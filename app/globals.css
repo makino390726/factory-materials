@@ -1,0 +1,242 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* selectオプションのスタイル - 白文字で見えやすく */
+option {
+  background-color: #1f2937;
+  color: white;
+}
+
+option:checked {
+  background-color: #3b82f6;
+  color: white;
+}
+
+select option:hover {
+  background-color: #374151;
+  color: white;
+}
+
+/* number型inputのスピナー（▼ボタン）を非表示 */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* 印刷用スタイル */
+@media print {
+  /* ページ設定 - A4横向き */
+  @page {
+    size: A4 landscape;
+    margin: 0.5cm;
+  }
+
+  /* 印刷時に非表示にする要素 */
+  .no-print {
+    display: none !important;
+  }
+
+  /* 全体を白背景で */
+  * {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10pt !important;
+  }
+
+  /* 背景色とボーダーを印刷用に調整 */
+  .bg-gradient-to-b,
+  .bg-slate-900\/50,
+  .bg-slate-900\/20,
+  div[class*="gradient"] {
+    background: white !important;
+  }
+
+  .border-slate-700,
+  .border-slate-600 {
+    border-color: #333 !important;
+  }
+
+  /* 全体のコンテナを調整 */
+  .max-w-7xl {
+    max-width: 100% !important;
+  }
+
+  /* テーブルのスタイル調整 */
+  table {
+    page-break-inside: auto;
+    width: 100% !important;
+    font-size: 8pt !important;
+    border-collapse: collapse !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  /* テーブルヘッダー・セルの調整 */
+  th,
+  td {
+    border: 1px solid #333 !important;
+    padding: 8px !important;
+    font-size: 8pt !important;
+    white-space: nowrap !important;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    color: black !important;
+    font-weight: bold !important;
+    font-size: 8.5pt !important;
+  }
+
+  /* グラデーション背景をリセット */
+  .bg-clip-text,
+  .bg-gradient-to-r {
+    background: none !important;
+    color: black !important;
+  }
+
+  h1,
+  h2,
+  h3 {
+    color: black !important;
+    font-weight: bold !important;
+    margin-bottom: 8px !important;
+  }
+
+  h1 {
+    font-size: 14pt !important;
+  }
+
+  h2 {
+    font-size: 12pt !important;
+  }
+
+  h3 {
+    font-size: 11pt !important;
+  }
+
+  /* テキスト色を黒に統一 */
+  .text-slate-300,
+  .text-slate-100,
+  .text-white,
+  .text-slate-400 {
+    color: black !important;
+  }
+
+  /* バッジスタイルを印刷用に */
+  .bg-blue-900\/40,
+  .bg-green-900\/40,
+  .bg-orange-900\/40 {
+    background-color: #f3f4f6 !important;
+    color: black !important;
+  }
+
+  .text-blue-300,
+  .text-green-300,
+  .text-orange-300 {
+    color: black !important;
+  }
+
+  /* 影やボーダーを調整 */
+  .shadow-lg,
+  .shadow-sm {
+    box-shadow: none !important;
+  }
+
+  /* 改ページ制御 */
+  .overflow-x-auto {
+    page-break-inside: avoid;
+  }
+
+  div[class*="mb-"] {
+    page-break-inside: avoid;
+  }
+
+  /* セクションの改ページ制御 */
+  section,
+  article,
+  .space-y-6 > div {
+    page-break-inside: avoid;
+  }
+
+  /* 任意グループセクションは新しいページから開始 */
+  .mt-12 {
+    page-break-before: always;
+  }
+
+  /* hidden:print で 印刷時表示, no-print で非表示 */
+  .hidden {
+    display: none !important;
+  }
+
+  .hidden.print\:block {
+    display: block !important;
+  }
+
+  /* パディング・マージンを調整 */
+  .p-4,
+  .p-6,
+  .p-8 {
+    padding: 4px !important;
+  }
+
+  .px-4,
+  .py-3 {
+    padding-left: 3px !important;
+    padding-right: 3px !important;
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+  }
+
+  /* 金額表示を少し小さく */
+  .font-mono {
+    font-size: 7.5pt !important;
+  }
+}
+

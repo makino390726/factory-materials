@@ -1,0 +1,48 @@
+{
+  "name": "Factory Materials - 在庫管理システム",
+  "short_name": "Factory Materials",
+  "description": "QRコードを使用した在庫管理システム。製品ラベル印刷、QRスキャン、在庫ダッシュボード機能を備えています。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#06b6d4",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/company-logo.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "QRスキャン",
+      "short_name": "スキャン",
+      "description": "QRコードをスキャンして在庫を管理",
+      "url": "/stock/scan",
+      "icons": [
+        {
+          "src": "/company-logo.png",
+          "sizes": "180x180",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "入出庫管理",
+      "short_name": "入出庫",
+      "description": "入出庫を記録",
+      "url": "/stock/receive",
+      "icons": [
+        {
+          "src": "/company-logo.png",
+          "sizes": "180x180",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
