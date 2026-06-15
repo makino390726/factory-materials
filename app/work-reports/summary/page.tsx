@@ -1,7 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { getCurrentMonthDateRange } from '@/lib/work-report-aggregation'
+import {
+  formatMonthLabel,
+  getCurrentMonthDateRange,
+  resolveAggregationMonth,
+} from '@/lib/work-report-aggregation'
 import Link from 'next/link'
 
 type SummaryRow = {
@@ -108,6 +112,15 @@ export default function WorkReportSummaryPage() {
   const [activeTab, setActiveTab] = useState<TabType>('summary')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isConfirmSaving, setIsConfirmSaving] = useState(false)
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null)
+
+  const confirmMonthLabel = useMemo(() => {
+    if (!fromDate || !toDate) return ''
+    const resolved = resolveAggregationMonth(fromDate, toDate)
+    if ('error' in resolved) return ''
+    return formatMonthLabel(resolved.monthKey)
+  }, [fromDate, toDate])
 
   useEffect(() => {
     const { from, to } = getCurrentMonthDateRange()
@@ -177,6 +190,36 @@ export default function WorkReportSummaryPage() {
     () => rows.reduce((sum, row) => sum + (row.work_minutes || 0), 0),
     [rows]
   )
+
+  const handleConfirmSave = async () => {
+    if (!fromDate || !toDate) return
+
+    const resolved = resolveAggregationMonth(fromDate, toDate)
+    if ('error' in resolved) {
+      setConfirmStatus(resolved.error)
+      return
+    }
+
+    setIsConfirmSaving(true)
+    setConfirmStatus(null)
+    try {
+      const response = await fetch('/api/work-reports/aggregations/monthly', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: resolved.year, month: resolved.month }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result?.error || '月別集計の保存に失敗しました')
+      }
+      setConfirmStatus(`${formatMonthLabel(resolved.monthKey)}の月別実績を保存しました`)
+      await fetchSummary()
+    } catch (saveError) {
+      setConfirmStatus(saveError instanceof Error ? saveError.message : '月別集計の保存に失敗しました')
+    } finally {
+      setIsConfirmSaving(false)
+    }
+  }
 
   const handlePrint = () => {
     if (activeTab !== 'person-detail') {
@@ -451,19 +494,35 @@ export default function WorkReportSummaryPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black"
               />
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
               <button
                 type="button"
                 onClick={fetchSummary}
-                className="w-full rounded-lg bg-teal-600 px-4 py-2 text-white font-semibold hover:bg-teal-500"
+                disabled={isLoading}
+                className="w-full rounded-lg bg-teal-600 px-4 py-2 text-white font-semibold hover:bg-teal-500 disabled:opacity-60"
               >
-                再読み込み
+                {isLoading ? '読み込み中...' : '再読み込み'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={isConfirmSaving || !confirmMonthLabel}
+                className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-white font-semibold hover:bg-emerald-500 disabled:opacity-60"
+                title={confirmMonthLabel ? `${confirmMonthLabel}の月別実績を保存` : '同一月内の期間を指定してください'}
+              >
+                {isConfirmSaving ? '保存中...' : '確認保存'}
               </button>
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-600">
-            集計表示は上記の期間で絞り込みます。ライン・D指令の月別実績は作業日報から自動集計され、ラインマスタ等に別途反映する必要はありません。
+            集計表示は上記の期間で絞り込みます。作業日報の確定保存時にも月別実績は自動更新されますが、集計内容を確認したうえで
+            {confirmMonthLabel ? `「確認保存」すると${confirmMonthLabel}分のライン・D指令実績を再集計して保存できます。` : '「確認保存」するには開始日・終了日を同一月内で指定してください。'}
           </p>
+          {confirmStatus && (
+            <p className={`mt-2 text-xs ${confirmStatus.includes('失敗') || confirmStatus.includes('指定') ? 'text-rose-600' : 'text-emerald-700'}`}>
+              {confirmStatus}
+            </p>
+          )}
         </div>
 
         {error && (
