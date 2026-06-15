@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { buildProcessManagementPath } from '@/lib/process-management'
 
 type LineItem = {
   id: string
@@ -676,6 +677,12 @@ export default function LinesPage() {
                             >
                               📄
                             </button>
+                            <Link
+                              href={buildProcessManagementPath('line', line.line_code)}
+                              className="px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition text-xs font-medium whitespace-nowrap"
+                            >
+                              工程
+                            </Link>
                             <button
                               type="button"
                               onClick={() => handleDelete(line)}

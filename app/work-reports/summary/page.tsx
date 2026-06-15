@@ -7,6 +7,7 @@ import {
   resolveAggregationMonth,
 } from '@/lib/work-report-aggregation'
 import Link from 'next/link'
+import { buildProcessManagementPath } from '@/lib/process-management'
 
 type SummaryRow = {
   report_id: string
@@ -716,13 +717,14 @@ export default function WorkReportSummaryPage() {
                     <th className="py-2 pr-4">区分</th>
                     <th className="py-2 pr-4">コード</th>
                     <th className="py-2 pr-4">名称</th>
-                    <th className="py-2">所要時間</th>
+                    <th className="py-2 pr-4">所要時間</th>
+                    <th className="py-2">工程</th>
                   </tr>
                 </thead>
                 <tbody className="text-black">
                   {instructionData.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={4} className="py-6 text-center text-slate-400">
+                      <td colSpan={5} className="py-6 text-center text-slate-400">
                         集計データがありません
                       </td>
                     </tr>
@@ -741,7 +743,19 @@ export default function WorkReportSummaryPage() {
                           </td>
                           <td className="py-3 pr-4 font-medium text-slate-900">{row.code}</td>
                           <td className="py-3 pr-4">{row.name || '-'}</td>
-                          <td className="py-3">{formatMinutes(row.duration_minutes)}</td>
+                          <td className="py-3 pr-4">{formatMinutes(row.duration_minutes)}</td>
+                          <td className="py-3">
+                            <Link
+                              href={buildProcessManagementPath(
+                                row.category,
+                                row.code,
+                                toDate || fromDate
+                              )}
+                              className="text-indigo-600 hover:underline text-xs font-medium"
+                            >
+                              工程管理表
+                            </Link>
+                          </td>
                         </tr>
                       ))
                   )}

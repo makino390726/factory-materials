@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { buildProcessManagementPath } from '@/lib/process-management'
 
 type WorkOrder = {
   id: string
@@ -1060,6 +1061,12 @@ export default function WorkOrdersPage() {
                             >
                               📄
                             </button>
+                            <Link
+                              href={buildProcessManagementPath('instruction', order.order_no)}
+                              className="px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition text-xs font-medium whitespace-nowrap"
+                            >
+                              工程
+                            </Link>
                             <button
                               type="button"
                               onClick={() => handleDelete(order)}

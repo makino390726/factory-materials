@@ -295,6 +295,19 @@ export default function Home() {
               </div>
             </Link>
 
+            {/* 工程管理表 */}
+            <Link href="/process-management">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/20 to-violet-900/20 rounded-2xl border-2 border-indigo-400 group-hover:border-indigo-300 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
+                  <div className="text-4xl">📈</div>
+                  <h3 className="text-lg font-bold text-indigo-300 group-hover:text-indigo-200 transition">
+                    工程管理表
+                  </h3>
+                </div>
+              </div>
+            </Link>
+
             {/* 指令原価BOM */}
             <Link href="/heater/models/dr8008">
               <div className="group relative h-32 cursor-pointer">
