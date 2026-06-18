@@ -80,11 +80,14 @@ export async function POST(request: NextRequest) {
     // 在庫テーブルを更新（upsert）
     const { error: updateError } = await supabase
       .from('stocks')
-      .upsert({
-        product_code: product_code,
-        stock_qty: newQuantity,
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(
+        {
+          product_code: product_code,
+          stock_qty: newQuantity,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'product_code' }
+      )
 
     if (updateError) {
       console.error('在庫更新エラー:', updateError)

@@ -49,6 +49,7 @@ type ProductionLotsResult = {
   target_name: string
   suggested_period_start: string | null
   lots: ProductionLotAnalysis[]
+  fiscal_year_summary: FiscalYearWorkGroupSummary | null
 }
 
 type FiscalYearWorkGroupSummary = {
@@ -56,8 +57,10 @@ type FiscalYearWorkGroupSummary = {
   fiscal_year_label: string
   period_start: string
   period_end: string
-  line_code: string
-  line_name: string
+  target_type: 'line' | 'instruction'
+  target_code: string
+  target_name: string
+  annual_completed_qty: number
   total_minutes: number
   duration_hours: string
   rows: Array<{
@@ -65,6 +68,7 @@ type FiscalYearWorkGroupSummary = {
     work_group_name: string
     total_minutes: number
     duration_hours: string
+    avg_st_minutes: number | null
   }>
 }
 
@@ -95,7 +99,7 @@ function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessa
           <th className="py-2 pr-4">名称</th>
           <th className="py-2 pr-4 text-right">期間実績</th>
           <th className="py-2 pr-4 text-right">1台ST</th>
-          <th className="py-2 pr-4 text-right">過去ST</th>
+          <th className="py-2 pr-4 text-right">平均ST</th>
           <th className="py-2 pr-4 text-right">変動</th>
           <th className="py-2">判定</th>
         </tr>
@@ -290,6 +294,10 @@ function ProcessManagementContent() {
       if (!res.ok) throw new Error(data?.error || '製作ロットの取得に失敗しました')
       const result = data as ProductionLotsResult
       setLotsResult(result)
+      if (result.fiscal_year_summary) {
+        setFiscalSummary(result.fiscal_year_summary)
+        setFiscalYear(result.fiscal_year_summary.fiscal_year)
+      }
       if (result.lots.length > 0) {
         setSelectedLotId(result.lots[result.lots.length - 1].lot.id)
       } else {
@@ -307,30 +315,29 @@ function ProcessManagementContent() {
     if (selectedTarget) fetchLots()
   }, [targetKey])
 
-  useEffect(() => {
-    if (!selectedTarget || selectedTarget.target_type !== 'line') {
+  const loadFiscalSummary = async () => {
+    if (!selectedTarget) return
+    setFiscalLoading(true)
+    try {
+      const params = new URLSearchParams({
+        list: 'fiscal-work-groups',
+        target_type: selectedTarget.target_type,
+        target_code: selectedTarget.target_code,
+        fiscal_year: String(fiscalYear),
+      })
+      const res = await fetch(`/api/process-management?${params}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || '年度集計の取得に失敗しました')
+      setFiscalSummary(data as FiscalYearWorkGroupSummary)
+    } catch {
       setFiscalSummary(null)
-      return
+    } finally {
+      setFiscalLoading(false)
     }
-    const loadFiscalSummary = async () => {
-      setFiscalLoading(true)
-      try {
-        const params = new URLSearchParams({
-          list: 'fiscal-work-groups',
-          line_code: selectedTarget.target_code,
-          fiscal_year: String(fiscalYear),
-        })
-        const res = await fetch(`/api/process-management?${params}`)
-        const data = await res.json()
-        if (!res.ok) throw new Error(data?.error || '年度集計の取得に失敗しました')
-        setFiscalSummary(data as FiscalYearWorkGroupSummary)
-      } catch {
-        setFiscalSummary(null)
-      } finally {
-        setFiscalLoading(false)
-      }
-    }
-    loadFiscalSummary()
+  }
+
+  useEffect(() => {
+    if (selectedTarget) loadFiscalSummary()
   }, [selectedTarget, fiscalYear])
 
   const handleSaveLot = async () => {
@@ -365,6 +372,10 @@ function ProcessManagementContent() {
       setLotsResult(result)
       setCompletedQtyInput('')
       setReceiptSlipNoInput('')
+      if (result.fiscal_year_summary) {
+        setFiscalSummary(result.fiscal_year_summary)
+        setFiscalYear(result.fiscal_year_summary.fiscal_year)
+      }
       if (result.lots.length > 0) {
         setSelectedLotId(result.lots[result.lots.length - 1].lot.id)
       }
@@ -625,7 +636,7 @@ function ProcessManagementContent() {
                   {selectedLot.lot.receipt_slip_no ? ` / 伝票 ${selectedLot.lot.receipt_slip_no}` : ''}
                 </p>
                 <p className="text-xs text-slate-500 mb-4">
-                  過去ST = それ以前のロットの1台ST平均。変動がプラスだと工程が遅くなっている傾向です。
+                  平均ST = 会計年度の作業グループ所要時間 ÷ 年間制作台数。ロットの1台STとの差（変動）で工程進捗を確認します。
                 </p>
                 <WorkGroupTable
                   rows={selectedLot.rows}
@@ -636,15 +647,16 @@ function ProcessManagementContent() {
           </>
         )}
 
-        {selectedTarget?.target_type === 'line' && (
+        {selectedTarget && (
           <div className="bg-white/95 rounded-2xl border border-indigo-100 p-6 shadow-xl mb-6 overflow-x-auto">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  会計年度 作業グループ別 所要時間（参考）
+                  会計年度 作業グループ別 平均ST
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">
-                  ライン {selectedTarget.target_code}（9月1日〜翌年8月31日の累計）
+                  {selectedTarget.target_type === 'instruction' ? 'D指令' : 'ライン'}{' '}
+                  {selectedTarget.target_code}（9月1日〜翌年8月31日）
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -670,26 +682,45 @@ function ProcessManagementContent() {
             ) : !fiscalSummary || fiscalSummary.rows.length === 0 ? (
               <p className="text-sm text-slate-400 py-6 text-center">データがありません</p>
             ) : (
-              <table className="min-w-full text-sm text-black">
-                <thead className="text-left border-b border-slate-200">
-                  <tr>
-                    <th className="py-2 pr-4">作業グループ</th>
-                    <th className="py-2 pr-4">名称</th>
-                    <th className="py-2 pr-4 text-right">所要時間</th>
-                    <th className="py-2 text-right">時間</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fiscalSummary.rows.map((row) => (
-                    <tr key={row.work_group_code} className="border-t border-slate-100">
-                      <td className="py-3 pr-4 font-mono">{row.work_group_code}</td>
-                      <td className="py-3 pr-4">{row.work_group_name}</td>
-                      <td className="py-3 pr-4 text-right">{formatMinutes(row.total_minutes)}</td>
-                      <td className="py-3 text-right text-slate-600">{row.duration_hours}</td>
+              <>
+                <p className="text-sm text-slate-700 mb-4">
+                  年間制作台数:{' '}
+                  <span className="font-semibold">{fiscalSummary.annual_completed_qty}台</span>
+                  {fiscalSummary.annual_completed_qty <= 0 && (
+                    <span className="text-amber-700 ml-2">
+                      ※入庫ロットを登録すると平均STが算出されます
+                    </span>
+                  )}
+                </p>
+                <table className="min-w-full text-sm text-black">
+                  <thead className="text-left border-b border-slate-200">
+                    <tr>
+                      <th className="py-2 pr-4">作業グループ</th>
+                      <th className="py-2 pr-4">名称</th>
+                      <th className="py-2 pr-4 text-right">所要時間</th>
+                      <th className="py-2 pr-4 text-right">平均ST</th>
+                      <th className="py-2 text-right">時間</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {fiscalSummary.rows.map((row) => (
+                      <tr key={row.work_group_code} className="border-t border-slate-100">
+                        <td className="py-3 pr-4 font-mono">{row.work_group_code}</td>
+                        <td className="py-3 pr-4">{row.work_group_name}</td>
+                        <td className="py-3 pr-4 text-right">{formatMinutes(row.total_minutes)}</td>
+                        <td className="py-3 pr-4 text-right font-semibold text-indigo-700">
+                          {formatSt(row.avg_st_minutes)}
+                        </td>
+                        <td className="py-3 text-right text-slate-600">{row.duration_hours}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-3 text-xs text-slate-600">
+                  平均ST = 所要時間 ÷ 年間制作台数（{fiscalSummary.period_start} 〜{' '}
+                  {fiscalSummary.period_end}）。入庫ロット追加のたびに再計算されます。
+                </p>
+              </>
             )}
           </div>
         )}

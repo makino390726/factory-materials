@@ -151,7 +151,7 @@ export default function InventoryDetailPage() {
       }
 
       // 入出庫履歴を取得
-      const historyRes = await fetch(`/api/stock/history?code=${encodeURIComponent(productCode)}&limit=100`)
+      const historyRes = await fetch(`/api/stock/history?code=${encodeURIComponent(productCode)}&limit=500`)
       const historyData = await historyRes.json()
       
       if (historyData.success) {

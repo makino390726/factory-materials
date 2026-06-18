@@ -18,6 +18,7 @@ type WorkOrder = {
   standard_duration_minutes: number | null
   cost_mode: 'direct' | 'bom' | null
   bom_model: string | null
+  exclude_from_work_report?: boolean | null
 }
 
 type BranchRow = {
@@ -40,6 +41,7 @@ export default function WorkOrdersPage() {
   const [costDoneIds, setCostDoneIds] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
   const [isUnlockingAll, setIsUnlockingAll] = useState(false)
+  const [togglingExcludeId, setTogglingExcludeId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -437,6 +439,41 @@ export default function WorkOrdersPage() {
     setSearchOrderNo('')
     setSearchProductName('')
     await fetchOrders({ orderNo: '', productName: '' })
+  }
+
+  const handleToggleExcludeFromWorkReport = async (order: WorkOrder) => {
+    const nextValue = !order.exclude_from_work_report
+    setTogglingExcludeId(order.id)
+    setError(null)
+    try {
+      const response = await fetch('/api/work-orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: order.id,
+          exclude_from_work_report: nextValue,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result?.error || '更新に失敗しました')
+      }
+
+      setOrders((prev) =>
+        prev.map((row) =>
+          row.id === order.id ? { ...row, exclude_from_work_report: nextValue } : row
+        )
+      )
+      setSuccessMessage(
+        nextValue
+          ? `指令 ${order.order_no} を作業日報の選択肢から除外しました`
+          : `指令 ${order.order_no} を作業日報の選択肢に戻しました`
+      )
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : 'Unknown error')
+    } finally {
+      setTogglingExcludeId(null)
+    }
   }
 
   const handleUnlockAll = async () => {
@@ -991,6 +1028,9 @@ export default function WorkOrdersPage() {
                     <th className="py-2 pr-4">数量</th>
                     <th className="py-2 pr-4">所要時間（分）</th>
                     <th className="py-2 pr-4">状態</th>
+                    <th className="py-2 pr-4 text-center" title="チェックすると作業日報のD指令リストに表示されません">
+                      日報非表示
+                    </th>
                     <th className="py-2 pr-4">完了日時</th>
                     <th className="py-2">操作</th>
                   </tr>
@@ -998,7 +1038,7 @@ export default function WorkOrdersPage() {
                 <tbody className="text-black">
                   {orders.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-slate-400">
+                      <td colSpan={10} className="py-6 text-center text-slate-400">
                         作業指令が未登録です
                       </td>
                     </tr>
@@ -1031,6 +1071,16 @@ export default function WorkOrdersPage() {
                           }`}>
                             {order.status || '未指定'}
                           </span>
+                        </td>
+                        <td className="py-3 pr-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(order.exclude_from_work_report)}
+                            disabled={togglingExcludeId === order.id || isLoading}
+                            onChange={() => handleToggleExcludeFromWorkReport(order)}
+                            title="作業日報のD指令リストから除外"
+                            className="h-4 w-4 cursor-pointer accent-indigo-600 disabled:cursor-not-allowed"
+                          />
                         </td>
                         <td className="py-3 pr-4 text-xs text-slate-500">
                           {order.completed_date

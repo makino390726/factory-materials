@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   analyzeProcessManagement,
   analyzeProductionLots,
-  aggregateLineWorkGroupMinutesInFiscalYear,
+  aggregateTargetWorkGroupSummaryInFiscalYear,
   createProductionLot,
   deleteProductionLot,
   listProcessTargets,
@@ -36,20 +36,25 @@ export async function GET(request: NextRequest) {
     }
 
     if (list === 'fiscal-work-groups') {
-      const lineCode = searchParams.get('line_code')?.trim() || searchParams.get('target_code')?.trim()
+      const targetType =
+        parseTargetType(searchParams.get('target_type')) ?? 'line'
+      const targetCode =
+        searchParams.get('target_code')?.trim() ||
+        searchParams.get('line_code')?.trim()
       const fiscalYearRaw = searchParams.get('fiscal_year')
       const fiscalYear = fiscalYearRaw ? Number(fiscalYearRaw) : getCurrentFiscalYear()
 
-      if (!lineCode) {
-        return NextResponse.json({ error: 'line_code が必要です' }, { status: 400 })
+      if (!targetCode) {
+        return NextResponse.json({ error: 'target_code が必要です' }, { status: 400 })
       }
       if (!Number.isFinite(fiscalYear)) {
         return NextResponse.json({ error: 'fiscal_year が不正です' }, { status: 400 })
       }
 
-      const result = await aggregateLineWorkGroupMinutesInFiscalYear(
+      const result = await aggregateTargetWorkGroupSummaryInFiscalYear(
         supabase,
-        normalizeTargetCode(lineCode),
+        targetType,
+        normalizeTargetCode(targetCode),
         fiscalYear
       )
       return NextResponse.json(result)

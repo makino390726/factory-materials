@@ -198,7 +198,7 @@ export default function BomPage() {
   const normalizedAllBom = useMemo(
     () =>
       bom.map((item) => {
-        const materialCost = Number(item.material_cost ?? item.cost_amount ?? 0);
+        const materialCost = Number(item.material_cost ?? 0);
         const laborCost = Number(item.labor_cost ?? 0);
         const indirectCost = Number(item.indirect_cost ?? 0);
         const totalCost = Number(item.total_cost ?? materialCost + laborCost + indirectCost);
@@ -216,7 +216,7 @@ export default function BomPage() {
   const normalizedBom = useMemo(
     () =>
       filteredBom.map((item) => {
-        const materialCost = Number(item.material_cost ?? item.cost_amount ?? 0);
+        const materialCost = Number(item.material_cost ?? 0);
         const laborCost = Number(item.labor_cost ?? 0);
         const indirectCost = Number(item.indirect_cost ?? 0);
         const totalCost = Number(item.total_cost ?? materialCost + laborCost + indirectCost);

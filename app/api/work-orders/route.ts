@@ -22,6 +22,10 @@ function hasWorkOrdersCostColumnError(error: any) {
   return hasMissingColumnError(error, 'bom_model') || hasMissingColumnError(error, 'cost_mode')
 }
 
+function hasExcludeFromWorkReportColumnError(error: any) {
+  return hasMissingColumnError(error, 'exclude_from_work_report')
+}
+
 async function syncWorkOrderBranchesFromBom(workOrderId: string, bomModel: string) {
   const { data: bomRows, error: bomError } = await supabase
     .from('heater_bom')
@@ -112,8 +116,13 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const orderNo = searchParams.get('orderNo')?.trim()
     const productName = searchParams.get('productName')?.trim()
+    const forWorkReport = searchParams.get('for_work_report') === '1'
 
     let query = supabase.from('work_orders').select('*')
+
+    if (forWorkReport) {
+      query = query.eq('exclude_from_work_report', false)
+    }
 
     if (orderNo) {
       query = query.ilike('order_no', `%${orderNo}%`)
@@ -124,6 +133,18 @@ export async function GET(req: Request) {
     }
 
     const { data, error } = await query.order('created_at', { ascending: false })
+
+    if (error && forWorkReport && hasExcludeFromWorkReportColumnError(error)) {
+      let fallbackQuery = supabase.from('work_orders').select('*')
+      if (orderNo) fallbackQuery = fallbackQuery.ilike('order_no', `%${orderNo}%`)
+      if (productName) fallbackQuery = fallbackQuery.ilike('product_name', `%${productName}%`)
+      const fallback = await fallbackQuery.order('created_at', { ascending: false })
+      if (fallback.error) {
+        console.error('Supabaseエラー:', fallback.error)
+        return NextResponse.json({ error: fallback.error.message }, { status: 500 })
+      }
+      return NextResponse.json(fallback.data || [])
+    }
 
     if (error) {
       console.error('Supabaseエラー:', error)
@@ -152,6 +173,7 @@ export async function POST(req: Request) {
       standard_duration_minutes,
       cost_mode,
       bom_model,
+      exclude_from_work_report,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -193,6 +215,8 @@ export async function POST(req: Request) {
       ...basePayload,
       cost_mode: normalizedCostMode,
       bom_model: normalizedBomModel,
+      exclude_from_work_report:
+        typeof exclude_from_work_report === 'boolean' ? exclude_from_work_report : false,
     }
 
     let data: any[] | null = null
@@ -203,7 +227,7 @@ export async function POST(req: Request) {
     error = primaryInsert.error
 
     // DBマイグレーション未反映環境向けフォールバック
-    if (error && hasWorkOrdersCostColumnError(error)) {
+    if (error && (hasWorkOrdersCostColumnError(error) || hasExcludeFromWorkReportColumnError(error))) {
       const fallbackInsert = await supabase.from('work_orders').insert([basePayload]).select()
       data = fallbackInsert.data
       error = fallbackInsert.error
@@ -247,6 +271,7 @@ export async function PUT(req: Request) {
       standard_duration_minutes,
       cost_mode,
       bom_model,
+      exclude_from_work_report,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -285,6 +310,9 @@ export async function PUT(req: Request) {
       ...basePayload,
       cost_mode: normalizedCostMode,
       bom_model: normalizedBomModel,
+      ...(typeof exclude_from_work_report === 'boolean'
+        ? { exclude_from_work_report }
+        : {}),
     }
 
     let data: any[] | null = null
@@ -300,7 +328,10 @@ export async function PUT(req: Request) {
     error = primaryUpdate.error
 
     // DBマイグレーション未反映環境向けフォールバック
-    if (error && hasWorkOrdersCostColumnError(error)) {
+    if (
+      error &&
+      (hasWorkOrdersCostColumnError(error) || hasExcludeFromWorkReportColumnError(error))
+    ) {
       const fallbackUpdate = await supabase
         .from('work_orders')
         .update(basePayload)
@@ -332,6 +363,54 @@ export async function PUT(req: Request) {
   } catch (error) {
     console.error('作業指令更新エラー:', error)
     return NextResponse.json({ error: '作業指令更新に失敗しました' }, { status: 500 })
+  }
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json()
+    const { id, exclude_from_work_report } = body
+
+    if (!id) {
+      return NextResponse.json({ error: 'IDが必要です' }, { status: 400 })
+    }
+
+    if (typeof exclude_from_work_report !== 'boolean') {
+      return NextResponse.json(
+        { error: 'exclude_from_work_report は true/false で指定してください' },
+        { status: 400 }
+      )
+    }
+
+    const { data, error } = await supabase
+      .from('work_orders')
+      .update({ exclude_from_work_report })
+      .eq('id', id)
+      .select()
+
+    if (error) {
+      if (hasExcludeFromWorkReportColumnError(error)) {
+        return NextResponse.json(
+          {
+            error:
+              'exclude_from_work_report 列がありません。migrate-add-work-order-exclude-from-work-report.sql を実行してください。',
+          },
+          { status: 500 }
+        )
+      }
+      console.error('Supabaseエラー:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    const saved = data?.[0]
+    if (!saved) {
+      return NextResponse.json({ error: '作業指令が見つかりません' }, { status: 404 })
+    }
+
+    return NextResponse.json(saved)
+  } catch (error) {
+    console.error('作業指令部分更新エラー:', error)
+    return NextResponse.json({ error: '作業指令の更新に失敗しました' }, { status: 500 })
   }
 }
 

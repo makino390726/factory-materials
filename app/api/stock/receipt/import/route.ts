@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
+import {
+  buildProductCodeLookupMap,
+  normalizeProductCodeFromExcel,
+  registerProductCode,
+  resolveProductCode,
+} from '@/lib/product-code'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -21,7 +27,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json('error: ファイルが選択されていません', { status: 400 })
     }
 
-    // Excelファイルを読み込む
     const buffer = await file.arrayBuffer()
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
     const worksheet = workbook.Sheets[workbook.SheetNames[0]]
@@ -31,14 +36,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ファイルが空です' }, { status: 400 })
     }
 
-    // カラムマッピング（複数の可能性に対応）
-    const getColumnValue = (row: any, possibleNames: string[]): any => {
+    const { data: existingProducts, error: productsFetchError } = await supabase
+      .from('products')
+      .select('product_code')
+
+    if (productsFetchError) {
+      return NextResponse.json(
+        { error: `既存商品の取得に失敗しました: ${productsFetchError.message}` },
+        { status: 500 }
+      )
+    }
+
+    const productCodeLookup = buildProductCodeLookupMap(
+      (existingProducts || []).map((p) => String(p.product_code || ''))
+    )
+
+    const getColumnValue = (row: Record<string, unknown>, possibleNames: string[]): unknown => {
       for (const name of possibleNames) {
-        // 完全一致
         if (row[name] !== undefined && row[name] !== '') {
           return row[name]
         }
-        // 大文字小文字区別なし
         const key = Object.keys(row).find((k) => k.toLowerCase() === name.toLowerCase())
         if (key && row[key] !== undefined && row[key] !== '') {
           return row[key]
@@ -50,12 +67,12 @@ export async function POST(request: NextRequest) {
     let successCount = 0
     let errorCount = 0
     const errors: string[] = []
+    const codeRemappings: string[] = []
 
     for (let i = 0; i < rawData.length; i++) {
-      const row = rawData[i] as Record<string, any>
+      const row = rawData[i] as Record<string, unknown>
 
       try {
-        // 必要なカラムを抽出
         const receiptDate = getColumnValue(row, [
           '入荷日付',
           'receipt_date',
@@ -63,7 +80,7 @@ export async function POST(request: NextRequest) {
           '入荷日',
           'date',
         ])
-        const productCode = getColumnValue(row, [
+        const rawProductCode = getColumnValue(row, [
           '商品コード',
           'product_code',
           'code',
@@ -81,8 +98,8 @@ export async function POST(request: NextRequest) {
         ])
         const unitPrice = getColumnValue(row, ['単価', 'unit_price', 'price', '価格', 'cost'])
 
-        // バリデーション
-        if (!productCode || productCode.toString().trim() === '') {
+        const importCode = normalizeProductCodeFromExcel(rawProductCode)
+        if (!importCode) {
           throw new Error('商品コードが空です')
         }
 
@@ -91,25 +108,25 @@ export async function POST(request: NextRequest) {
           throw new Error('入荷数が正しくありません')
         }
 
-        const price = unitPrice ? Number(unitPrice) : null
+        const price = unitPrice !== null && unitPrice !== undefined && unitPrice !== ''
+          ? Number(unitPrice)
+          : null
         if (price !== null && isNaN(price)) {
           throw new Error('単価が正しくありません')
         }
 
-        const productCodeStr = String(productCode).trim()
+        const { code: productCodeStr, isExisting } = resolveProductCode(importCode, productCodeLookup)
+        if (importCode !== productCodeStr && isExisting) {
+          const remapNote = `${importCode} → ${productCodeStr}`
+          if (!codeRemappings.includes(remapNote)) {
+            codeRemappings.push(remapNote)
+          }
+        }
 
-        // 1. 商品が存在するか確認
-        const { data: existingProduct } = await supabase
-          .from('products')
-          .select('id')
-          .eq('product_code', productCodeStr)
-          .maybeSingle()
-
-        // 商品が存在しない場合は作成
-        if (!existingProduct) {
+        if (!isExisting) {
           const { error: productError } = await supabase.from('products').insert({
             product_code: productCodeStr,
-            name: productName || productCodeStr,
+            name: productName ? String(productName).trim() : productCodeStr,
             purchase_price: price,
             cost_price: price,
           })
@@ -117,6 +134,8 @@ export async function POST(request: NextRequest) {
           if (productError) {
             throw new Error(`商品作成失敗: ${productError.message}`)
           }
+
+          registerProductCode(productCodeLookup, productCodeStr)
         } else if (price !== null) {
           const { error: productPriceUpdateError } = await supabase
             .from('products')
@@ -131,7 +150,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 2. 在庫を更新（IN: 入庫）
         const { data: currentStock } = await supabase
           .from('stocks')
           .select('stock_qty, unit_price')
@@ -140,8 +158,7 @@ export async function POST(request: NextRequest) {
 
         const currentQty = currentStock?.stock_qty || 0
 
-        // 単価を更新する場合
-        const updateData: any = {
+        const updateData: Record<string, unknown> = {
           product_code: productCodeStr,
           stock_qty: currentQty + qty,
           updated_at: new Date().toISOString(),
@@ -151,31 +168,25 @@ export async function POST(request: NextRequest) {
           updateData.unit_price = price
         }
 
-        const { error: stockError } = await supabase.from('stocks').upsert(updateData)
+        const { error: stockError } = await supabase
+          .from('stocks')
+          .upsert(updateData, { onConflict: 'product_code' })
 
         if (stockError) {
           throw new Error(`在庫更新失敗: ${stockError.message}`)
         }
 
-        // 3. 在庫移動履歴を記録
         let receiptDateIso: string
         if (receiptDate) {
           let dateObj: Date
-          // XLSX の cellDates: true により、既に Date オブジェクトの可能性が高い
           if (receiptDate instanceof Date) {
             dateObj = receiptDate
           } else if (typeof receiptDate === 'number') {
-            // Excelシリアル日付の場合：1900-01-01 が 1
-            // ただし、Excel の1900年バグを考慮（1900-02-29が存在しないと扱われたため）
-            // 簡単には: new Date(1900, 0, receiptDate) で計算するが、正確には以下の通り
             const excelEpoch = new Date(1900, 0, 1)
             dateObj = new Date(excelEpoch.getTime() + (receiptDate - 1) * 86400 * 1000)
           } else if (typeof receiptDate === 'string') {
-            // 文字列の場合、複数の日付形式に対応
             dateObj = new Date(receiptDate)
-            // もし パースに失敗した場合、いくつかのフォーマットを試す
             if (isNaN(dateObj.getTime())) {
-              // YYYY/MM/DD または YYYY-MM-DD 形式を試す
               const match = receiptDate.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
               if (match) {
                 dateObj = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]))
@@ -184,7 +195,7 @@ export async function POST(request: NextRequest) {
           } else {
             dateObj = new Date()
           }
-          receiptDateIso = dateObj.toISOString()
+          receiptDateIso = isNaN(dateObj.getTime()) ? new Date().toISOString() : dateObj.toISOString()
         } else {
           receiptDateIso = new Date().toISOString()
         }
@@ -194,7 +205,7 @@ export async function POST(request: NextRequest) {
           movement: 'IN',
           qty: qty,
           input_method: 'batch_import',
-          note: productName ? `商品データとり込み: ${productName}` : null,
+          note: productName ? `商品データとり込み: ${String(productName).trim()}` : null,
           created_at: receiptDateIso,
         })
 
@@ -215,6 +226,7 @@ export async function POST(request: NextRequest) {
       total: rawData.length,
       successCount,
       errorCount,
+      codeRemappings: codeRemappings.length > 0 ? codeRemappings.slice(0, 20) : undefined,
       errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       note: errors.length > 10 ? `他 ${errors.length - 10} 件のエラーがあります` : undefined,
     })

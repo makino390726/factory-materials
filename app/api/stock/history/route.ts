@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const productCode = searchParams.get('code')
-    const limit = parseInt(searchParams.get('limit') || '20')
+    const requestedLimit = parseInt(searchParams.get('limit') || '20', 10)
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 2000)
+      : 20
 
     let query = supabase
       .from('stock_movements')

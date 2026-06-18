@@ -11,6 +11,63 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   },
 })
 
+const BATCH_SIZE = 1000
+
+async function fetchAllStocks() {
+  const rows: Array<{
+    product_code: string
+    name: string | null
+    stock_qty: number | null
+    unit_price: number | null
+    total_amount: number | null
+    updated_at: string | null
+  }> = []
+  let offset = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('stocks_with_name')
+      .select('product_code, name, stock_qty, unit_price, total_amount, updated_at')
+      .order('product_code', { ascending: true })
+      .range(offset, offset + BATCH_SIZE - 1)
+
+    if (error) throw error
+    if (!data || data.length === 0) break
+
+    rows.push(...data)
+    if (data.length < BATCH_SIZE) break
+    offset += BATCH_SIZE
+  }
+
+  return rows
+}
+
+async function fetchAllMovements() {
+  const rows: Array<{
+    product_code: string
+    created_at: string
+    movement: string
+  }> = []
+  let offset = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('stock_movements')
+      .select('product_code, created_at, movement')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + BATCH_SIZE - 1)
+
+    if (error) throw error
+    if (!data || data.length === 0) break
+
+    rows.push(...data)
+    if (data.length < BATCH_SIZE) break
+    offset += BATCH_SIZE
+  }
+
+  return rows
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
@@ -20,32 +77,8 @@ export async function GET(request: NextRequest) {
     const movementEndDate = searchParams.get('movementEndDate')
     const hasMovementFilter = Boolean(movementType || movementStartDate || movementEndDate)
 
-    // 在庫 + 製品名ビューを取得（stocks 件数のまま name を付与）
-    const { data: stocks, error: stocksError } = await supabase
-      .from('stocks_with_name')
-      .select('product_code, name, stock_qty, unit_price, total_amount, updated_at')
-
-    if (stocksError) {
-      console.error('在庫取得エラー:', stocksError)
-      return NextResponse.json(
-        { success: false, error: '在庫情報の取得に失敗しました' },
-        { status: 500 }
-      )
-    }
-
-    // 在庫移動の最終日時を取得
-    const { data: movements, error: movementError } = await supabase
-      .from('stock_movements')
-      .select('product_code, created_at, movement')
-      .order('created_at', { ascending: false })
-
-    if (movementError) {
-      console.error('在庫移動取得エラー:', movementError)
-      return NextResponse.json(
-        { success: false, error: '在庫移動情報の取得に失敗しました' },
-        { status: 500 }
-      )
-    }
+    const stocks = await fetchAllStocks()
+    const movements = await fetchAllMovements()
 
     const movementMap = new Map<string, string>()
     const matchingProductCodes = new Set<string>()

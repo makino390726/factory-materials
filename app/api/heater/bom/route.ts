@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { buildLinePartCostUnitMap } from '@/lib/line-part-cost-breakdown';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -12,7 +13,7 @@ export async function GET() {
     // すべての部品マスタを取得（原価含む）
     const { data: partsData, error: partsError } = await supabase
       .from('heater_parts_master')
-      .select('part_key, product_code, part_name, spec, cost_price');
+      .select('part_key, product_code, part_name, spec, cost_price, material_cost_total, indirect_cost_total');
     
     if (partsError) throw partsError;
 
@@ -24,8 +25,21 @@ export async function GET() {
           product_code: part.product_code, 
           part_name: part.part_name, 
           spec: part.spec,
-          cost_price: part.cost_price || 0
+          cost_price: part.cost_price || 0,
+          material_cost_total: part.material_cost_total ?? null,
+          indirect_cost_total: part.indirect_cost_total ?? null,
         }
+      ])
+    );
+
+    const partsFallbackMap = new Map(
+      (partsData || []).map((part) => [
+        part.part_key,
+        {
+          cost_price: part.cost_price ?? null,
+          material_cost_total: part.material_cost_total ?? null,
+          indirect_cost_total: part.indirect_cost_total ?? null,
+        },
       ])
     );
 
@@ -67,40 +81,12 @@ export async function GET() {
     
     console.log('BOM Data Debug:', JSON.stringify(debugInfo, null, 2));
 
-    // ライン原価明細を part_key ごとに集計（1個あたり）
     const uniquePartKeys = [...new Set((bomData || []).map((item: any) => item.part_key).filter(Boolean))]
-    const lineCostMap = new Map<string, {
-      material_unit: number
-      labor_unit: number
-      indirect_unit: number
-      total_unit: number
-    }>()
-
-    if (uniquePartKeys.length > 0) {
-      const { data: lineCostRows, error: lineCostError } = await supabase
-        .from('work_order_cost_items')
-        .select('master_id, material_cost, labor_cost, indirect_cost, line_total')
-        .eq('master_type', 'ライン原価')
-        .in('master_id', uniquePartKeys)
-
-      if (lineCostError) throw lineCostError
-
-      for (const row of lineCostRows || []) {
-        const key = String(row.master_id || '')
-        if (!key) continue
-        const prev = lineCostMap.get(key) || {
-          material_unit: 0,
-          labor_unit: 0,
-          indirect_unit: 0,
-          total_unit: 0,
-        }
-        prev.material_unit += Number(row.material_cost || 0)
-        prev.labor_unit += Number(row.labor_cost || 0)
-        prev.indirect_unit += Number(row.indirect_cost || 0)
-        prev.total_unit += Number(row.line_total || 0)
-        lineCostMap.set(key, prev)
-      }
-    }
+    const lineCostMap = await buildLinePartCostUnitMap(
+      supabase,
+      uniquePartKeys,
+      partsFallbackMap
+    )
 
     // BOMデータに部品情報と原価内訳を付与
     const enrichedData = (bomData || []).map((item) => {
@@ -109,15 +95,17 @@ export async function GET() {
         part_name: null,
         spec: null,
         cost_price: 0,
+        material_cost_total: null,
+        indirect_cost_total: null,
       };
 
       const quantity = Number(item.quantity || 0);
       const costPrice = Number(partInfo.cost_price || 0);
       const lineCost = lineCostMap.get(String(item.part_key || ''))
 
-      const materialUnit = lineCost ? Number(lineCost.material_unit || 0) : costPrice
+      const materialUnit = lineCost ? Number(lineCost.material_unit || 0) : Number(partInfo.material_cost_total || 0)
       const laborUnit = lineCost ? Number(lineCost.labor_unit || 0) : 0
-      const indirectUnit = lineCost ? Number(lineCost.indirect_unit || 0) : 0
+      const indirectUnit = lineCost ? Number(lineCost.indirect_unit || 0) : Number(partInfo.indirect_cost_total || 0)
       const totalUnit = lineCost
         ? Number(lineCost.total_unit || (materialUnit + laborUnit + indirectUnit))
         : costPrice

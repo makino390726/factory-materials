@@ -3,6 +3,7 @@ import { getMonthDateRange } from '@/lib/work-report-monthly-sync'
 import {
   formatFiscalYearLabel,
   getFiscalYearDateRange,
+  getFiscalYearFromDate,
 } from '@/lib/fiscal-year'
 import { formatDurationHours } from '@/lib/work-report-aggregation'
 
@@ -59,6 +60,7 @@ export type ProductionLotsResult = {
   target_name: string
   suggested_period_start: string | null
   lots: ProductionLotAnalysis[]
+  fiscal_year_summary: FiscalYearWorkGroupSummary | null
 }
 
 export type ProcessAnalysisResult = {
@@ -885,46 +887,81 @@ export type FiscalYearWorkGroupRow = {
   work_group_name: string
   total_minutes: number
   duration_hours: string
+  avg_st_minutes: number | null
 }
 
-export type FiscalYearLineWorkGroupSummary = {
+export type FiscalYearWorkGroupSummary = {
   fiscal_year: number
   fiscal_year_label: string
   period_start: string
   period_end: string
-  line_code: string
-  line_name: string
+  target_type: ProcessTargetType
+  target_code: string
+  target_name: string
+  annual_completed_qty: number
   total_minutes: number
   duration_hours: string
   rows: FiscalYearWorkGroupRow[]
 }
 
-/** 会計年度（9/1〜翌8/31）のライン別・作業グループ別所要時間 */
-export async function aggregateLineWorkGroupMinutesInFiscalYear(
+/** @deprecated use FiscalYearWorkGroupSummary */
+export type FiscalYearLineWorkGroupSummary = FiscalYearWorkGroupSummary
+
+async function sumFiscalYearCompletedQty(
   supabase: SupabaseClient,
-  lineCode: string,
+  targetType: ProcessTargetType,
+  targetCode: string,
   fiscalYear: number
-): Promise<FiscalYearLineWorkGroupSummary> {
+) {
+  const normalizedCode = normalizeTargetCode(targetCode)
+  const { start, end } = getFiscalYearDateRange(fiscalYear)
+
+  const { data, error } = await supabase
+    .from('process_production_lots')
+    .select('completed_qty, period_end')
+    .eq('target_type', targetType)
+    .eq('target_code', normalizedCode)
+    .gte('period_end', start)
+    .lte('period_end', end)
+
+  if (error) {
+    if (isMissingTableError(error)) return 0
+    throw error
+  }
+
+  return (data || []).reduce((sum, row) => sum + (row.completed_qty || 0), 0)
+}
+
+/** 会計年度（9/1〜翌8/31）の作業グループ別所要時間と平均ST（年間制作台数で割算） */
+export async function aggregateTargetWorkGroupSummaryInFiscalYear(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number
+): Promise<FiscalYearWorkGroupSummary> {
   if (!Number.isFinite(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
     throw new Error('fiscal_year が不正です')
   }
 
-  const normalizedCode = normalizeTargetCode(lineCode)
-  const line = await resolveLineId(supabase, normalizedCode)
-  if (!line) {
-    throw new Error(`ライン ${normalizedCode} が見つかりません`)
-  }
-
+  const normalizedCode = normalizeTargetCode(targetCode)
+  const { targetName, lineId } = await resolveTargetContext(supabase, targetType, normalizedCode)
   const { start, end } = getFiscalYearDateRange(fiscalYear)
+
   const totals = await aggregateTargetWorkGroupMinutesInRange(
     supabase,
-    'line',
+    targetType,
     normalizedCode,
     start,
     end,
-    line.id
+    lineId
   )
   const workGroupNames = await fetchWorkGroupNames(supabase)
+  const annualCompletedQty = await sumFiscalYearCompletedQty(
+    supabase,
+    targetType,
+    normalizedCode,
+    fiscalYear
+  )
 
   const rows: FiscalYearWorkGroupRow[] = Array.from(totals.entries())
     .sort(([a], [b]) => a.localeCompare(b, 'ja', { numeric: true }))
@@ -933,6 +970,10 @@ export async function aggregateLineWorkGroupMinutesInFiscalYear(
       work_group_name: workGroupNames.get(workGroupCode) || workGroupCode,
       total_minutes: totalMinutes,
       duration_hours: formatDurationHours(totalMinutes),
+      avg_st_minutes:
+        annualCompletedQty > 0 && totalMinutes > 0
+          ? roundSt(totalMinutes / annualCompletedQty)
+          : null,
     }))
 
   const totalMinutes = rows.reduce((sum, row) => sum + row.total_minutes, 0)
@@ -942,12 +983,50 @@ export async function aggregateLineWorkGroupMinutesInFiscalYear(
     fiscal_year_label: formatFiscalYearLabel(fiscalYear),
     period_start: start,
     period_end: end,
-    line_code: line.line_code,
-    line_name: line.name,
+    target_type: targetType,
+    target_code: normalizedCode,
+    target_name: targetName,
+    annual_completed_qty: annualCompletedQty,
     total_minutes: totalMinutes,
     duration_hours: formatDurationHours(totalMinutes),
     rows,
   }
+}
+
+/** 会計年度の作業グループ別平均ST（比較用） */
+export async function getFiscalYearAverageStByWorkGroup(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number
+) {
+  const summary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+    supabase,
+    targetType,
+    targetCode,
+    fiscalYear
+  )
+  const map = new Map<string, number>()
+  for (const row of summary.rows) {
+    if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
+      map.set(row.work_group_code, row.avg_st_minutes)
+    }
+  }
+  return map
+}
+
+/** 会計年度（9/1〜翌8/31）のライン別・作業グループ別所要時間 */
+export async function aggregateLineWorkGroupMinutesInFiscalYear(
+  supabase: SupabaseClient,
+  lineCode: string,
+  fiscalYear: number
+): Promise<FiscalYearWorkGroupSummary> {
+  return aggregateTargetWorkGroupSummaryInFiscalYear(
+    supabase,
+    'line',
+    lineCode,
+    fiscalYear
+  )
 }
 
 function roundSt(value: number) {
@@ -1008,29 +1087,6 @@ function buildWorkGroupRowsFromMinutes(
   return rows
 }
 
-function computeBaselineFromPriorLots(priorLots: ProductionLotAnalysis[]) {
-  const valuesByGroup = new Map<string, number[]>()
-
-  for (const lot of priorLots) {
-    for (const row of lot.rows) {
-      if (row.avg_st_minutes === null || row.avg_st_minutes <= 0) continue
-      const list = valuesByGroup.get(row.work_group_code) || []
-      list.push(row.avg_st_minutes)
-      valuesByGroup.set(row.work_group_code, list)
-    }
-  }
-
-  const baseline = new Map<string, number>()
-  for (const [workGroupCode, values] of valuesByGroup.entries()) {
-    if (values.length === 0) continue
-    baseline.set(
-      workGroupCode,
-      roundSt(values.reduce((sum, value) => sum + value, 0) / values.length)
-    )
-  }
-  return baseline
-}
-
 async function resolveTargetContext(
   supabase: SupabaseClient,
   targetType: ProcessTargetType,
@@ -1056,7 +1112,7 @@ async function analyzeSingleProductionLot(
   lot: ProductionLotRecord,
   lineId: string | null,
   workGroupNames: Map<string, string>,
-  priorLots: ProductionLotAnalysis[]
+  fiscalAvgStCache: Map<number, Map<string, number>>
 ): Promise<ProductionLotAnalysis> {
   const minutesByGroup = await aggregateTargetWorkGroupMinutesInRange(
     supabase,
@@ -1066,7 +1122,22 @@ async function analyzeSingleProductionLot(
     lot.period_end,
     lineId
   )
-  const baselineSt = computeBaselineFromPriorLots(priorLots)
+  const fiscalYear = getFiscalYearFromDate(lot.period_end)
+  let baselineSt = new Map<string, number>()
+  if (fiscalYear !== null) {
+    if (!fiscalAvgStCache.has(fiscalYear)) {
+      fiscalAvgStCache.set(
+        fiscalYear,
+        await getFiscalYearAverageStByWorkGroup(
+          supabase,
+          lot.target_type,
+          lot.target_code,
+          fiscalYear
+        )
+      )
+    }
+    baselineSt = fiscalAvgStCache.get(fiscalYear) || new Map()
+  }
   const rows = buildWorkGroupRowsFromMinutes(
     minutesByGroup,
     lot.completed_qty,
@@ -1132,9 +1203,12 @@ export async function analyzeProductionLots(
   const { targetName, lineId } = await resolveTargetContext(supabase, targetType, targetCode)
   const records = await listProductionLotRecords(supabase, targetType, targetCode)
   const workGroupNames = await fetchWorkGroupNames(supabase)
+  const fiscalAvgStCache = new Map<number, Map<string, number>>()
 
   const lastLot = records.length > 0 ? records[records.length - 1] : null
   const suggestedPeriodStart = lastLot ? shiftCalendarDate(lastLot.period_end, 1) : null
+  const displayFiscalYear =
+    (lastLot ? getFiscalYearFromDate(lastLot.period_end) : null) ?? null
 
   const lots: ProductionLotAnalysis[] = []
   for (let index = 0; index < records.length; index++) {
@@ -1144,12 +1218,26 @@ export async function analyzeProductionLots(
       record,
       lineId,
       workGroupNames,
-      lots
+      fiscalAvgStCache
     )
     lots.push({
       ...analysis,
       is_cumulative: index === 0,
     })
+  }
+
+  let fiscalYearSummary: FiscalYearWorkGroupSummary | null = null
+  if (displayFiscalYear !== null) {
+    try {
+      fiscalYearSummary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+        supabase,
+        targetType,
+        targetCode,
+        displayFiscalYear
+      )
+    } catch {
+      fiscalYearSummary = null
+    }
   }
 
   return {
@@ -1158,6 +1246,7 @@ export async function analyzeProductionLots(
     target_name: targetName,
     suggested_period_start: suggestedPeriodStart,
     lots,
+    fiscal_year_summary: fiscalYearSummary,
   }
 }
 

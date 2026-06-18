@@ -44,7 +44,15 @@ export async function POST(
   try {
     const { id: lineId } = await params
     const body = await req.json()
-    const { part_key, ratio } = body
+    const {
+      part_key,
+      ratio,
+      common_group_label,
+      allocation_models,
+      bom_model_count,
+      common_group_source,
+      settings_confirmed,
+    } = body
 
     console.debug('POST assignment - lineId:', lineId, 'part_key:', part_key, 'ratio:', ratio)
 
@@ -57,10 +65,28 @@ export async function POST(
     }
 
     const ratioNum = Number(ratio) || 100
+    const now = new Date().toISOString()
+    const confirmed = Boolean(settings_confirmed)
 
     const { data, error } = await supabase
       .from('line_part_assignments')
-      .insert([{ line_id: lineId, part_key, ratio: ratioNum }])
+      .insert([
+        {
+          line_id: lineId,
+          part_key,
+          ratio: ratioNum,
+          common_group_label: common_group_label || null,
+          allocation_models: allocation_models ?? null,
+          bom_model_count:
+            bom_model_count === undefined || bom_model_count === null
+              ? null
+              : Number(bom_model_count),
+          common_group_source: common_group_source || 'bom_auto',
+          settings_confirmed: confirmed,
+          settings_confirmed_at: confirmed ? now : null,
+          updated_at: now,
+        },
+      ])
       .select()
 
     if (error) {
@@ -83,7 +109,15 @@ export async function PUT(
   try {
     const { id: lineId } = await params
     const body = await req.json()
-    const { part_key, ratio } = body
+    const {
+      part_key,
+      ratio,
+      common_group_label,
+      allocation_models,
+      bom_model_count,
+      common_group_source,
+      settings_confirmed,
+    } = body
 
     console.debug('PUT assignment - lineId:', lineId, 'part_key:', part_key, 'ratio:', ratio)
 
@@ -96,10 +130,34 @@ export async function PUT(
     }
 
     const ratioNum = Number(ratio) || 100
+    const now = new Date().toISOString()
+    const updatePayload: Record<string, unknown> = {
+      ratio: ratioNum,
+      updated_at: now,
+    }
+
+    if (common_group_label !== undefined) {
+      updatePayload.common_group_label = common_group_label || null
+    }
+    if (allocation_models !== undefined) {
+      updatePayload.allocation_models = allocation_models
+    }
+    if (bom_model_count !== undefined) {
+      updatePayload.bom_model_count =
+        bom_model_count === null ? null : Number(bom_model_count)
+    }
+    if (common_group_source !== undefined) {
+      updatePayload.common_group_source = common_group_source || 'bom_auto'
+    }
+    if (settings_confirmed !== undefined) {
+      const confirmed = Boolean(settings_confirmed)
+      updatePayload.settings_confirmed = confirmed
+      updatePayload.settings_confirmed_at = confirmed ? now : null
+    }
 
     const { data, error } = await supabase
       .from('line_part_assignments')
-      .update({ ratio: ratioNum })
+      .update(updatePayload)
       .eq('line_id', lineId)
       .eq('part_key', part_key)
       .select()

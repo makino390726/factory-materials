@@ -137,6 +137,12 @@ export default function WorkOrderCostPage() {
   const [isBulkUpdatingUnitPrice, setIsBulkUpdatingUnitPrice] = useState(false)
   const [monthlyLineMinutes, setMonthlyLineMinutes] = useState<Record<string, number>>({})
   const [monthlyOrderMinutes, setMonthlyOrderMinutes] = useState<number | null>(null)
+  const [plannedPartQty, setPlannedPartQty] = useState<number | null>(null)
+  const [plannedPartQtyMeta, setPlannedPartQtyMeta] = useState<{
+    plan_fiscal_year: string | null
+    total_plan_qty: number
+    model_count: number
+  } | null>(null)
 
   useEffect(() => {
     const loadMonthlyLineMinutes = async () => {
@@ -437,15 +443,73 @@ export default function WorkOrderCostPage() {
     )
   }, [lineMasters, selectedPartKey])
 
-  const aggregatedLineDurationMinutes = useMemo(() => {
+  useEffect(() => {
+    if (mode !== 'line' || !selectedPartKey) {
+      setPlannedPartQty(null)
+      setPlannedPartQtyMeta(null)
+      return
+    }
+
+    const loadPlannedQty = async () => {
+      try {
+        const res = await fetch(
+          `/api/heater/manufacturing-plans/planned-part-qty?part_key=${encodeURIComponent(selectedPartKey)}`
+        )
+        if (!res.ok) {
+          setPlannedPartQty(null)
+          setPlannedPartQtyMeta(null)
+          return
+        }
+        const data = await res.json()
+        const qty = Number(data?.planned_part_qty || 0)
+        setPlannedPartQty(qty > 0 ? qty : null)
+        setPlannedPartQtyMeta({
+          plan_fiscal_year: data?.plan_fiscal_year ?? null,
+          total_plan_qty: Number(data?.total_plan_qty || 0),
+          model_count: Number(data?.model_count || 0),
+        })
+      } catch (err) {
+        console.error('製造計画台数の取得エラー:', err)
+        setPlannedPartQty(null)
+        setPlannedPartQtyMeta(null)
+      }
+    }
+
+    loadPlannedQty()
+  }, [mode, selectedPartKey])
+
+  const aggregatedMonthlyLineDurationMinutes = useMemo(() => {
     return matchingLines.reduce(
       (sum, line) => sum + (monthlyLineMinutes[line.line_code] ?? 0),
       0
     )
   }, [matchingLines, monthlyLineMinutes])
 
+  const aggregatedStandardLineDurationMinutes = useMemo(() => {
+    return matchingLines.reduce(
+      (sum, line) => sum + Number(line.standard_duration_minutes || 0),
+      0
+    )
+  }, [matchingLines])
+
+  /** ラインの制作所要時間（標準所要時間を優先、なければ月次実績） */
+  const totalProductionDurationMinutes = useMemo(() => {
+    if (aggregatedStandardLineDurationMinutes > 0) {
+      return aggregatedStandardLineDurationMinutes
+    }
+    return aggregatedMonthlyLineDurationMinutes
+  }, [aggregatedMonthlyLineDurationMinutes, aggregatedStandardLineDurationMinutes])
+
+  /** 1個あたり制作時間 = 制作所要時間 ÷ 製造計画部品数 */
+  const perUnitDurationMinutes = useMemo(() => {
+    if (mode !== 'line' || !selectedPartKey) return null
+    if (totalProductionDurationMinutes <= 0) return null
+    if (!plannedPartQty || plannedPartQty <= 0) return null
+    return Math.round((totalProductionDurationMinutes / plannedPartQty) * 10) / 10
+  }, [mode, selectedPartKey, totalProductionDurationMinutes, plannedPartQty])
+
   const effectiveDurationMinutes = mode === 'line'
-    ? (selectedPartKey ? aggregatedLineDurationMinutes : null)
+    ? (selectedPartKey ? (perUnitDurationMinutes ?? totalProductionDurationMinutes ?? null) : null)
     : (monthlyOrderMinutes ?? selectedOrder?.standard_duration_minutes ?? null)
 
   useEffect(() => {
@@ -1684,7 +1748,24 @@ export default function WorkOrderCostPage() {
                   </td>
                   <td className="py-4 pr-4 font-medium text-rose-400">固定</td>
                   <td className="py-4 pr-4 text-rose-300 font-medium">
-                    {effectiveDurationMinutes ?? '-'} 分
+                    <div>{effectiveDurationMinutes ?? '-'} 分</div>
+                    {mode === 'line' && selectedPartKey && totalProductionDurationMinutes > 0 && (
+                      <div className="mt-1 text-xs text-rose-200/80">
+                        {plannedPartQty && plannedPartQty > 0 ? (
+                          <>
+                            制作所要 {totalProductionDurationMinutes.toLocaleString('ja-JP')}分
+                            ÷ 計画 {plannedPartQty.toLocaleString('ja-JP')}個
+                            {plannedPartQtyMeta?.plan_fiscal_year
+                              ? `（${plannedPartQtyMeta.plan_fiscal_year}年度）`
+                              : ''}
+                          </>
+                        ) : (
+                          <span className="text-amber-300">
+                            製造計画が未登録のため1個あたりに換算できません
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="py-4 pr-4 text-rose-300 font-medium">
                     {calculateLaborUnitPrice().toFixed(3)}

@@ -31,6 +31,7 @@ type WorkOrderOption = {
   model: string | null
   status: string | null
   completed?: boolean | null
+  exclude_from_work_report?: boolean | null
 }
 
 type WorkContentOption = {
@@ -99,7 +100,8 @@ const formatMinutes = (value: number) => {
 }
 
 const isSelectableWorkOrder = (order: WorkOrderOption) => {
-  // D指令リストでは「完了」状態の指令は選択対象外にする
+  // D指令リストでは「完了」状態および「日報非表示」の指令は選択対象外
+  if (order.exclude_from_work_report) return false
   return order.status !== '完了'
 }
 
@@ -196,7 +198,7 @@ export default function WorkReportsPage() {
 
   const refetchWorkOrders = async () => {
     try {
-      const response = await fetch('/api/work-orders')
+      const response = await fetch('/api/work-orders?for_work_report=1')
       if (!response.ok) throw new Error('Failed to fetch work orders')
       const data = await response.json()
       const selectable = (data || []).filter(isSelectableWorkOrder)
@@ -1188,7 +1190,7 @@ export default function WorkReportsPage() {
                     <ul className="space-y-2 text-sm">
                       <li>• 作業内訳の合計所要時間が勤務時間と一致する必要があります。</li>
                       <li>• 作業区分と作業内容は作業内容マスタから選択してください。</li>
-                      <li>• D指令は作業指令一覧（状態が「完了」以外）から選択してください。</li>
+                      <li>• D指令は作業指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
                       <li>• ラインは事前にラインマスタで登録します。</li>
                     </ul>
                   </div>
