@@ -409,7 +409,8 @@ export default function WorkOrderCostPage() {
           return
         }
         const rows = (await res.json()) as MonthlyDurationRow[]
-        setMonthlyOrderMinutes(getMonthMinutes(rows))
+        const minutes = getMonthMinutes(rows)
+        setMonthlyOrderMinutes(minutes > 0 ? minutes : null)
       } catch (err) {
         console.error('月別指令実績の取得エラー:', err)
         setMonthlyOrderMinutes(null)
@@ -508,9 +509,33 @@ export default function WorkOrderCostPage() {
     return Math.round((totalProductionDurationMinutes / plannedPartQty) * 10) / 10
   }, [mode, selectedPartKey, totalProductionDurationMinutes, plannedPartQty])
 
-  const effectiveDurationMinutes = mode === 'line'
-    ? (selectedPartKey ? (perUnitDurationMinutes ?? totalProductionDurationMinutes ?? null) : null)
-    : (monthlyOrderMinutes ?? selectedOrder?.standard_duration_minutes ?? null)
+  const isOrderCompleted = selectedOrder?.status === '完了'
+  const orderStandardMinutes = Number(selectedOrder?.standard_duration_minutes || 0)
+  const orderMonthlyMinutes = monthlyOrderMinutes ?? 0
+
+  const effectiveDurationMinutes = useMemo(() => {
+    if (mode === 'line') {
+      if (!selectedPartKey) return null
+      return perUnitDurationMinutes ?? totalProductionDurationMinutes ?? null
+    }
+    // 指令: 完了かつ月次実績ありなら実績優先。それ以外は指令マスタの所要時間
+    if (isOrderCompleted && orderMonthlyMinutes > 0) return orderMonthlyMinutes
+    if (orderStandardMinutes > 0) return orderStandardMinutes
+    if (orderMonthlyMinutes > 0) return orderMonthlyMinutes
+    return null
+  }, [
+    mode,
+    selectedPartKey,
+    perUnitDurationMinutes,
+    totalProductionDurationMinutes,
+    isOrderCompleted,
+    orderStandardMinutes,
+    orderMonthlyMinutes,
+  ])
+
+  const isAutoLaborMode =
+    mode === 'line' ||
+    (mode === 'order' && effectiveDurationMinutes !== null && effectiveDurationMinutes > 0)
 
   useEffect(() => {
     const loadBranches = async () => {
@@ -548,9 +573,6 @@ export default function WorkOrderCostPage() {
 
     loadBranches()
   }, [mode, selectedWorkOrderId, workOrders])
-
-  const isOrderCompleted = selectedOrder?.status === '完了'
-  const isAutoLaborMode = mode === 'line' || isOrderCompleted
 
   const UNIT_LABOR_COST = 17810 // 1工数単価
   const UNIT_MINUTES = 480 // 8時間=480分
@@ -831,11 +853,11 @@ export default function WorkOrderCostPage() {
 
     // 工賃（ヘッダ）の間接費を laborCostType と laborCost に応じて自動再計算
     useEffect(() => {
-      const laborVal = isOrderCompleted ? calculateAutoLaborCost() : toNumber(laborCost)
+      const laborVal = isAutoLaborMode ? calculateAutoLaborCost() : toNumber(laborCost)
       const pct = laborCostType === '加' ? 0.3 : 0.05
       const indirect = Math.round(laborVal * pct)
       setLaborIndirectCost(String(indirect))
-    }, [laborCost, laborCostType, selectedWorkOrderId, isOrderCompleted])
+    }, [laborCost, laborCostType, selectedWorkOrderId, isAutoLaborMode, effectiveDurationMinutes])
 
   const handleUpdateCostPrice = async (rowId: string) => {
     const row = partRows.find((r) => r.id === rowId)
@@ -1162,11 +1184,37 @@ export default function WorkOrderCostPage() {
           if (isBranchScopedOrder && selectedBranch) {
             const laborFromItems = filteredSourceItems.reduce((sum: number, it: any) => sum + Number(it.labor_cost || 0), 0)
             const indirectFromItems = filteredSourceItems.reduce((sum: number, it: any) => sum + Number(it.indirect_cost || 0), 0)
-            setLaborCost(String(laborFromItems))
-            setLaborIndirectCost(String(indirectFromItems))
+            const autoLabor = calculateAutoLaborCost()
+            if (selectedBranch.branch_no === '00') {
+              const savedHeaderLabor = Number(data.header?.total_labor_cost || 0)
+              setLaborCost(
+                String(
+                  savedHeaderLabor > 0
+                    ? savedHeaderLabor
+                    : laborFromItems > 0
+                      ? laborFromItems
+                      : autoLabor
+                )
+              )
+              const savedHeaderIndirect = Number(data.header?.total_indirect_cost || 0)
+              setLaborIndirectCost(
+                String(
+                  savedHeaderIndirect > 0
+                    ? savedHeaderIndirect
+                    : indirectFromItems > 0
+                      ? indirectFromItems
+                      : Math.round(autoLabor * (laborCostType === '加' ? 0.3 : 0.05))
+                )
+              )
+            } else {
+              setLaborCost(String(laborFromItems))
+              setLaborIndirectCost(String(indirectFromItems))
+            }
           } else if (data.header) {
             setLaborIndirectCost(String(data.header.total_indirect_cost || 0))
-            setLaborCost(String(data.header.total_labor_cost || 0))
+            const savedLabor = Number(data.header.total_labor_cost || 0)
+            const autoLabor = calculateAutoLaborCost()
+            setLaborCost(String(savedLabor > 0 ? savedLabor : autoLabor))
             if (data.header.labor_cost_type) {
               setLaborCostType(data.header.labor_cost_type)
             }
@@ -1739,9 +1787,14 @@ export default function WorkOrderCostPage() {
                   <td className="py-4 pr-4">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-rose-300">工賃</span>
-                      {mode === 'order' && !isOrderCompleted && (
+                      {mode === 'order' && !isAutoLaborMode && (
                         <span className="text-xs font-semibold text-amber-300 bg-amber-900/60 px-2 py-1 rounded">
-                          ステータスが完了してません
+                          所要時間未設定
+                        </span>
+                      )}
+                      {mode === 'order' && isAutoLaborMode && !isOrderCompleted && orderStandardMinutes > 0 && (
+                        <span className="text-xs font-semibold text-emerald-300 bg-emerald-900/60 px-2 py-1 rounded">
+                          指令マスタ {orderStandardMinutes.toLocaleString('ja-JP')}分
                         </span>
                       )}
                     </div>
