@@ -1,15 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import {
-  buildDisplayItemsFromUnit,
-  buildLinePartCostUnitMap,
-  buildMasterCostUnitMap,
-  masterCostMapKey,
-  reconcileCostItemsWithBreakdown,
-  type PartCostUnit,
-} from '@/lib/line-part-cost-breakdown'
-
-const LABOR_UNIT_PRICE = 17810
-const INDIRECT_RATE = 0.3
 
 export type BomCostItem = {
   id: string
@@ -23,6 +12,7 @@ export type BomCostItem = {
   indirect_cost: number
   line_total: number
   cost_type: string
+  master_id?: string
 }
 
 export type BomBranchResult = {
@@ -48,13 +38,14 @@ export type WorkOrderBomSummaryRow = {
   labor_total: number
   grand_total: number
   branch_count: number
+  has_saved_cost: boolean
+  cost_saved_at: string | null
 }
 
 type WorkOrderForBom = {
   id: string
   order_no: string
   product_name?: string | null
-  standard_duration_minutes?: number | null
 }
 
 type BranchRow = {
@@ -70,11 +61,25 @@ type BranchRow = {
   synced_at?: string | null
 }
 
-export type BomCostPrefetch = {
-  masterCostMap: Map<string, PartCostUnit>
-  linePartCostMap: Map<string, PartCostUnit>
-  orderCostItemsMap: Record<string, BomCostItem[]>
-  lineCostItemsMap: Record<string, BomCostItem[]>
+type CostHeaderRow = {
+  id: string
+  work_order_id: string | null
+  total_material_cost: number | null
+  total_labor_cost: number | null
+  total_indirect_cost: number | null
+  total_cost: number | null
+  updated_at: string | null
+  created_at: string | null
+}
+
+export type SavedWorkOrderCostResult = {
+  branches: BomBranchResult[]
+  material_total: number
+  labor_total: number
+  indirect_total: number
+  grand_total: number
+  has_saved_cost: boolean
+  cost_saved_at: string | null
 }
 
 function formatBranchNo(branchNo: string): string {
@@ -84,19 +89,60 @@ function formatBranchNo(branchNo: string): string {
 }
 
 function mapCostItem(item: any): BomCostItem {
+  const material = Number(item.material_cost || 0)
+  const labor = Number(item.labor_cost || 0)
+  const indirect = Number(item.indirect_cost || 0)
   return {
-    id: item.id,
+    id: String(item.id || ''),
     product_code: item.product_code ?? '',
     part_name: item.part_name ?? '',
     spec: item.spec ?? '',
     quantity: Number(item.quantity || 0),
     unit_price: Number(item.unit_price || 0),
-    material_cost: Number(item.material_cost || 0),
-    labor_cost: Number(item.labor_cost || 0),
-    indirect_cost: Number(item.indirect_cost || 0),
-    line_total: Number(item.line_total || 0),
+    material_cost: material,
+    labor_cost: labor,
+    indirect_cost: indirect,
+    line_total: Number(item.line_total || material + labor + indirect),
     cost_type: item.cost_type || '加',
+    master_id: item.master_id ?? undefined,
   }
+}
+
+function buildBranchCandidateKeys(orderNo: string, branch: BranchRow): string[] {
+  const partKey = String(branch.part_key || '').trim()
+  const branchNo = String(branch.branch_no || '')
+  const formattedNo = formatBranchNo(branchNo)
+  const stripped = branchNo.replace(/^[A-Za-z]+/, '').replace(/^0+/, '') || branchNo
+
+  const keys = [
+    `${orderNo}-${formattedNo}`,
+    `${orderNo}-${stripped}`,
+    `${orderNo}-${branchNo}`,
+    partKey,
+  ].filter(Boolean)
+
+  return [...new Set(keys)]
+}
+
+function sumItems(items: BomCostItem[]) {
+  return items.reduce(
+    (acc, item) => {
+      acc.material += item.material_cost
+      acc.labor += item.labor_cost
+      acc.indirect += item.indirect_cost
+      acc.total += item.line_total
+      return acc
+    },
+    { material: 0, labor: 0, indirect: 0, total: 0 }
+  )
+}
+
+/** 枝番明細は1セット分。枝番00のみ数量込み総額として扱う */
+export function branchCostItemMultiplier(
+  branch: Pick<BomBranchResult, 'branch_no' | 'bom_quantity'>
+): number {
+  if (String(branch.branch_no || '') === '00') return 1
+  return Number(branch.bom_quantity || 1)
 }
 
 export function summarizeBomBranches(branches: BomBranchResult[]) {
@@ -105,11 +151,11 @@ export function summarizeBomBranches(branches: BomBranchResult[]) {
   let indirect = 0
 
   for (const branch of branches) {
-    const qty = Number(branch.bom_quantity || 1)
+    const qty = branchCostItemMultiplier(branch)
     for (const item of branch.cost_items || []) {
-      material += Number(item.material_cost || 0) * qty
-      labor += Number(item.labor_cost || 0) * qty
-      indirect += Number(item.indirect_cost || 0) * qty
+      material += item.material_cost * qty
+      labor += item.labor_cost * qty
+      indirect += item.indirect_cost * qty
     }
   }
 
@@ -125,244 +171,298 @@ export function summarizeBomBranches(branches: BomBranchResult[]) {
   }
 }
 
-export async function prefetchBomCostData(
+async function loadLatestCostHeader(
   supabase: SupabaseClient,
-  workOrders: WorkOrderForBom[],
-  branchesByWorkOrderId: Map<string, BranchRow[]>
-): Promise<BomCostPrefetch> {
-  const allCandidateKeys = new Set<string>()
-  const partKeysForLine = new Set<string>()
+  workOrderId: string
+): Promise<CostHeaderRow | null> {
+  const { data, error } = await supabase
+    .from('work_order_costs')
+    .select(
+      'id, work_order_id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
+    )
+    .eq('work_order_id', workOrderId)
+    .order('updated_at', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1)
 
-  for (const wo of workOrders) {
-    const branches = branchesByWorkOrderId.get(wo.id) || []
-    for (const branch of branches) {
-      const partKey = String(branch.part_key || '').trim()
-      const formattedNo = formatBranchNo(String(branch.branch_no || ''))
-      allCandidateKeys.add(`${wo.order_no}-${formattedNo}`)
-      if (partKey) {
-        allCandidateKeys.add(partKey)
-        if (!partKey.endsWith('-00')) partKeysForLine.add(partKey)
-      }
-    }
-  }
-
-  const masterSpecs = [...allCandidateKeys].flatMap((masterId) => [
-    { master_id: masterId, master_type: '指令原価' },
-    { master_id: masterId, master_type: 'ライン原価' },
-  ])
-
-  const [masterCostMap, linePartCostMap] = await Promise.all([
-    buildMasterCostUnitMap(supabase, masterSpecs),
-    buildLinePartCostUnitMap(supabase, [...partKeysForLine]),
-  ])
-
-  const orderCostItemsMap: Record<string, BomCostItem[]> = {}
-  const lineCostItemsMap: Record<string, BomCostItem[]> = {}
-
-  if (allCandidateKeys.size > 0) {
-    const { data: costItems, error: ciErr } = await supabase
-      .from('work_order_cost_items')
-      .select(
-        'id, master_id, master_type, product_code, part_name, spec, quantity, unit_price, material_cost, labor_cost, indirect_cost, line_total, cost_type'
-      )
-      .in('master_type', ['指令原価', 'ライン原価'])
-      .in('master_id', [...allCandidateKeys])
-      .order('line_no', { ascending: true })
-
-    if (ciErr) throw ciErr
-
-    for (const item of costItems || []) {
-      const key = String(item.master_id || '')
-      const mappedItem = mapCostItem(item)
-      if (item.master_type === '指令原価') {
-        if (!orderCostItemsMap[key]) orderCostItemsMap[key] = []
-        orderCostItemsMap[key].push(mappedItem)
-      } else {
-        if (!lineCostItemsMap[key]) lineCostItemsMap[key] = []
-        lineCostItemsMap[key].push(mappedItem)
-      }
-    }
-  }
-
-  return { masterCostMap, linePartCostMap, orderCostItemsMap, lineCostItemsMap }
+  if (error) throw error
+  return (data?.[0] as CostHeaderRow | undefined) ?? null
 }
 
-function resolveUnitBreakdown(
-  candidateKeys: string[],
-  partKey: string,
-  prefetch: BomCostPrefetch
-): PartCostUnit {
-  const { masterCostMap, linePartCostMap, orderCostItemsMap, lineCostItemsMap } = prefetch
-  const empty: PartCostUnit = { material_unit: 0, labor_unit: 0, indirect_unit: 0, total_unit: 0 }
+async function loadSavedOrderCostItems(
+  supabase: SupabaseClient,
+  headerId: string
+): Promise<BomCostItem[]> {
+  const { data, error } = await supabase
+    .from('work_order_cost_items')
+    .select(
+      'id, master_id, master_type, product_code, part_name, spec, quantity, unit_price, material_cost, labor_cost, indirect_cost, line_total, cost_type'
+    )
+    .eq('work_order_cost_id', headerId)
+    .eq('master_type', '指令原価')
+    .order('line_no', { ascending: true })
 
-  for (const candidateKey of candidateKeys) {
-    if ((orderCostItemsMap[candidateKey] || []).length > 0) {
-      return masterCostMap.get(masterCostMapKey(candidateKey, '指令原価')) || empty
-    }
-    if ((lineCostItemsMap[candidateKey] || []).length > 0) {
-      return (
-        masterCostMap.get(masterCostMapKey(candidateKey, 'ライン原価')) ||
-        linePartCostMap.get(candidateKey) ||
-        empty
-      )
-    }
-  }
-
-  const lineUnit = partKey ? linePartCostMap.get(partKey) : undefined
-  if (lineUnit && lineUnit.total_unit > 0) return lineUnit
-  return empty
+  if (error) throw error
+  return (data || []).map(mapCostItem)
 }
 
-export function aggregateWorkOrderBomCost(
+function buildBranchesFromSavedItems(
   wo: WorkOrderForBom,
   branches: BranchRow[],
-  prefetch: BomCostPrefetch
-): { branches: BomBranchResult[]; grand_total: number } & ReturnType<typeof summarizeBomBranches> {
-  const branchCandidateKeys = branches.map((branch) => {
-    const partKey = String(branch.part_key || '')
-    const formattedNo = formatBranchNo(String(branch.branch_no || ''))
-    const keys = [`${wo.order_no}-${formattedNo}`]
-    if (partKey) keys.push(partKey)
-    return keys
-  })
+  items: BomCostItem[],
+  header: CostHeaderRow
+): BomBranchResult[] {
+  const itemsByMasterId = new Map<string, BomCostItem[]>()
+  for (const item of items) {
+    const key = String(item.master_id || '').trim()
+    if (!key) continue
+    const list = itemsByMasterId.get(key) || []
+    list.push(item)
+    itemsByMasterId.set(key, list)
+  }
 
-  const { orderCostItemsMap, lineCostItemsMap } = prefetch
+  const usedMasterIds = new Set<string>()
+  const branchResults: BomBranchResult[] = []
 
-  const branchesWithItems: BomBranchResult[] = branches.map((branch, index) => {
-    if (branch.branch_no === '00') {
-      const qty = Number(branch.bom_quantity || 0)
-      const unitPrice = Number(branch.unit_cost || LABOR_UNIT_PRICE)
-      const laborAmt = Math.round(qty * unitPrice)
-      const indirectAmt = Math.round(laborAmt * INDIRECT_RATE)
-      const lineTotal = laborAmt + indirectAmt
-      return {
-        id: branch.id,
-        branch_no: branch.branch_no,
-        part_key: branch.part_key,
-        part_name: branch.part_name ?? '工賃',
-        product_code: null,
-        bom_quantity: qty,
-        unit_cost: unitPrice,
-        subtotal: lineTotal,
-        notes: branch.notes ?? null,
-        synced_at: branch.synced_at ?? null,
-        cost_items: [
-          {
-            id: `${branch.id}-labor`,
-            product_code: '',
-            part_name: '工賃',
-            spec: '',
-            quantity: qty,
-            unit_price: unitPrice,
-            material_cost: 0,
-            labor_cost: laborAmt,
-            indirect_cost: indirectAmt,
-            line_total: lineTotal,
-            cost_type: '加',
-          },
-        ],
-      }
-    }
+  for (const branch of branches) {
+    const candidateKeys = buildBranchCandidateKeys(wo.order_no, branch)
+    let matchedItems: BomCostItem[] = []
+    let matchedKey = ''
 
-    let items: BomCostItem[] = []
-    for (const candidateKey of branchCandidateKeys[index]) {
-      const found = orderCostItemsMap[candidateKey] ?? lineCostItemsMap[candidateKey]
+    for (const key of candidateKeys) {
+      const found = itemsByMasterId.get(key)
       if (found && found.length > 0) {
-        items = found.map((item) => ({ ...item }))
+        matchedItems = found.map((item) => ({ ...item }))
+        matchedKey = key
         break
       }
     }
 
-    const unitBreakdown = resolveUnitBreakdown(
-      branchCandidateKeys[index],
-      String(branch.part_key || ''),
-      prefetch
-    )
+    if (matchedKey) usedMasterIds.add(matchedKey)
 
-    if (items.length > 0) {
-      items = reconcileCostItemsWithBreakdown(
-        items,
-        unitBreakdown,
-        `${branch.branch_no || branch.id}-reconcile`
-      )
-    } else if (unitBreakdown.total_unit > 0) {
-      items = buildDisplayItemsFromUnit(unitBreakdown, `${branch.branch_no || branch.id}-unit`)
-    }
+    const itemSum = sumItems(matchedItems)
+    const multiplier = branch.branch_no === '00' ? 1 : Number(branch.bom_quantity || 1)
+    const subtotal = Math.round(itemSum.total * multiplier)
 
-    const unitCostFromBreakdown =
-      unitBreakdown.total_unit > 0
-        ? unitBreakdown.total_unit
-        : items.length > 0
-          ? items.reduce((sum, item) => sum + item.line_total, 0)
-          : Number(branch.unit_cost || 0)
-
-    return {
+    branchResults.push({
       id: branch.id,
       branch_no: branch.branch_no,
       part_key: branch.part_key,
       part_name: branch.part_name ?? null,
       product_code: branch.product_code ?? null,
       bom_quantity: Number(branch.bom_quantity || 1),
-      unit_cost: unitCostFromBreakdown,
-      subtotal: Math.round(unitCostFromBreakdown * Number(branch.bom_quantity || 1)),
+      unit_cost: matchedItems.length > 0 ? Math.round(itemSum.total) : Number(branch.unit_cost || 0),
+      subtotal,
       notes: branch.notes ?? null,
       synced_at: branch.synced_at ?? null,
-      cost_items: items,
-    }
-  })
-
-  let finalBranches = branchesWithItems
-  const hasBranch00 = branchesWithItems.some((branch) => branch.branch_no === '00')
-
-  if (!hasBranch00) {
-    const stdMinutes = Number(wo.standard_duration_minutes || 0)
-    const laborQty = stdMinutes > 0 ? Math.round((stdMinutes / 480) * 1000) / 1000 : 0
-    const laborAmt = Math.round(laborQty * LABOR_UNIT_PRICE)
-    const indirectAmt = Math.round(laborAmt * INDIRECT_RATE)
-    const lineTotal = laborAmt + indirectAmt
-    finalBranches = [
-      {
-        id: `${wo.id}-labor-synthetic`,
-        branch_no: '00',
-        part_key: `${wo.order_no}-00`,
-        part_name: '工賃',
-        product_code: null,
-        bom_quantity: laborQty,
-        unit_cost: LABOR_UNIT_PRICE,
-        subtotal: lineTotal,
-        notes: null,
-        synced_at: null,
-        cost_items: [
-          {
-            id: `${wo.id}-labor-item`,
-            product_code: '',
-            part_name: '工賃',
-            spec: `所要時間 ${stdMinutes}分`,
-            quantity: laborQty,
-            unit_price: LABOR_UNIT_PRICE,
-            material_cost: 0,
-            labor_cost: laborAmt,
-            indirect_cost: indirectAmt,
-            line_total: lineTotal,
-            cost_type: '加',
-          },
-        ],
-      },
-      ...branchesWithItems,
-    ]
+      cost_items: matchedItems,
+    })
   }
 
-  const summary = summarizeBomBranches(finalBranches)
-  return { branches: finalBranches, ...summary }
+  const unassigned: BomCostItem[] = []
+  for (const [masterId, masterItems] of itemsByMasterId) {
+    if (!usedMasterIds.has(masterId)) {
+      unassigned.push(...masterItems)
+    }
+  }
+
+  if (unassigned.length > 0) {
+    const wholeOrderItems =
+      itemsByMasterId.get(wo.order_no)?.map((item) => ({ ...item })) ||
+      unassigned.map((item) => ({ ...item }))
+    const itemSum = sumItems(wholeOrderItems)
+    const existingWhole = branchResults.find(
+      (b) => b.part_key === wo.order_no || b.branch_no === '指令全体'
+    )
+    if (existingWhole) {
+      existingWhole.cost_items = wholeOrderItems
+      existingWhole.subtotal = Math.round(itemSum.total)
+      existingWhole.unit_cost = Math.round(itemSum.total)
+    } else {
+      branchResults.unshift({
+        id: `${wo.id}-saved-whole`,
+        branch_no: '指令全体',
+        part_key: wo.order_no,
+        part_name: '指令原価（保存明細）',
+        product_code: null,
+        bom_quantity: 1,
+        unit_cost: Math.round(itemSum.total),
+        subtotal: Math.round(itemSum.total),
+        notes: null,
+        synced_at: header.updated_at ?? null,
+        cost_items: wholeOrderItems,
+      })
+    }
+  }
+
+  const branchItemTotals = summarizeBomBranches(branchResults)
+  const headerLabor = Number(header.total_labor_cost || 0)
+  const headerIndirect = Number(header.total_indirect_cost || 0)
+  const laborGap = Math.round(headerLabor - branchItemTotals.labor_total)
+  const indirectGap = Math.round(headerIndirect - branchItemTotals.indirect_total)
+
+  if (laborGap !== 0 || indirectGap !== 0) {
+    const laborBranch =
+      branchResults.find((b) => b.branch_no === '00') ||
+      branchResults.find((b) => b.part_name?.includes('工賃'))
+
+    if (laborBranch) {
+      const extraItems = [...laborBranch.cost_items]
+      if (laborGap > 0) {
+        extraItems.push({
+          id: `${wo.id}-header-labor`,
+          product_code: '',
+          part_name: '工賃（指令ヘッダ）',
+          spec: '指令原価計算で保存された工賃',
+          quantity: 1,
+          unit_price: laborGap,
+          material_cost: 0,
+          labor_cost: laborGap,
+          indirect_cost: 0,
+          line_total: laborGap,
+          cost_type: '加',
+        })
+      }
+      if (indirectGap > 0) {
+        extraItems.push({
+          id: `${wo.id}-header-indirect`,
+          product_code: '',
+          part_name: '間接費（指令ヘッダ）',
+          spec: '指令原価計算で保存された間接費',
+          quantity: 1,
+          unit_price: indirectGap,
+          material_cost: 0,
+          labor_cost: 0,
+          indirect_cost: indirectGap,
+          line_total: indirectGap,
+          cost_type: '加',
+        })
+      }
+      const sum = sumItems(extraItems)
+      laborBranch.cost_items = extraItems
+      laborBranch.subtotal = Math.round(sum.total * branchCostItemMultiplier(laborBranch))
+      laborBranch.unit_cost = Math.round(sum.total)
+    } else {
+      branchResults.unshift({
+        id: `${wo.id}-header-cost`,
+        branch_no: '00',
+        part_key: `${wo.order_no}-00`,
+        part_name: '指令工賃・間接費',
+        product_code: null,
+        bom_quantity: 1,
+        unit_cost: laborGap + indirectGap,
+        subtotal: laborGap + indirectGap,
+        notes: null,
+        synced_at: header.updated_at ?? null,
+        cost_items: [
+          ...(laborGap > 0
+            ? [
+                {
+                  id: `${wo.id}-header-labor`,
+                  product_code: '',
+                  part_name: '工賃（指令ヘッダ）',
+                  spec: '',
+                  quantity: 1,
+                  unit_price: laborGap,
+                  material_cost: 0,
+                  labor_cost: laborGap,
+                  indirect_cost: 0,
+                  line_total: laborGap,
+                  cost_type: '加',
+                },
+              ]
+            : []),
+          ...(indirectGap > 0
+            ? [
+                {
+                  id: `${wo.id}-header-indirect`,
+                  product_code: '',
+                  part_name: '間接費（指令ヘッダ）',
+                  spec: '',
+                  quantity: 1,
+                  unit_price: indirectGap,
+                  material_cost: 0,
+                  labor_cost: 0,
+                  indirect_cost: indirectGap,
+                  line_total: indirectGap,
+                  cost_type: '加',
+                },
+              ]
+            : []),
+        ],
+      })
+    }
+  }
+
+  return branchResults
+}
+
+/** 指令原価計算の保存結果（work_order_costs）を正とした集計 */
+export async function aggregateWorkOrderSavedCost(
+  supabase: SupabaseClient,
+  wo: WorkOrderForBom,
+  branches: BranchRow[]
+): Promise<SavedWorkOrderCostResult> {
+  const header = await loadLatestCostHeader(supabase, wo.id)
+
+  if (!header) {
+    return {
+      branches: [],
+      material_total: 0,
+      labor_total: 0,
+      indirect_total: 0,
+      grand_total: 0,
+      has_saved_cost: false,
+      cost_saved_at: null,
+    }
+  }
+
+  const items = await loadSavedOrderCostItems(supabase, header.id)
+  const branchResults =
+    branches.length > 0
+      ? buildBranchesFromSavedItems(wo, branches, items, header)
+      : items.length > 0
+        ? buildBranchesFromSavedItems(wo, [], items, header)
+        : []
+
+  if (branches.length === 0 && items.length > 0 && branchResults.length === 0) {
+    const itemSum = sumItems(items)
+    branchResults.push({
+      id: `${wo.id}-saved-all`,
+      branch_no: '指令全体',
+      part_key: wo.order_no,
+      part_name: '指令原価（保存明細）',
+      product_code: null,
+      bom_quantity: 1,
+      unit_cost: Math.round(itemSum.total),
+      subtotal: Math.round(itemSum.total),
+      notes: null,
+      synced_at: header.updated_at ?? null,
+      cost_items: items,
+    })
+  }
+
+  return {
+    branches: branchResults,
+    material_total: Number(header.total_material_cost || 0),
+    labor_total: Number(header.total_labor_cost || 0),
+    indirect_total: Number(header.total_indirect_cost || 0),
+    grand_total: Number(header.total_cost || 0),
+    has_saved_cost: true,
+    cost_saved_at: header.updated_at || header.created_at || null,
+  }
 }
 
 export async function listWorkOrderBomSummaries(
   supabase: SupabaseClient,
   filter: 'all' | 'bom' = 'bom'
-): Promise<{ rows: WorkOrderBomSummaryRow[]; totals: Omit<WorkOrderBomSummaryRow, 'work_order_id' | 'order_no' | 'product_name' | 'branch_count'> }> {
+): Promise<{
+  rows: WorkOrderBomSummaryRow[]
+  totals: Omit<WorkOrderBomSummaryRow, 'work_order_id' | 'order_no' | 'product_name' | 'branch_count' | 'has_saved_cost' | 'cost_saved_at'>
+}> {
   const { data: workOrders, error: woErr } = await supabase
     .from('work_orders')
-    .select('id, order_no, product_name, bom_model, cost_mode, standard_duration_minutes')
+    .select('id, order_no, product_name, bom_model, cost_mode')
     .order('order_no', { ascending: true })
 
   if (woErr) throw woErr
@@ -382,35 +482,70 @@ export async function listWorkOrderBomSummaries(
   }
 
   const workOrderIds = filtered.map((wo) => wo.id)
-  const { data: branchRows, error: brErr } = await supabase
-    .from('work_order_branches')
-    .select('*')
-    .in('work_order_id', workOrderIds)
-    .order('branch_no', { ascending: true })
 
+  const [{ data: headers, error: headerErr }, { data: branchRows, error: brErr }] =
+    await Promise.all([
+      supabase
+        .from('work_order_costs')
+        .select(
+          'id, work_order_id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
+        )
+        .in('work_order_id', workOrderIds),
+      supabase
+        .from('work_order_branches')
+        .select('work_order_id')
+        .in('work_order_id', workOrderIds),
+    ])
+
+  if (headerErr) throw headerErr
   if (brErr) throw brErr
 
-  const branchesByWorkOrderId = new Map<string, BranchRow[]>()
-  for (const branch of branchRows || []) {
-    const list = branchesByWorkOrderId.get(branch.work_order_id) || []
-    list.push(branch as BranchRow)
-    branchesByWorkOrderId.set(branch.work_order_id, list)
+  const headerByWorkOrderId = new Map<string, CostHeaderRow>()
+  for (const header of (headers || []) as CostHeaderRow[]) {
+    const workOrderId = String(header.work_order_id || '')
+    if (!workOrderId) continue
+    const existing = headerByWorkOrderId.get(workOrderId)
+    const headerTime = String(header.updated_at || header.created_at || '')
+    const existingTime = String(existing?.updated_at || existing?.created_at || '')
+    if (!existing || headerTime.localeCompare(existingTime) > 0) {
+      headerByWorkOrderId.set(workOrderId, header)
+    }
   }
 
-  const prefetch = await prefetchBomCostData(supabase, filtered, branchesByWorkOrderId)
+  const branchCountByWorkOrderId = new Map<string, number>()
+  for (const branch of branchRows || []) {
+    const workOrderId = String(branch.work_order_id || '')
+    branchCountByWorkOrderId.set(workOrderId, (branchCountByWorkOrderId.get(workOrderId) || 0) + 1)
+  }
 
   const rows: WorkOrderBomSummaryRow[] = filtered.map((wo) => {
-    const branches = branchesByWorkOrderId.get(wo.id) || []
-    const result = aggregateWorkOrderBomCost(wo, branches, prefetch)
+    const header = headerByWorkOrderId.get(wo.id)
+    if (!header) {
+      return {
+        work_order_id: wo.id,
+        order_no: wo.order_no,
+        product_name: wo.product_name ?? null,
+        material_total: 0,
+        indirect_total: 0,
+        labor_total: 0,
+        grand_total: 0,
+        branch_count: branchCountByWorkOrderId.get(wo.id) || 0,
+        has_saved_cost: false,
+        cost_saved_at: null,
+      }
+    }
+
     return {
       work_order_id: wo.id,
       order_no: wo.order_no,
       product_name: wo.product_name ?? null,
-      material_total: result.material_total,
-      indirect_total: result.indirect_total,
-      labor_total: result.labor_total,
-      grand_total: result.grand_total,
-      branch_count: result.branches.length,
+      material_total: Number(header.total_material_cost || 0),
+      indirect_total: Number(header.total_indirect_cost || 0),
+      labor_total: Number(header.total_labor_cost || 0),
+      grand_total: Number(header.total_cost || 0),
+      branch_count: branchCountByWorkOrderId.get(wo.id) || 0,
+      has_saved_cost: true,
+      cost_saved_at: header.updated_at || header.created_at || null,
     }
   })
 

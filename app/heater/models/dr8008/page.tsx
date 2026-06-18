@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { branchCostItemMultiplier } from '@/lib/work-order-bom-cost-aggregate'
 
 // =============================================================
 // 型定義
@@ -54,6 +55,17 @@ type OrderSummaryRow = {
   labor_total: number
   grand_total: number
   branch_count: number
+  has_saved_cost?: boolean
+  cost_saved_at?: string | null
+}
+
+type SavedCostHeader = {
+  has_saved_cost: boolean
+  cost_saved_at: string | null
+  material_total: number
+  labor_total: number
+  indirect_total: number
+  grand_total: number
 }
 
 type OrderSummaryTotals = {
@@ -75,9 +87,8 @@ type BreakdownData = {
 // 指令原価BOM ページ
 // =============================================================
 // 計算フロー:
-//   指令の bom_model（または直接入力 BOM モデル）
-//   → heater_bom の各 part_key の原価明細（work_order_cost_items）
-//   → パーツ毎の小計（unit_cost × bom_quantity）→ 総合計
+//   指令原価計算（/work-orders/cost）で保存された work_order_costs を表示
+//   一覧・枝番別とも保存結果を正とする（再集計・ライン原価フォールバックなし）
 // =============================================================
 export default function WorkOrderBomCostPage() {
   const searchParams = useSearchParams()
@@ -88,7 +99,7 @@ export default function WorkOrderBomCostPage() {
   const [bomModelInput, setBomModelInput] = useState<string>('')
 
   const [data, setData] = useState<BreakdownData | null>(null)
-  const [orderLaborCost, setOrderLaborCost] = useState(0)
+  const [savedCostHeader, setSavedCostHeader] = useState<SavedCostHeader | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -125,6 +136,50 @@ export default function WorkOrderBomCostPage() {
     setSelectedWorkOrder(wo)
     if (wo?.bom_model) setBomModelInput(wo.bom_model)
   }, [selectedWorkOrderId, workOrders])
+
+  const applyOrderCostResponse = (orderJson: any, wo: WorkOrder | null) => {
+    const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
+      branch_no: String(branch.branch_no || ''),
+      part_key: String(branch.part_key || ''),
+      part_name: branch.part_name ?? null,
+      product_code: branch.product_code ?? null,
+      bom_quantity: Number(branch.bom_quantity || 1),
+      unit_cost: Number(branch.unit_cost || 0),
+      subtotal: Number(branch.subtotal || 0),
+      cost_items: Array.isArray(branch.cost_items)
+        ? branch.cost_items.map((item: any) => ({
+            id: String(item.id || ''),
+            product_code: item.product_code ?? '',
+            part_name: item.part_name ?? '',
+            spec: item.spec ?? '',
+            quantity: Number(item.quantity || 0),
+            unit_price: Number(item.unit_price || 0),
+            material_cost: Number(item.material_cost || 0),
+            labor_cost: Number(item.labor_cost || 0),
+            indirect_cost: Number(item.indirect_cost || 0),
+            line_total: Number(item.line_total || 0),
+            cost_type: item.cost_type || '加',
+          }))
+        : [],
+    }))
+    const modelName = wo?.bom_model || wo?.order_no || bomModelInput || '指令BOM'
+    setData({
+      model: modelName,
+      product_code: null,
+      current_cost_price: null,
+      grand_total: Number(orderJson.grand_total || 0),
+      sections,
+    })
+    setSavedCostHeader({
+      has_saved_cost: Boolean(orderJson.has_saved_cost),
+      cost_saved_at: orderJson.cost_saved_at ?? null,
+      material_total: Number(orderJson.material_total || 0),
+      labor_total: Number(orderJson.labor_total || 0),
+      indirect_total: Number(orderJson.indirect_total || 0),
+      grand_total: Number(orderJson.grand_total || 0),
+    })
+    setExpandedSections(new Set(sections.map((s) => s.part_key)))
+  }
 
   const loadSummaryList = async (filter: WorkOrderListFilter = workOrderListFilter) => {
     setSummaryLoading(true)
@@ -201,40 +256,7 @@ export default function WorkOrderBomCostPage() {
         setSelectedWorkOrder(wo)
         if (wo.bom_model) setBomModelInput(wo.bom_model)
       }
-      const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
-        branch_no: String(branch.branch_no || ''),
-        part_key: String(branch.part_key || ''),
-        part_name: branch.part_name ?? null,
-        product_code: branch.product_code ?? null,
-        bom_quantity: Number(branch.bom_quantity || 1),
-        unit_cost: Number(branch.unit_cost || 0),
-        subtotal: Number(branch.subtotal || 0),
-        cost_items: Array.isArray(branch.cost_items)
-          ? branch.cost_items.map((item: any) => ({
-              id: String(item.id || ''),
-              product_code: item.product_code ?? '',
-              part_name: item.part_name ?? '',
-              spec: item.spec ?? '',
-              quantity: Number(item.quantity || 0),
-              unit_price: Number(item.unit_price || 0),
-              material_cost: Number(item.material_cost || 0),
-              labor_cost: Number(item.labor_cost || 0),
-              indirect_cost: Number(item.indirect_cost || 0),
-              line_total: Number(item.line_total || 0),
-              cost_type: item.cost_type || '加',
-            }))
-          : [],
-      }))
-      const modelName = wo?.bom_model || wo?.order_no || bomModelInput || '指令BOM'
-      setData({
-        model: modelName,
-        product_code: null,
-        current_cost_price: null,
-        grand_total: Number(orderJson.grand_total || 0),
-        sections,
-      })
-      setOrderLaborCost(Number(orderJson.order_labor_cost || 0))
-      setExpandedSections(new Set(sections.map((s) => s.part_key)))
+      applyOrderCostResponse(orderJson, wo)
     } catch (e) {
       setError(e instanceof Error ? e.message : '取得に失敗しました')
     } finally {
@@ -277,6 +299,7 @@ export default function WorkOrderBomCostPage() {
     setLoading(true)
     setError(null)
     setData(null)
+    setSavedCostHeader(null)
     try {
       // 指令が選択されている場合は、指令マスタ（work_order_branches）ベースで集計する。
       // heater_bom はライン側用途として切り分ける。
@@ -301,41 +324,7 @@ export default function WorkOrderBomCostPage() {
           if (wo.bom_model) setBomModelInput(wo.bom_model)
         }
 
-        const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
-          branch_no: String(branch.branch_no || ''),
-          part_key: String(branch.part_key || ''),
-          part_name: branch.part_name ?? null,
-          product_code: branch.product_code ?? null,
-          bom_quantity: Number(branch.bom_quantity || 1),
-          unit_cost: Number(branch.unit_cost || 0),
-          subtotal: Number(branch.subtotal || 0),
-          cost_items: Array.isArray(branch.cost_items)
-            ? branch.cost_items.map((item: any) => ({
-                id: String(item.id || ''),
-                product_code: item.product_code ?? '',
-                part_name: item.part_name ?? '',
-                spec: item.spec ?? '',
-                quantity: Number(item.quantity || 0),
-                unit_price: Number(item.unit_price || 0),
-                material_cost: Number(item.material_cost || 0),
-                labor_cost: Number(item.labor_cost || 0),
-                indirect_cost: Number(item.indirect_cost || 0),
-                line_total: Number(item.line_total || 0),
-                cost_type: item.cost_type || '加',
-              }))
-            : [],
-        }))
-
-        const modelName = wo?.bom_model || wo?.order_no || bomModelInput || '指令BOM'
-        setData({
-          model: modelName,
-          product_code: null,
-          current_cost_price: null,
-          grand_total: Number(orderJson.grand_total || 0),
-          sections,
-        })
-        setOrderLaborCost(Number(orderJson.order_labor_cost || 0))
-        setExpandedSections(new Set(sections.map(s => s.part_key)))
+        applyOrderCostResponse(orderJson, wo)
         return
       }
 
@@ -437,30 +426,9 @@ export default function WorkOrderBomCostPage() {
   // =========================================================
   // サマリ計算（ヘッダ表示用）
   // =========================================================
-  const totalMaterial =
-    data?.sections.reduce(
-      (sum, section) =>
-        sum +
-        section.cost_items.reduce((itemSum, item) => itemSum + item.material_cost, 0) *
-          section.bom_quantity,
-      0
-    ) ?? 0
-  const totalLaborItems =
-    data?.sections.reduce(
-      (sum, section) =>
-        sum +
-        section.cost_items.reduce((itemSum, item) => itemSum + item.labor_cost, 0) * section.bom_quantity,
-      0
-    ) ?? 0
-  const totalLabor = totalLaborItems + orderLaborCost
-  const totalIndirect =
-    data?.sections.reduce(
-      (sum, section) =>
-        sum +
-        section.cost_items.reduce((itemSum, item) => itemSum + item.indirect_cost, 0) *
-          section.bom_quantity,
-      0
-    ) ?? 0
+  const totalMaterial = savedCostHeader?.material_total ?? 0
+  const totalLabor = savedCostHeader?.labor_total ?? 0
+  const totalIndirect = savedCostHeader?.indirect_total ?? 0
   const workOrderQty = selectedWorkOrder?.qty ?? 1
   const sortedWorkOrders = useMemo(
     () => [...workOrders].sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP', { numeric: true })),
@@ -476,7 +444,7 @@ export default function WorkOrderBomCostPage() {
   }, [sortedWorkOrders, workOrderListFilter])
 
   const sectionBreakdown = (section: Section) => {
-    const bomQty = section.bom_quantity || 1
+    const bomQty = branchCostItemMultiplier(section)
     const material = section.cost_items.reduce((sum, item) => sum + item.material_cost, 0) * bomQty
     const labor = section.cost_items.reduce((sum, item) => sum + item.labor_cost, 0) * bomQty
     const indirect = section.cost_items.reduce((sum, item) => sum + item.indirect_cost, 0) * bomQty
@@ -504,7 +472,7 @@ export default function WorkOrderBomCostPage() {
             指令原価BOM
           </h1>
           <p className="mt-2 text-sm text-slate-400">
-            指令の BOM を展開し、各パーツの原価明細を積み上げて原価を算出します
+            指令原価計算で保存した結果を表示します（1台分）。未保存の指令は指令原価計算画面で計算・保存してください。
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -653,7 +621,7 @@ export default function WorkOrderBomCostPage() {
             <div>
               <h2 className="text-lg font-semibold text-white">指令BOM 一覧</h2>
               <p className="text-xs text-slate-400 mt-1">
-                指令番号・指令名称ごとに材料費計・間接費計・工賃計・合計を表示します。行をクリックすると枝番別の明細を開きます。
+                指令原価計算の保存結果（材料費計・間接費計・工賃計・合計・1台分）を表示します。行をクリックすると枝番別の保存明細を開きます。
               </p>
             </div>
             <button
@@ -670,7 +638,7 @@ export default function WorkOrderBomCostPage() {
             <div className="text-center py-16 text-slate-400">一覧を読み込み中…</div>
           ) : summaryRows.length === 0 ? (
             <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-6 text-amber-300 text-center">
-              表示対象の指令がありません（BOM同期済みの指令を確認してください）
+              表示対象の指令がありません
             </div>
           ) : (
             <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
@@ -684,6 +652,7 @@ export default function WorkOrderBomCostPage() {
                       <th className="px-4 py-3 text-right font-bold text-violet-300">間接費計</th>
                       <th className="px-4 py-3 text-right font-bold text-emerald-300">工賃計</th>
                       <th className="px-4 py-3 text-right font-bold text-yellow-300">合計</th>
+                      <th className="px-4 py-3 text-center font-bold text-slate-300">状態</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/80">
@@ -712,7 +681,18 @@ export default function WorkOrderBomCostPage() {
                           ¥{row.labor_total.toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-yellow-300">
-                          ¥{row.grand_total.toLocaleString()}
+                          {row.has_saved_cost ? `¥${row.grand_total.toLocaleString()}` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {row.has_saved_cost ? (
+                            <span className="px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-300 text-xs font-semibold">
+                              保存済
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-400 text-xs font-semibold">
+                              未計算
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -721,7 +701,7 @@ export default function WorkOrderBomCostPage() {
                     <tfoot className="bg-slate-800/90 border-t-2 border-yellow-500/40">
                       <tr>
                         <td colSpan={2} className="px-4 py-3 font-bold text-yellow-300">
-                          合計（{summaryRows.length} 指令）
+                          合計（{summaryRows.length} 指令・保存済みのみ集計）
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-sky-300">
                           ¥{summaryTotals.material_total.toLocaleString()}
@@ -735,6 +715,7 @@ export default function WorkOrderBomCostPage() {
                         <td className="px-4 py-3 text-right font-extrabold text-xl text-yellow-300">
                           ¥{summaryTotals.grand_total.toLocaleString()}
                         </td>
+                        <td />
                       </tr>
                     </tfoot>
                   )}
@@ -777,16 +758,11 @@ export default function WorkOrderBomCostPage() {
               <p className="text-xs text-slate-400 mb-1">材料費 合計</p>
               <p className="text-xl font-bold text-sky-300">¥{totalMaterial.toLocaleString()}</p>
             </div>
-            <div className={`bg-slate-800/60 border rounded-2xl p-4 ${orderLaborCost > 0 ? 'border-emerald-500/50' : 'border-slate-600/50'}`}>
-              <p className="text-xs text-slate-400 mb-1">工賃 合計（指令全体）</p>
-              <p className={`text-xl font-bold ${orderLaborCost > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+            <div className={`bg-slate-800/60 border rounded-2xl p-4 ${totalLabor > 0 ? 'border-emerald-500/50' : 'border-slate-600/50'}`}>
+              <p className="text-xs text-slate-400 mb-1">工賃 合計</p>
+              <p className={`text-xl font-bold ${totalLabor > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
                 ¥{totalLabor.toLocaleString()}
               </p>
-              {selectedWorkOrderId && (
-                <p className="text-xs text-slate-400 mt-1">
-                  指令工賃: <span className={orderLaborCost > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>¥{orderLaborCost.toLocaleString()}</span>
-                </p>
-              )}
             </div>
             <div className="bg-slate-800/60 border border-slate-600/50 rounded-2xl p-4">
               <p className="text-xs text-slate-400 mb-1">間接費 合計</p>
@@ -805,6 +781,27 @@ export default function WorkOrderBomCostPage() {
               )}
             </div>
           </div>
+
+          {selectedWorkOrderId && savedCostHeader && !savedCostHeader.has_saved_cost && (
+            <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-5 text-amber-200">
+              <p className="font-bold mb-1">この指令は原価が未保存です</p>
+              <p className="text-sm text-amber-100/90">
+                指令原価計算画面で計算・保存すると、この画面に反映されます。
+              </p>
+              <Link
+                href={`/work-orders/cost?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`}
+                className="inline-block mt-3 px-4 py-2 rounded-lg bg-amber-700/60 hover:bg-amber-600/70 text-sm font-semibold text-white transition"
+              >
+                指令原価計算へ →
+              </Link>
+            </div>
+          )}
+
+          {selectedWorkOrderId && savedCostHeader?.has_saved_cost && savedCostHeader.cost_saved_at && (
+            <p className="text-xs text-slate-500 px-1">
+              保存日時: {new Date(savedCostHeader.cost_saved_at).toLocaleString('ja-JP')}
+            </p>
+          )}
 
           {/* 製作原価合計（製作数 × 1台原価） */}
           {selectedWorkOrderId && workOrderQty > 1 && data && (
@@ -829,11 +826,19 @@ export default function WorkOrderBomCostPage() {
           {/* BOM が空の場合 */}
           {data.sections.length === 0 && (
             <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-6 text-amber-300 text-center">
-              <p className="font-bold">{data.model} の BOM が登録されていません</p>
-              <p className="text-sm mt-1">
-                <Link href="/heater/bom" className="underline hover:text-amber-200">BOM 管理画面</Link>
-                から model={data.model} でパーツを登録してください。
-              </p>
+              {selectedWorkOrderId && savedCostHeader && !savedCostHeader.has_saved_cost ? (
+                <>
+                  <p className="font-bold">保存済みの原価明細がありません</p>
+                  <p className="text-sm mt-1">指令原価計算で保存してください。</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold">{data.model} の保存明細がありません</p>
+                  <p className="text-sm mt-1">
+                    枝番が未登録の場合は BOM 同期後、指令原価計算で保存してください。
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -916,7 +921,7 @@ export default function WorkOrderBomCostPage() {
                             {section.cost_items.length === 0 ? (
                               <tr>
                                 <td colSpan={10} className="px-10 py-3 text-slate-500 italic">
-                                  原価明細なし（パーツマスタの設定値を使用: ¥{section.unit_cost.toLocaleString()}）
+                                  保存済みの原価明細なし
                                 </td>
                               </tr>
                             ) : (

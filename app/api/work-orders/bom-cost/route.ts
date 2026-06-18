@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
-  aggregateWorkOrderBomCost,
+  aggregateWorkOrderSavedCost,
   listWorkOrderBomSummaries,
-  prefetchBomCostData,
 } from '@/lib/work-order-bom-cost-aggregate'
 
 export const runtime = 'nodejs'
@@ -53,9 +52,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: brErr.message }, { status: 500 })
     }
 
-    const branchesByWorkOrderId = new Map([[wo.id, branches || []]])
-    const prefetch = await prefetchBomCostData(supabase, [wo], branchesByWorkOrderId)
-    const result = aggregateWorkOrderBomCost(wo, branches || [], prefetch)
+    const result = await aggregateWorkOrderSavedCost(supabase, wo, branches || [])
 
     return NextResponse.json({
       work_order: wo,
@@ -64,6 +61,8 @@ export async function GET(req: Request) {
       labor_total: result.labor_total,
       indirect_total: result.indirect_total,
       branches: result.branches,
+      has_saved_cost: result.has_saved_cost,
+      cost_saved_at: result.cost_saved_at,
       order_labor_cost: 0,
     })
   } catch (err) {
