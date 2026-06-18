@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  buildDisplayItemsFromUnit,
+  buildLinePartCostUnitMap,
+  buildMasterCostUnitMap,
+  masterCostMapKey,
+  reconcileCostItemsWithBreakdown,
+  type PartCostUnit,
+} from '@/lib/line-part-cost-breakdown'
 
 export const runtime = 'nodejs'
 
@@ -86,6 +94,54 @@ export async function GET(req: Request) {
 
     // 全候補キーを重複排除して一括取得
     const allCandidateKeys = [...new Set(branchCandidateKeys.flat())]
+    const partKeysForLine = [
+      ...new Set(
+        (branches || [])
+          .map((b: any) => String(b.part_key || '').trim())
+          .filter((key: string) => key && !key.endsWith('-00'))
+      ),
+    ]
+
+    const masterSpecs = allCandidateKeys.flatMap((masterId) => [
+      { master_id: masterId, master_type: '指令原価' },
+      { master_id: masterId, master_type: 'ライン原価' },
+    ])
+    const [masterCostMap, linePartCostMap] = await Promise.all([
+      buildMasterCostUnitMap(supabase, masterSpecs),
+      buildLinePartCostUnitMap(supabase, partKeysForLine),
+    ])
+
+    const resolveUnitBreakdown = (
+      candidateKeys: string[],
+      partKey: string,
+      orderItems: Record<string, any[]>,
+      lineItems: Record<string, any[]>
+    ): { unit: PartCostUnit; usedKey: string; usedType: string } => {
+      for (const candidateKey of candidateKeys) {
+        if ((orderItems[candidateKey] || []).length > 0) {
+          const unit =
+            masterCostMap.get(masterCostMapKey(candidateKey, '指令原価')) ||
+            ({ material_unit: 0, labor_unit: 0, indirect_unit: 0, total_unit: 0 } as PartCostUnit)
+          return { unit, usedKey: candidateKey, usedType: '指令原価' }
+        }
+        if ((lineItems[candidateKey] || []).length > 0) {
+          const unit =
+            masterCostMap.get(masterCostMapKey(candidateKey, 'ライン原価')) ||
+            linePartCostMap.get(candidateKey) ||
+            ({ material_unit: 0, labor_unit: 0, indirect_unit: 0, total_unit: 0 } as PartCostUnit)
+          return { unit, usedKey: candidateKey, usedType: 'ライン原価' }
+        }
+      }
+      const lineUnit = partKey ? linePartCostMap.get(partKey) : undefined
+      if (lineUnit && lineUnit.total_unit > 0) {
+        return { unit: lineUnit, usedKey: partKey, usedType: 'ライン原価' }
+      }
+      return {
+        unit: { material_unit: 0, labor_unit: 0, indirect_unit: 0, total_unit: 0 },
+        usedKey: '',
+        usedType: '',
+      }
+    }
 
     // 3) 各枝番キーに紐づく原価明細を取得
     //    - まず 指令原価 を優先
@@ -179,9 +235,31 @@ export async function GET(req: Request) {
           break
         }
       }
-      const computedSubtotal = items.length > 0
-        ? Math.round(items.reduce((s: number, item: any) => s + item.line_total, 0) * Number(b.bom_quantity || 1))
-        : Number(b.subtotal || 0)
+
+      const { unit: unitBreakdown } = resolveUnitBreakdown(
+        branchCandidateKeys[i],
+        String(b.part_key || ''),
+        orderCostItemsMap,
+        lineCostItemsMap
+      )
+
+      if (items.length > 0) {
+        items = reconcileCostItemsWithBreakdown(
+          items,
+          unitBreakdown,
+          `${b.branch_no || b.id}-reconcile`
+        )
+      } else if (unitBreakdown.total_unit > 0) {
+        items = buildDisplayItemsFromUnit(unitBreakdown, `${b.branch_no || b.id}-unit`)
+      }
+
+      const unitCostFromBreakdown = unitBreakdown.total_unit > 0
+        ? unitBreakdown.total_unit
+        : items.length > 0
+          ? items.reduce((sum: number, item: any) => sum + item.line_total, 0)
+          : Number(b.unit_cost || 0)
+
+      const computedSubtotal = Math.round(unitCostFromBreakdown * Number(b.bom_quantity || 1))
       return {
         id: b.id,
         branch_no: b.branch_no,
@@ -189,13 +267,14 @@ export async function GET(req: Request) {
         part_name: b.part_name ?? null,
         product_code: b.product_code ?? null,
         bom_quantity: Number(b.bom_quantity || 1),
-        unit_cost: items.length > 0
-          ? Math.round(items.reduce((s: number, item: any) => s + item.line_total, 0))
-          : Number(b.unit_cost || 0),
+        unit_cost: unitCostFromBreakdown,
         subtotal: computedSubtotal,
         notes: b.notes ?? null,
         synced_at: b.synced_at ?? null,
         cost_items: items,
+        material_unit: unitBreakdown.material_unit,
+        labor_unit: unitBreakdown.labor_unit,
+        indirect_unit: unitBreakdown.indirect_unit,
       }
     })
 

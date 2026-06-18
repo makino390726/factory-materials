@@ -32,6 +32,7 @@ type CostItem = {
 }
 
 type Section = {
+  branch_no: string
   part_key: string
   part_name: string | null
   product_code: string | null
@@ -40,6 +41,9 @@ type Section = {
   subtotal: number
   cost_items: CostItem[]
 }
+
+type ViewMode = 'branch' | 'flat'
+type WorkOrderListFilter = 'all' | 'bom'
 
 type BreakdownData = {
   model: string
@@ -73,6 +77,8 @@ export default function WorkOrderBomCostPage() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
   const [syncing, setSyncing] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('branch')
+  const [workOrderListFilter, setWorkOrderListFilter] = useState<WorkOrderListFilter>('bom')
 
   // 指令一覧を取得
   useEffect(() => {
@@ -159,6 +165,7 @@ export default function WorkOrderBomCostPage() {
         }
 
         const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
+          branch_no: String(branch.branch_no || ''),
           part_key: String(branch.part_key || ''),
           part_name: branch.part_name ?? null,
           product_code: branch.product_code ?? null,
@@ -293,15 +300,98 @@ export default function WorkOrderBomCostPage() {
   // =========================================================
   // サマリ計算（ヘッダ表示用）
   // =========================================================
-  const totalMaterial = data?.sections.flatMap(s => s.cost_items).reduce((s, i) => s + i.material_cost, 0) ?? 0
-  const totalLaborItems = data?.sections.flatMap(s => s.cost_items).reduce((s, i) => s + i.labor_cost, 0) ?? 0
+  const totalMaterial =
+    data?.sections.reduce(
+      (sum, section) =>
+        sum +
+        section.cost_items.reduce((itemSum, item) => itemSum + item.material_cost, 0) *
+          section.bom_quantity,
+      0
+    ) ?? 0
+  const totalLaborItems =
+    data?.sections.reduce(
+      (sum, section) =>
+        sum +
+        section.cost_items.reduce((itemSum, item) => itemSum + item.labor_cost, 0) * section.bom_quantity,
+      0
+    ) ?? 0
   const totalLabor = totalLaborItems + orderLaborCost
-  const totalIndirect = data?.sections.flatMap(s => s.cost_items).reduce((s, i) => s + i.indirect_cost, 0) ?? 0
+  const totalIndirect =
+    data?.sections.reduce(
+      (sum, section) =>
+        sum +
+        section.cost_items.reduce((itemSum, item) => itemSum + item.indirect_cost, 0) *
+          section.bom_quantity,
+      0
+    ) ?? 0
   const workOrderQty = selectedWorkOrder?.qty ?? 1
   const sortedWorkOrders = useMemo(
     () => [...workOrders].sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP', { numeric: true })),
     [workOrders]
   )
+  const filteredWorkOrders = useMemo(() => {
+    if (workOrderListFilter === 'bom') {
+      return sortedWorkOrders.filter(
+        (wo) => wo.cost_mode === 'bom' || Boolean(wo.bom_model?.trim())
+      )
+    }
+    return sortedWorkOrders
+  }, [sortedWorkOrders, workOrderListFilter])
+
+  const flatCostRows = useMemo(() => {
+    if (!data) return []
+    const orderNo = selectedWorkOrder?.order_no || data.model
+    return data.sections.flatMap((section) => {
+      const branchLabel = section.branch_no
+        ? `${orderNo}-${section.branch_no}`
+        : section.part_key
+      if (section.cost_items.length === 0) {
+        return [{
+          key: `${section.part_key}-empty`,
+          branchLabel,
+          branchNo: section.branch_no,
+          partKey: section.part_key,
+          partName: section.part_name || '（名称未設定）',
+          productCode: section.product_code || '',
+          spec: '',
+          quantity: section.bom_quantity,
+          unitPrice: section.unit_cost,
+          materialCost: 0,
+          laborCost: 0,
+          indirectCost: 0,
+          lineTotal: section.subtotal,
+          costType: '加',
+          isSectionSummary: true,
+        }]
+      }
+      return section.cost_items.map((item, idx) => ({
+        key: `${section.part_key}-${item.id || idx}`,
+        branchLabel,
+        branchNo: section.branch_no,
+        partKey: section.part_key,
+        partName: item.part_name,
+        productCode: item.product_code,
+        spec: item.spec,
+        quantity: item.quantity,
+        bomQuantity: section.bom_quantity,
+        unitPrice: item.unit_price,
+        materialCost: Math.round(item.material_cost * section.bom_quantity),
+        laborCost: Math.round(item.labor_cost * section.bom_quantity),
+        indirectCost: Math.round(item.indirect_cost * section.bom_quantity),
+        lineTotal: Math.round(item.line_total * section.bom_quantity),
+        costType: item.cost_type,
+        isSectionSummary: false,
+      }))
+    })
+  }, [data, selectedWorkOrder])
+
+  const sectionBreakdown = (section: Section) => {
+    const bomQty = section.bom_quantity || 1
+    const material = section.cost_items.reduce((sum, item) => sum + item.material_cost, 0) * bomQty
+    const labor = section.cost_items.reduce((sum, item) => sum + item.labor_cost, 0) * bomQty
+    const indirect = section.cost_items.reduce((sum, item) => sum + item.indirect_cost, 0) * bomQty
+    return { material: Math.round(material), labor: Math.round(labor), indirect: Math.round(indirect) }
+  }
 
   const canSave = Boolean(data && (data.product_code || selectedWorkOrderId) && data.sections.length > 0)
 
@@ -346,6 +436,29 @@ export default function WorkOrderBomCostPage() {
         <p className="text-sm font-semibold text-slate-300 mb-3">
           ① 指令を選択（または BOM モデルを直接入力）
         </p>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="text-xs text-slate-400">指令リスト:</span>
+          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="radio"
+              name="workOrderListFilter"
+              checked={workOrderListFilter === 'bom'}
+              onChange={() => setWorkOrderListFilter('bom')}
+              className="accent-violet-500"
+            />
+            BOM出力指令のみ
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="radio"
+              name="workOrderListFilter"
+              checked={workOrderListFilter === 'all'}
+              onChange={() => setWorkOrderListFilter('all')}
+              className="accent-violet-500"
+            />
+            全指令
+          </label>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-3 items-end">
           <div>
             <label className="block text-xs text-slate-400 mb-1">指令</label>
@@ -355,7 +468,7 @@ export default function WorkOrderBomCostPage() {
               className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
             >
               <option value="">─ 指令を選択 ─</option>
-              {sortedWorkOrders.map(wo => (
+              {filteredWorkOrders.map(wo => (
                 <option key={wo.id} value={wo.id}>
                   {wo.order_no}
                   {wo.product_name ? ` │ ${wo.product_name}` : ''}
@@ -439,12 +552,39 @@ export default function WorkOrderBomCostPage() {
         <div className="max-w-screen-xl mx-auto space-y-6">
 
           {/* 集計対象ラベル */}
-          <div className="flex items-center gap-3 px-1">
-            <span className="text-slate-400 text-sm">集計対象:</span>
-            <span className="text-lg font-bold text-violet-300">{data.model}</span>
-            {selectedWorkOrder && (
-              <span className="text-sm text-slate-400">（指令: {selectedWorkOrder.order_no}）</span>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-3">
+              <span className="text-slate-400 text-sm">集計対象:</span>
+              <span className="text-lg font-bold text-violet-300">{data.model}</span>
+              {selectedWorkOrder && (
+                <span className="text-sm text-slate-400">（指令: {selectedWorkOrder.order_no}）</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 print:hidden">
+              <span className="text-xs text-slate-400">表示:</span>
+              <button
+                type="button"
+                onClick={() => setViewMode('branch')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  viewMode === 'branch'
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-slate-800 text-slate-300 border border-slate-600 hover:border-slate-400'
+                }`}
+              >
+                枝番別
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('flat')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  viewMode === 'flat'
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-slate-800 text-slate-300 border border-slate-600 hover:border-slate-400'
+                }`}
+              >
+                全明細リスト
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-slate-800/60 border border-slate-600/50 rounded-2xl p-4">
@@ -512,7 +652,72 @@ export default function WorkOrderBomCostPage() {
           )}
 
           {/* セクション別明細テーブル */}
-          {data.sections.length > 0 && (
+          {data.sections.length > 0 && viewMode === 'flat' && (
+            <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/80">
+                <h3 className="text-sm font-semibold text-slate-200">指令BOM 全明細リスト</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  枝番をまたいだ原価明細を1行ずつ表示します（BOM数量を反映した金額）
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-slate-900/90 border-b border-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-bold text-slate-300">枝番</th>
+                      <th className="px-3 py-2 text-left font-bold text-slate-300">品番</th>
+                      <th className="px-3 py-2 text-left font-bold text-slate-300">部品名 / 規格</th>
+                      <th className="px-2 py-2 text-right font-bold text-slate-300">数量</th>
+                      <th className="px-2 py-2 text-right font-bold text-slate-300">材料費</th>
+                      <th className="px-2 py-2 text-right font-bold text-slate-300">工賃</th>
+                      <th className="px-2 py-2 text-center font-bold text-slate-300">区分</th>
+                      <th className="px-2 py-2 text-right font-bold text-slate-300">間接費</th>
+                      <th className="px-2 py-2 text-right font-bold text-slate-300 bg-slate-700">行合計</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/80">
+                    {flatCostRows.map((row, idx) => (
+                      <tr
+                        key={row.key}
+                        className={idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20'}
+                      >
+                        <td className="px-3 py-2 text-cyan-300 font-mono whitespace-nowrap">{row.branchLabel}</td>
+                        <td className="px-3 py-2 text-slate-400 font-mono">{row.productCode || '—'}</td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {row.partName}
+                          {row.spec && <span className="ml-2 text-slate-500">{row.spec}</span>}
+                        </td>
+                        <td className="px-2 py-2 text-right text-slate-300">
+                          {row.isSectionSummary
+                            ? `× ${row.quantity}`
+                            : row.quantity.toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2 text-right text-sky-300/80">
+                          {row.materialCost > 0 ? `¥${row.materialCost.toLocaleString()}` : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-right text-emerald-300/80">
+                          {row.laborCost > 0 ? `¥${row.laborCost.toLocaleString()}` : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-800/60 text-amber-300">
+                            {row.costType}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-right text-violet-300/80">
+                          {row.indirectCost > 0 ? `¥${row.indirectCost.toLocaleString()}` : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-right font-semibold text-cyan-200 bg-slate-800/60">
+                          ¥{row.lineTotal.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {data.sections.length > 0 && viewMode === 'branch' && (
             <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
               {/* テーブルヘッダ */}
               <div className="sticky top-0 z-10 bg-slate-800 border-b-2 border-slate-700">
@@ -538,6 +743,7 @@ export default function WorkOrderBomCostPage() {
               <div className="divide-y divide-slate-700/50">
                 {data.sections.map((section) => {
                   const isExpanded = expandedSections.has(section.part_key)
+                  const breakdown = sectionBreakdown(section)
                   return (
                     <div key={section.part_key}>
                       {/* ─── セクションヘッダ行（パーツ名 + BOM 数量） ─── */}
@@ -564,10 +770,16 @@ export default function WorkOrderBomCostPage() {
                               <td className="w-[110px] px-2 py-3 text-right text-slate-300">
                                 ¥{section.unit_cost.toLocaleString()}
                               </td>
-                              <td className="w-[110px] px-2 py-3 text-right text-slate-400">—</td>
-                              <td className="w-[110px] px-2 py-3 text-right text-slate-400">—</td>
+                              <td className="w-[110px] px-2 py-3 text-right text-sky-300/90">
+                                {breakdown.material > 0 ? `¥${breakdown.material.toLocaleString()}` : '—'}
+                              </td>
+                              <td className="w-[110px] px-2 py-3 text-right text-emerald-300/90">
+                                {breakdown.labor > 0 ? `¥${breakdown.labor.toLocaleString()}` : '—'}
+                              </td>
                               <td className="w-[90px] px-2 py-3 text-center text-slate-400">—</td>
-                              <td className="w-[110px] px-2 py-3 text-right text-slate-400">—</td>
+                              <td className="w-[110px] px-2 py-3 text-right text-violet-300/90">
+                                {breakdown.indirect > 0 ? `¥${breakdown.indirect.toLocaleString()}` : '—'}
+                              </td>
                               <td className="w-[130px] px-2 py-3 text-right font-bold text-yellow-300 bg-yellow-900/20">
                                 ¥{section.subtotal.toLocaleString()}
                               </td>

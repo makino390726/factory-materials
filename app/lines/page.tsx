@@ -376,13 +376,13 @@ export default function LinesPage() {
       is_active: line.is_active ?? true,
     })
     // 割り当てを読み込む
-    const assignments = (line.part_assignments || []).map((a: any) => ({
+    const assignments: PartAssignment[] = (line.part_assignments || []).map((a: any) => ({
       part_key: a.part_key,
       ratio: a.ratio,
       common_group_label: a.common_group_label || '',
       allocation_models: Array.isArray(a.allocation_models) ? a.allocation_models : null,
       bom_model_count: a.bom_model_count ?? null,
-      common_group_source: a.common_group_source === 'manual' ? 'manual' : 'bom_auto',
+      common_group_source: (a.common_group_source === 'manual' ? 'manual' : 'bom_auto') as PartAssignment['common_group_source'],
       settings_confirmed: Boolean(a.settings_confirmed),
     }))
     setCurrentAssignments(assignments)
