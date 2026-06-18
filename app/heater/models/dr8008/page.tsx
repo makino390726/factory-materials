@@ -42,8 +42,26 @@ type Section = {
   cost_items: CostItem[]
 }
 
-type ViewMode = 'branch' | 'flat'
+type ViewMode = 'branch' | 'list'
 type WorkOrderListFilter = 'all' | 'bom'
+
+type OrderSummaryRow = {
+  work_order_id: string
+  order_no: string
+  product_name: string | null
+  material_total: number
+  indirect_total: number
+  labor_total: number
+  grand_total: number
+  branch_count: number
+}
+
+type OrderSummaryTotals = {
+  material_total: number
+  indirect_total: number
+  labor_total: number
+  grand_total: number
+}
 
 type BreakdownData = {
   model: string
@@ -79,6 +97,9 @@ export default function WorkOrderBomCostPage() {
   const [syncing, setSyncing] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('branch')
   const [workOrderListFilter, setWorkOrderListFilter] = useState<WorkOrderListFilter>('bom')
+  const [summaryRows, setSummaryRows] = useState<OrderSummaryRow[]>([])
+  const [summaryTotals, setSummaryTotals] = useState<OrderSummaryTotals | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
 
   // 指令一覧を取得
   useEffect(() => {
@@ -104,6 +125,122 @@ export default function WorkOrderBomCostPage() {
     setSelectedWorkOrder(wo)
     if (wo?.bom_model) setBomModelInput(wo.bom_model)
   }, [selectedWorkOrderId, workOrders])
+
+  const loadSummaryList = async (filter: WorkOrderListFilter = workOrderListFilter) => {
+    setSummaryLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(
+        `/api/work-orders/bom-cost?list=1&filter=${encodeURIComponent(filter)}`
+      )
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || `HTTP ${res.status}`)
+      }
+      setSummaryRows(Array.isArray(json.rows) ? json.rows : [])
+      setSummaryTotals(json.totals ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '一覧の取得に失敗しました')
+      setSummaryRows([])
+      setSummaryTotals(null)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (viewMode !== 'list') return
+    let cancelled = false
+    const run = async () => {
+      setSummaryLoading(true)
+      setError(null)
+      try {
+        const res = await fetch(
+          `/api/work-orders/bom-cost?list=1&filter=${encodeURIComponent(workOrderListFilter)}`
+        )
+        const json = await res.json()
+        if (!res.ok || json.error) {
+          throw new Error(json.error || `HTTP ${res.status}`)
+        }
+        if (!cancelled) {
+          setSummaryRows(Array.isArray(json.rows) ? json.rows : [])
+          setSummaryTotals(json.totals ?? null)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : '一覧の取得に失敗しました')
+          setSummaryRows([])
+          setSummaryTotals(null)
+        }
+      } finally {
+        if (!cancelled) setSummaryLoading(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [viewMode, workOrderListFilter])
+
+  const handleSelectSummaryRow = async (row: OrderSummaryRow) => {
+    setSelectedWorkOrderId(row.work_order_id)
+    setViewMode('branch')
+    setLoading(true)
+    setError(null)
+    try {
+      const orderRes = await fetch(
+        `/api/work-orders/bom-cost?work_order_id=${encodeURIComponent(row.work_order_id)}`
+      )
+      if (!orderRes.ok) {
+        const body = await orderRes.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${orderRes.status}`)
+      }
+      const orderJson = await orderRes.json()
+      const wo = orderJson.work_order as WorkOrder | null
+      if (wo) {
+        setSelectedWorkOrder(wo)
+        if (wo.bom_model) setBomModelInput(wo.bom_model)
+      }
+      const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
+        branch_no: String(branch.branch_no || ''),
+        part_key: String(branch.part_key || ''),
+        part_name: branch.part_name ?? null,
+        product_code: branch.product_code ?? null,
+        bom_quantity: Number(branch.bom_quantity || 1),
+        unit_cost: Number(branch.unit_cost || 0),
+        subtotal: Number(branch.subtotal || 0),
+        cost_items: Array.isArray(branch.cost_items)
+          ? branch.cost_items.map((item: any) => ({
+              id: String(item.id || ''),
+              product_code: item.product_code ?? '',
+              part_name: item.part_name ?? '',
+              spec: item.spec ?? '',
+              quantity: Number(item.quantity || 0),
+              unit_price: Number(item.unit_price || 0),
+              material_cost: Number(item.material_cost || 0),
+              labor_cost: Number(item.labor_cost || 0),
+              indirect_cost: Number(item.indirect_cost || 0),
+              line_total: Number(item.line_total || 0),
+              cost_type: item.cost_type || '加',
+            }))
+          : [],
+      }))
+      const modelName = wo?.bom_model || wo?.order_no || bomModelInput || '指令BOM'
+      setData({
+        model: modelName,
+        product_code: null,
+        current_cost_price: null,
+        grand_total: Number(orderJson.grand_total || 0),
+        sections,
+      })
+      setOrderLaborCost(Number(orderJson.order_labor_cost || 0))
+      setExpandedSections(new Set(sections.map((s) => s.part_key)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '取得に失敗しました')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleSync = async () => {
     if (!selectedWorkOrderId || !bomModelInput.trim()) {
@@ -338,53 +475,6 @@ export default function WorkOrderBomCostPage() {
     return sortedWorkOrders
   }, [sortedWorkOrders, workOrderListFilter])
 
-  const flatCostRows = useMemo(() => {
-    if (!data) return []
-    const orderNo = selectedWorkOrder?.order_no || data.model
-    return data.sections.flatMap((section) => {
-      const branchLabel = section.branch_no
-        ? `${orderNo}-${section.branch_no}`
-        : section.part_key
-      if (section.cost_items.length === 0) {
-        return [{
-          key: `${section.part_key}-empty`,
-          branchLabel,
-          branchNo: section.branch_no,
-          partKey: section.part_key,
-          partName: section.part_name || '（名称未設定）',
-          productCode: section.product_code || '',
-          spec: '',
-          quantity: section.bom_quantity,
-          unitPrice: section.unit_cost,
-          materialCost: 0,
-          laborCost: 0,
-          indirectCost: 0,
-          lineTotal: section.subtotal,
-          costType: '加',
-          isSectionSummary: true,
-        }]
-      }
-      return section.cost_items.map((item, idx) => ({
-        key: `${section.part_key}-${item.id || idx}`,
-        branchLabel,
-        branchNo: section.branch_no,
-        partKey: section.part_key,
-        partName: item.part_name,
-        productCode: item.product_code,
-        spec: item.spec,
-        quantity: item.quantity,
-        bomQuantity: section.bom_quantity,
-        unitPrice: item.unit_price,
-        materialCost: Math.round(item.material_cost * section.bom_quantity),
-        laborCost: Math.round(item.labor_cost * section.bom_quantity),
-        indirectCost: Math.round(item.indirect_cost * section.bom_quantity),
-        lineTotal: Math.round(item.line_total * section.bom_quantity),
-        costType: item.cost_type,
-        isSectionSummary: false,
-      }))
-    })
-  }, [data, selectedWorkOrder])
-
   const sectionBreakdown = (section: Section) => {
     const bomQty = section.bom_quantity || 1
     const material = section.cost_items.reduce((sum, item) => sum + item.material_cost, 0) * bomQty
@@ -458,6 +548,30 @@ export default function WorkOrderBomCostPage() {
             />
             全指令
           </label>
+          <span className="text-slate-600">|</span>
+          <span className="text-xs text-slate-400">表示:</span>
+          <button
+            type="button"
+            onClick={() => setViewMode('branch')}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+              viewMode === 'branch'
+                ? 'bg-violet-600 text-white'
+                : 'bg-slate-900 text-slate-300 border border-slate-600 hover:border-slate-400'
+            }`}
+          >
+            枝番別
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+              viewMode === 'list'
+                ? 'bg-violet-600 text-white'
+                : 'bg-slate-900 text-slate-300 border border-slate-600 hover:border-slate-400'
+            }`}
+          >
+            一覧表示
+          </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-3 items-end">
           <div>
@@ -532,8 +646,107 @@ export default function WorkOrderBomCostPage() {
         )}
       </div>
 
+      {/* 一覧表示（指令単位サマリ） */}
+      {viewMode === 'list' && (
+        <div className="max-w-screen-xl mx-auto mb-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">指令BOM 一覧</h2>
+              <p className="text-xs text-slate-400 mt-1">
+                指令番号・指令名称ごとに材料費計・間接費計・工賃計・合計を表示します。行をクリックすると枝番別の明細を開きます。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadSummaryList()}
+              disabled={summaryLoading}
+              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-semibold transition"
+            >
+              {summaryLoading ? '読込中…' : '一覧を更新'}
+            </button>
+          </div>
+
+          {summaryLoading && summaryRows.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">一覧を読み込み中…</div>
+          ) : summaryRows.length === 0 ? (
+            <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-6 text-amber-300 text-center">
+              表示対象の指令がありません（BOM同期済みの指令を確認してください）
+            </div>
+          ) : (
+            <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-800 border-b border-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">指令番号</th>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">指令名称</th>
+                      <th className="px-4 py-3 text-right font-bold text-sky-300">材料費計</th>
+                      <th className="px-4 py-3 text-right font-bold text-violet-300">間接費計</th>
+                      <th className="px-4 py-3 text-right font-bold text-emerald-300">工賃計</th>
+                      <th className="px-4 py-3 text-right font-bold text-yellow-300">合計</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/80">
+                    {summaryRows.map((row, idx) => (
+                      <tr
+                        key={row.work_order_id}
+                        onClick={() => handleSelectSummaryRow(row)}
+                        className={`cursor-pointer transition hover:bg-violet-900/30 ${
+                          idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20'
+                        } ${selectedWorkOrderId === row.work_order_id ? 'ring-1 ring-inset ring-violet-400/60' : ''}`}
+                        title="クリックで枝番別明細を表示"
+                      >
+                        <td className="px-4 py-3 font-mono font-semibold text-cyan-300 whitespace-nowrap">
+                          {row.order_no}
+                        </td>
+                        <td className="px-4 py-3 text-slate-200">
+                          {row.product_name || '（名称未設定）'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sky-300">
+                          ¥{row.material_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-violet-300">
+                          ¥{row.indirect_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-emerald-300">
+                          ¥{row.labor_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-yellow-300">
+                          ¥{row.grand_total.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {summaryTotals && (
+                    <tfoot className="bg-slate-800/90 border-t-2 border-yellow-500/40">
+                      <tr>
+                        <td colSpan={2} className="px-4 py-3 font-bold text-yellow-300">
+                          合計（{summaryRows.length} 指令）
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-sky-300">
+                          ¥{summaryTotals.material_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-violet-300">
+                          ¥{summaryTotals.indirect_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-300">
+                          ¥{summaryTotals.labor_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right font-extrabold text-xl text-yellow-300">
+                          ¥{summaryTotals.grand_total.toLocaleString()}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ローディング / エラー */}
-      {loading && (
+      {viewMode === 'branch' && loading && (
         <div className="max-w-screen-xl mx-auto text-center py-16 text-slate-400">
           データを読み込み中…
         </div>
@@ -548,43 +761,16 @@ export default function WorkOrderBomCostPage() {
         </div>
       )}
 
-      {data && !loading && (
+      {viewMode === 'branch' && data && !loading && (
         <div className="max-w-screen-xl mx-auto space-y-6">
 
           {/* 集計対象ラベル */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-            <div className="flex items-center gap-3">
-              <span className="text-slate-400 text-sm">集計対象:</span>
-              <span className="text-lg font-bold text-violet-300">{data.model}</span>
-              {selectedWorkOrder && (
-                <span className="text-sm text-slate-400">（指令: {selectedWorkOrder.order_no}）</span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 print:hidden">
-              <span className="text-xs text-slate-400">表示:</span>
-              <button
-                type="button"
-                onClick={() => setViewMode('branch')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  viewMode === 'branch'
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-slate-800 text-slate-300 border border-slate-600 hover:border-slate-400'
-                }`}
-              >
-                枝番別
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('flat')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  viewMode === 'flat'
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-slate-800 text-slate-300 border border-slate-600 hover:border-slate-400'
-                }`}
-              >
-                全明細リスト
-              </button>
-            </div>
+          <div className="flex flex-wrap items-center gap-3 px-1">
+            <span className="text-slate-400 text-sm">集計対象:</span>
+            <span className="text-lg font-bold text-violet-300">{data.model}</span>
+            {selectedWorkOrder && (
+              <span className="text-sm text-slate-400">（指令: {selectedWorkOrder.order_no}）</span>
+            )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-slate-800/60 border border-slate-600/50 rounded-2xl p-4">
@@ -652,72 +838,7 @@ export default function WorkOrderBomCostPage() {
           )}
 
           {/* セクション別明細テーブル */}
-          {data.sections.length > 0 && viewMode === 'flat' && (
-            <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/80">
-                <h3 className="text-sm font-semibold text-slate-200">指令BOM 全明細リスト</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  枝番をまたいだ原価明細を1行ずつ表示します（BOM数量を反映した金額）
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-900/90 border-b border-slate-600">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-bold text-slate-300">枝番</th>
-                      <th className="px-3 py-2 text-left font-bold text-slate-300">品番</th>
-                      <th className="px-3 py-2 text-left font-bold text-slate-300">部品名 / 規格</th>
-                      <th className="px-2 py-2 text-right font-bold text-slate-300">数量</th>
-                      <th className="px-2 py-2 text-right font-bold text-slate-300">材料費</th>
-                      <th className="px-2 py-2 text-right font-bold text-slate-300">工賃</th>
-                      <th className="px-2 py-2 text-center font-bold text-slate-300">区分</th>
-                      <th className="px-2 py-2 text-right font-bold text-slate-300">間接費</th>
-                      <th className="px-2 py-2 text-right font-bold text-slate-300 bg-slate-700">行合計</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/80">
-                    {flatCostRows.map((row, idx) => (
-                      <tr
-                        key={row.key}
-                        className={idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20'}
-                      >
-                        <td className="px-3 py-2 text-cyan-300 font-mono whitespace-nowrap">{row.branchLabel}</td>
-                        <td className="px-3 py-2 text-slate-400 font-mono">{row.productCode || '—'}</td>
-                        <td className="px-3 py-2 text-slate-300">
-                          {row.partName}
-                          {row.spec && <span className="ml-2 text-slate-500">{row.spec}</span>}
-                        </td>
-                        <td className="px-2 py-2 text-right text-slate-300">
-                          {row.isSectionSummary
-                            ? `× ${row.quantity}`
-                            : row.quantity.toLocaleString()}
-                        </td>
-                        <td className="px-2 py-2 text-right text-sky-300/80">
-                          {row.materialCost > 0 ? `¥${row.materialCost.toLocaleString()}` : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-right text-emerald-300/80">
-                          {row.laborCost > 0 ? `¥${row.laborCost.toLocaleString()}` : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-800/60 text-amber-300">
-                            {row.costType}
-                          </span>
-                        </td>
-                        <td className="px-2 py-2 text-right text-violet-300/80">
-                          {row.indirectCost > 0 ? `¥${row.indirectCost.toLocaleString()}` : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-right font-semibold text-cyan-200 bg-slate-800/60">
-                          ¥{row.lineTotal.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {data.sections.length > 0 && viewMode === 'branch' && (
+          {data.sections.length > 0 && (
             <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
               {/* テーブルヘッダ */}
               <div className="sticky top-0 z-10 bg-slate-800 border-b-2 border-slate-700">
