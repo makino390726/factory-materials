@@ -1,6 +1,15 @@
-export function isDirectOrIndirectWorkType(workType: unknown): boolean {
+export function isDirectWorkType(workType: unknown): boolean {
   const t = typeof workType === 'string' ? workType.trim() : ''
-  return t === '直接' || t === '間接'
+  return t === '直接'
+}
+
+export function isIndirectWorkType(workType: unknown): boolean {
+  const t = typeof workType === 'string' ? workType.trim() : ''
+  return t === '間接'
+}
+
+export function isDirectOrIndirectWorkType(workType: unknown): boolean {
+  return isDirectWorkType(workType) || isIndirectWorkType(workType)
 }
 
 export function hasInstructionOrLine(item: {
@@ -32,7 +41,8 @@ export function validateWorkReportItem(item: {
   if (!isDirectOrIndirectWorkType(item.work_type)) {
     return WORK_TYPE_VALIDATION_MESSAGE
   }
-  if (!hasInstructionOrLine(item)) {
+  // 直接費（直接）の場合のみ D指令・L指令のいずれかが必須。間接は未入力可。
+  if (isDirectWorkType(item.work_type) && !hasInstructionOrLine(item)) {
     return WORK_TARGET_VALIDATION_MESSAGE
   }
   return null
