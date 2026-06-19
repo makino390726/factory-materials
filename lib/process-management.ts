@@ -728,7 +728,7 @@ export async function analyzeProcessManagement(
   if (targetType === 'line') {
     const line = await resolveLineId(supabase, normalizedCode)
     if (!line) {
-      throw new Error(`ライン ${normalizedCode} が見つかりません`)
+      throw new Error(`L指令 ${normalizedCode} が見つかりません`)
     }
     targetName = line.name
     lineId = line.id
@@ -1096,7 +1096,7 @@ async function resolveTargetContext(
 
   if (targetType === 'line') {
     const line = await resolveLineId(supabase, normalizedCode)
-    if (!line) throw new Error(`ライン ${normalizedCode} が見つかりません`)
+    if (!line) throw new Error(`L指令 ${normalizedCode} が見つかりません`)
     return { targetName: line.name, lineId: line.id as string }
   }
 
@@ -1337,7 +1337,7 @@ export async function resolveProductionLotPeriodStart(
     offset += pageSize
   }
 
-  throw new Error('完成日以前に該当する作業日報がありません。作業日報のライン／D指令を確認してください。')
+  throw new Error('完成日以前に該当する作業日報がありません。作業日報のL指令／D指令を確認してください。')
 }
 
 export async function createProductionLot(
@@ -1432,7 +1432,7 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
       target_type: 'line',
       target_code: line.line_code,
       name: line.name,
-      subtitle: `ライン ${line.line_code}`,
+      subtitle: `L指令 ${line.line_code}`,
     })
   }
 

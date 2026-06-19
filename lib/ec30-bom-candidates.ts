@@ -137,7 +137,7 @@ export function buildCandidatePools(
         {
           kind: 'line',
           ref: l.line_code,
-          label: `[ライン] ${l.name} (${l.line_code})`,
+          label: `[L指令] ${l.name} (${l.line_code})`,
           tier: 'exact',
         },
         perSource * 4
@@ -149,7 +149,7 @@ export function buildCandidatePools(
         {
           kind: 'line',
           ref: l.line_code,
-          label: `[ライン] ${l.name} (${l.line_code})`,
+          label: `[L指令] ${l.name} (${l.line_code})`,
           tier: 'partial',
         },
         perSource * 4
@@ -162,7 +162,7 @@ export function buildCandidatePools(
     const ono = normalizeJp(w.order_no)
     const md = w.model ? normalizeJp(w.model) : ''
     const ref = workOrderRef(w)
-    const lab = `[指令] ${w.order_no} ${w.product_name || ''}${w.model ? ` / ${w.model}` : ''}`
+    const lab = `[D指令] ${w.order_no} ${w.product_name || ''}${w.model ? ` / ${w.model}` : ''}`
     if (pn === nt || ono === nt || (md && md === nt)) {
       pushDedupe(exact, seenE, { kind: 'work_order', ref, label: lab, tier: 'exact' }, perSource * 4)
     } else if (

@@ -18,13 +18,31 @@ export function hasInstructionOrLine(item: {
   return Boolean(instruction) || Boolean(lineId)
 }
 
+export const WORK_TYPE_VALIDATION_MESSAGE =
+  '作業区分（直接・間接）を選択してください'
+
+export const WORK_TARGET_VALIDATION_MESSAGE =
+  'D指令・L指令のいずれかを選択してください'
+
+export function validateWorkReportItem(item: {
+  instruction_text?: unknown
+  line_id?: unknown
+  work_type?: unknown
+}): string | null {
+  if (!isDirectOrIndirectWorkType(item.work_type)) {
+    return WORK_TYPE_VALIDATION_MESSAGE
+  }
+  if (!hasInstructionOrLine(item)) {
+    return WORK_TARGET_VALIDATION_MESSAGE
+  }
+  return null
+}
+
+/** @deprecated validateWorkReportItem を使用 */
 export function hasWorkTarget(item: {
   instruction_text?: unknown
   line_id?: unknown
   work_type?: unknown
 }): boolean {
-  return hasInstructionOrLine(item) || isDirectOrIndirectWorkType(item.work_type)
+  return validateWorkReportItem(item) === null
 }
-
-export const WORK_TARGET_VALIDATION_MESSAGE =
-  'D指令・L指令のいずれか、または作業区分（直接・間接）を入力してください'

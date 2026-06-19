@@ -3,10 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import PushNotificationManager from '@/app/components/PushNotificationManager'
-import {
-  hasWorkTarget,
-  WORK_TARGET_VALIDATION_MESSAGE,
-} from '@/lib/work-report-item-validation'
+import { validateWorkReportItem } from '@/lib/work-report-item-validation'
 import {
   computeItemDurationMinutes,
   computeWorkMinutes,
@@ -505,6 +502,18 @@ export default function WorkReportsPage() {
     }
   }, [staff?.id, workDate])
 
+  const getWorkItemValidationError = (isDraft: boolean): string | null => {
+    for (const item of items) {
+      if (isDraft && (!item.start_time || !item.end_time)) continue
+      if (!isDraft && (!item.start_time || !item.end_time)) {
+        return '開始/終了時間は必須です'
+      }
+      const itemError = validateWorkReportItem(item)
+      if (itemError) return itemError
+    }
+    return null
+  }
+
   const saveReport = async (
     isDraft: boolean,
     confirmations?: Array<{
@@ -520,6 +529,12 @@ export default function WorkReportsPage() {
 
     setIsSaving(true)
     try {
+      const validationError = getWorkItemValidationError(isDraft)
+      if (validationError) {
+        setError(validationError)
+        return
+      }
+
       const payload: Record<string, unknown> = {
         staff_id: staff.id,
         work_date: workDate,
@@ -591,25 +606,9 @@ export default function WorkReportsPage() {
       return
     }
 
-    if (!isDraft) {
-      const invalidItem = items.find(
-        (item) => !item.start_time || !item.end_time || !item.work_type
-      )
-      if (invalidItem) {
-        setError('作業区分・開始/終了時間は必須です')
-        return
-      }
-    }
-
-    const targetInvalidItem = items.find((item) => {
-      if (!isDraft) {
-        return !hasWorkTarget(item)
-      }
-      if (!item.start_time || !item.end_time) return false
-      return !hasWorkTarget(item)
-    })
-    if (targetInvalidItem) {
-      setError(WORK_TARGET_VALIDATION_MESSAGE)
+    const validationError = getWorkItemValidationError(isDraft)
+    if (validationError) {
+      setError(validationError)
       return
     }
 
@@ -1208,7 +1207,7 @@ export default function WorkReportsPage() {
                       <li>• 作業区分と作業内容は作業内容マスタから選択してください。</li>
                       <li>• D指令はD指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
                       <li>• L指令は事前にL指令マスタで登録します。</li>
-                      <li>• 各作業内訳に、D指令・L指令のいずれか、または作業区分（直接・間接）の入力が必要です。</li>
+                      <li>• 各作業内訳に、D指令・L指令のいずれか、および作業区分（直接・間接）の選択が必要です。</li>
                     </ul>
                   </div>
                 </div>

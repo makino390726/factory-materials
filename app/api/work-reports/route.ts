@@ -8,8 +8,7 @@ import {
   toMinutes,
 } from '@/lib/work-report-time'
 import {
-  hasWorkTarget,
-  WORK_TARGET_VALIDATION_MESSAGE,
+  validateWorkReportItem,
 } from '@/lib/work-report-item-validation'
 import { parseYearMonthFromDate, syncMonthFromWorkReports } from '@/lib/work-report-monthly-sync'
 
@@ -192,8 +191,9 @@ export async function POST(request: NextRequest) {
         throw new Error('作業区分・開始/終了時間は必須です')
       }
 
-      if (!hasWorkTarget(item)) {
-        throw new Error(WORK_TARGET_VALIDATION_MESSAGE)
+      const itemValidationError = validateWorkReportItem(item)
+      if (itemValidationError) {
+        throw new Error(itemValidationError)
       }
 
       const rawDuration = diffMinutes(item.start_time!, item.end_time!)

@@ -101,7 +101,7 @@ function buildLineOrderNo(partKey: string) {
   return `LINE-${partKey}-${timestamp}`
 }
 
-/** 1件のラインパーツ割り当てについて労賃を再計算して保存 */
+/** 1件のL指令パーツ割り当てについて労賃を再計算して保存 */
 export async function recalculateAssignmentLabor(
   supabase: SupabaseClient,
   assignment: LinePartAssignmentRow,
@@ -246,7 +246,7 @@ export async function bulkRecalculateConfirmedAssignments(
         settings_confirmed: Boolean(assignment.settings_confirmed),
         success: false,
         skipped: true,
-        reason: 'ラインが見つかりません',
+        reason: 'L指令が見つかりません',
       })
       continue
     }
