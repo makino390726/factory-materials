@@ -39,7 +39,7 @@ export async function GET(req: Request) {
       .maybeSingle()
 
     if (woErr || !wo) {
-      return NextResponse.json({ error: '指令が見つかりません' }, { status: 404 })
+      return NextResponse.json({ error: 'D指令が見つかりません' }, { status: 404 })
     }
 
     const { data: branches, error: brErr } = await supabase
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
       .maybeSingle()
 
     if (!wo) {
-      return NextResponse.json({ error: '指令が見つかりません' }, { status: 404 })
+      return NextResponse.json({ error: 'D指令が見つかりません' }, { status: 404 })
     }
 
     const { data: branches } = await supabase

@@ -262,7 +262,7 @@ export default function WorkOrdersPage() {
 
   const handleSaveBranches = async () => {
     if (!editingId) {
-      setError('先に指令を登録してから構成パーツを追加してください')
+      setError('先にD指令を登録してから構成パーツを追加してください')
       return
     }
 
@@ -288,7 +288,7 @@ export default function WorkOrdersPage() {
 
   const handleSyncBranchesFromBom = async () => {
     if (!editingId) {
-      setError('先に指令を登録してからBOM展開してください')
+      setError('先にD指令を登録してからBOM展開してください')
       return
     }
     if (!formData.bom_model.trim()) {
@@ -466,8 +466,8 @@ export default function WorkOrdersPage() {
       )
       setSuccessMessage(
         nextValue
-          ? `指令 ${order.order_no} を作業日報の選択肢から除外しました`
-          : `指令 ${order.order_no} を作業日報の選択肢に戻しました`
+          ? `D指令 ${order.order_no} を作業日報の選択肢から除外しました`
+          : `D指令 ${order.order_no} を作業日報の選択肢に戻しました`
       )
     } catch (toggleError) {
       setError(toggleError instanceof Error ? toggleError.message : 'Unknown error')
@@ -477,7 +477,7 @@ export default function WorkOrdersPage() {
   }
 
   const handleUnlockAll = async () => {
-    if (!confirm('完了済みの指令をすべて一時編集可能に戻しますか？\n完了フラグ・完了日時を解除し、完了ステータスは未開始に戻します。')) {
+    if (!confirm('完了済みのD指令をすべて一時編集可能に戻しますか？\n完了フラグ・完了日時を解除し、完了ステータスは未開始に戻します。')) {
       return
     }
 
@@ -496,7 +496,7 @@ export default function WorkOrdersPage() {
 
       setSuccessMessage(
         result.updated_count > 0
-          ? `${result.updated_count}件の指令を一時編集可能に戻しました`
+          ? `${result.updated_count}件のD指令を一時編集可能に戻しました`
           : '編集可能化の対象はありませんでした'
       )
       await fetchOrders()
@@ -530,7 +530,7 @@ export default function WorkOrdersPage() {
     event.preventDefault()
 
     if (!formData.order_no.trim()) {
-      setError('作業指令番号は必須です')
+      setError('D指令番号は必須です')
       return
     }
 
@@ -540,7 +540,7 @@ export default function WorkOrdersPage() {
     }
 
     if (formData.has_bom && !formData.order_no.trim()) {
-      setError('BOM構成ありの場合、指令番号が必須です')
+      setError('BOM構成ありの場合、D指令番号が必須です')
       return
     }
 
@@ -586,9 +586,9 @@ export default function WorkOrdersPage() {
 
       await fetchOrders()
       if (branchSavedCount > 0) {
-        setSuccessMessage(`${editingId ? '指令を更新' : '指令を登録'}し、構成パーツ${branchSavedCount}件を保存しました`)
+        setSuccessMessage(`${editingId ? 'D指令を更新' : 'D指令を登録'}し、構成パーツ${branchSavedCount}件を保存しました`)
       } else {
-        setSuccessMessage(editingId ? '指令を更新しました' : '指令を登録しました')
+        setSuccessMessage(editingId ? 'D指令を更新しました' : 'D指令を登録しました')
       }
       resetForm()
     } catch (submitError) {
@@ -603,7 +603,7 @@ export default function WorkOrdersPage() {
   }
 
   const handleDelete = async (order: WorkOrder) => {
-    if (!confirm(`指令 ${order.order_no} を削除しますか？`)) return
+    if (!confirm(`D指令 ${order.order_no} を削除しますか？`)) return
 
     setIsLoading(true)
     setError(null)
@@ -621,7 +621,7 @@ export default function WorkOrdersPage() {
       }
 
       await fetchOrders()
-      setSuccessMessage(`指令 ${order.order_no} を削除しました`)
+      setSuccessMessage(`D指令 ${order.order_no} を削除しました`)
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Unknown error')
     } finally {
@@ -648,7 +648,7 @@ export default function WorkOrdersPage() {
           <div>
             <p className="text-indigo-200 text-sm uppercase tracking-[0.3em]">Work Order Master</p>
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300">
-              作業指令マスタ
+              D指令マスタ
             </h1>
           </div>
           <Link href="/">
@@ -673,11 +673,11 @@ export default function WorkOrdersPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-6">
           <div id="work-order-form" className="bg-white/95 rounded-2xl shadow-xl border border-indigo-100 p-6 backdrop-blur">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
-              {editingId ? '指令を編集' : '新しい指令を追加'}
+              {editingId ? 'D指令を編集' : '新しいD指令を追加'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">指令番号 *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">D指令番号 *</label>
                 <input
                   type="text"
                   value={formData.order_no}
@@ -758,11 +758,11 @@ export default function WorkOrdersPage() {
                       type="text"
                       value={formData.bom_model}
                       readOnly
-                      placeholder="指令番号と同じ値を自動設定"
+                      placeholder="D指令番号と同じ値を自動設定"
                       className={formFieldVioletClass}
                     />
                     <p className="mt-1 text-xs text-violet-700">
-                      BOM構成ありの場合、BOMモデルは指令番号と同一値で固定されます。
+                      BOM構成ありの場合、BOMモデルはD指令番号と同一値で固定されます。
                     </p>
                     {editingId && (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -788,7 +788,7 @@ export default function WorkOrdersPage() {
                     <div>
                       <p className="text-sm font-medium text-slate-800">構成パーツ一覧</p>
                       <p className="text-xs text-slate-500">
-                        指令番号に対して複数パーツを登録します。保存後は指令BOM原価に反映されます。
+                        D指令番号に対して複数パーツを登録します。保存後はD指令BOM原価に反映されます。
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -812,7 +812,7 @@ export default function WorkOrdersPage() {
 
                   {!editingId && (
                     <div className="rounded-md bg-amber-50 border border-amber-200 p-2 text-xs text-amber-700">
-                      先に指令を登録すると、この画面で複数パーツを追加・編集できます。
+                      先にD指令を登録すると、この画面で複数パーツを追加・編集できます。
                     </div>
                   )}
 
@@ -954,7 +954,7 @@ export default function WorkOrdersPage() {
 
           <div className="bg-white/95 rounded-2xl shadow-xl border border-indigo-100 p-6 backdrop-blur">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">作業指令一覧</h2>
+              <h2 className="text-lg font-semibold text-slate-900">D指令一覧</h2>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -983,7 +983,7 @@ export default function WorkOrdersPage() {
                 type="text"
                 value={searchOrderNo}
                 onChange={(event) => setSearchOrderNo(event.target.value)}
-                placeholder="指令番号で検索"
+                placeholder="D指令番号で検索"
                 className={searchFieldClass}
               />
               <input
@@ -1020,7 +1020,7 @@ export default function WorkOrdersPage() {
                       className="py-2 pr-4 cursor-pointer hover:text-slate-700 transition"
                       onClick={() => handleSort('order_no')}
                     >
-                      指令番号 {sortColumn === 'order_no' && (sortDirection === 'asc' ? '↑' : '↓')}
+                      D指令番号 {sortColumn === 'order_no' && (sortDirection === 'asc' ? '↑' : '↓')}
                     </th>
                     <th className="py-2 pr-4">製品名</th>
                     <th className="py-2 pr-4">型式</th>
@@ -1039,7 +1039,7 @@ export default function WorkOrdersPage() {
                   {orders.length === 0 && !isLoading ? (
                     <tr>
                       <td colSpan={10} className="py-6 text-center text-slate-400">
-                        作業指令が未登録です
+                        D指令が未登録です
                       </td>
                     </tr>
                   ) : (
@@ -1138,7 +1138,7 @@ export default function WorkOrdersPage() {
               <div className="mt-6 p-4 bg-indigo-50 border-2 border-indigo-200 rounded-lg">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-md font-semibold text-indigo-900">
-                    📄 指令 {showHistoryFor}　月別実績
+                    📄 D指令 {showHistoryFor}　月別実績
                   </h3>
                   <button
                     onClick={() => setShowHistoryFor(null)}

@@ -728,7 +728,7 @@ export default function QRScanPage() {
                 <textarea
                   value={usagePurpose}
                   onChange={(e) => setUsagePurpose(e.target.value)}
-                  placeholder="例: 製造Aライン, 修理対応, 品質確認用"
+                  placeholder="例: 製造AL指令, 修理対応, 品質確認用"
                   className="w-full px-4 py-3 bg-slate-800 border-2 border-cyan-400 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-300 focus:shadow-[0_0_10px_rgba(34,211,238,0.5)] resize-none h-24"
                 />
               </div>

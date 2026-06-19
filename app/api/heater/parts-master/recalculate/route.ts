@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       updatedCount,
       skippedCount,
       note: skippedCount > 0 
-        ? `${skippedCount}件のパーツはライン原価データが存在しないため、既存の値を保持しました`
+        ? `${skippedCount}件のパーツはL指令原価データが存在しないため、既存の値を保持しました`
         : undefined,
     })
   } catch (err) {

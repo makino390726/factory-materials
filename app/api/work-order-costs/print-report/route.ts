@@ -199,7 +199,7 @@ export async function GET(req: Request) {
       })
       .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))
 
-    // BOMベースの指令の場合、BOM合計を計算
+    // BOMベースのD指令の場合、BOM合計を計算
     const bomSummary = new Map<string, {
       model: string
       product_code: string

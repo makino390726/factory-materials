@@ -517,7 +517,7 @@ export default function WorkReportSummaryPage() {
           </div>
           <p className="mt-3 text-xs text-slate-600">
             集計表示は上記の期間で絞り込みます。作業日報の確定保存時にも月別実績は自動更新されますが、集計内容を確認したうえで
-            {confirmMonthLabel ? `「確認保存」すると${confirmMonthLabel}分のライン・D指令実績を再集計して保存できます。` : '「確認保存」するには開始日・終了日を同一月内で指定してください。'}
+            {confirmMonthLabel ? `「確認保存」すると${confirmMonthLabel}分のL指令・D指令実績を再集計して保存できます。` : '「確認保存」するには開始日・終了日を同一月内で指定してください。'}
           </p>
           {confirmStatus && (
             <p className={`mt-2 text-xs ${confirmStatus.includes('失敗') || confirmStatus.includes('指定') ? 'text-rose-600' : 'text-emerald-700'}`}>
@@ -739,7 +739,7 @@ export default function WorkReportSummaryPage() {
                       .map((row) => (
                         <tr key={`${row.category}-${row.code}`} className="border-t border-slate-100">
                           <td className="py-3 pr-4 font-medium text-slate-900">
-                            {row.category === 'line' ? 'ライン' : 'D指令'}
+                            {row.category === 'line' ? 'L指令' : 'D指令'}
                           </td>
                           <td className="py-3 pr-4 font-medium text-slate-900">{row.code}</td>
                           <td className="py-3 pr-4">{row.name || '-'}</td>

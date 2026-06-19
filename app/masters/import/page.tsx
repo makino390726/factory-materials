@@ -17,10 +17,10 @@ interface ImportTypeOption {
 const IMPORT_TYPES: ImportTypeOption[] = [
   {
     value: 'work-orders',
-    label: '作業指令マスタ',
+    label: 'D指令マスタ',
     icon: '📋',
     color: 'indigo',
-    description: '作業指令番号、製品名、型式、作業内容、数量、ステータス',
+    description: 'D指令番号、製品名、型式、作業内容、数量、ステータス',
   },
   {
     value: 'machines',
@@ -38,10 +38,10 @@ const IMPORT_TYPES: ImportTypeOption[] = [
   },
   {
     value: 'lines',
-    label: 'ラインマスタ',
+    label: 'L指令マスタ',
     icon: '🏭',
     color: 'green',
-    description: 'ラインコード、ライン名、表示順、有効',
+    description: 'L指令コード、L指令名、表示順、有効',
   },
 ]
 
@@ -117,7 +117,7 @@ export default function MastersImportPage() {
 
     switch (importType) {
       case 'work-orders':
-        header = '作業指令番号,製品名,型式,作業内容,数量,ステータス'
+        header = 'D指令番号,製品名,型式,作業内容,数量,ステータス'
         rows = [
           'ORD-001,ヒーター本体,HT-2000,組立作業,10,未開始',
           'ORD-002,ヒーター本体,HT-3000,検査,5,',
@@ -134,11 +134,11 @@ export default function MastersImportPage() {
         ]
         break
       case 'lines':
-        header = 'ラインコード,ライン名,表示順,有効'
+        header = 'L指令コード,L指令名,表示順,有効'
         rows = [
-          'LINE-A,第1ライン,1,はい',
-          'LINE-B,第2ライン,2,はい',
-          'LINE-C,第3ライン,3,いいえ',
+          'LINE-A,第1L指令,1,はい',
+          'LINE-B,第2L指令,2,はい',
+          'LINE-C,第3L指令,3,いいえ',
         ]
         break
       case 'work-contents':
@@ -330,7 +330,7 @@ export default function MastersImportPage() {
 
               {importType === 'work-orders' && (
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="font-mono text-purple-400">作業指令番号*</div>
+                  <div className="font-mono text-purple-400">D指令番号*</div>
                   <div>必須、ユニーク</div>
                   <div className="font-mono text-purple-400">製品名</div>
                   <div>オプション</div>
@@ -371,9 +371,9 @@ export default function MastersImportPage() {
 
               {importType === 'lines' && (
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="font-mono text-purple-400">ラインコード*</div>
+                  <div className="font-mono text-purple-400">L指令コード*</div>
                   <div>必須、ユニーク</div>
-                  <div className="font-mono text-purple-400">ライン名*</div>
+                  <div className="font-mono text-purple-400">L指令名*</div>
                   <div>必須</div>
                   <div className="font-mono text-purple-400">表示順</div>
                   <div>オプション、整数（デフォルト: 0）</div>

@@ -324,7 +324,7 @@ export default function LinesPage() {
     event.preventDefault()
 
     if (!formData.line_code.trim() || !formData.name.trim()) {
-      setError('ラインコードとライン名は必須です')
+      setError('L指令コードとL指令名は必須です')
       return
     }
 
@@ -395,19 +395,19 @@ export default function LinesPage() {
     if (!line) {
       try {
         const response = await fetch('/api/lines')
-        if (!response.ok) throw new Error('ライン一覧の取得に失敗しました')
+        if (!response.ok) throw new Error('L指令一覧の取得に失敗しました')
         const data = await response.json()
         const refreshed = Array.isArray(data) ? data : []
         setLines(refreshed)
         line = refreshed.find((item: LineItem) => item.id === row.line_id)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'ラインの取得に失敗しました')
+        setError(err instanceof Error ? err.message : 'L指令の取得に失敗しました')
         return
       }
     }
 
     if (!line) {
-      setError(`ライン ${row.line_code} が見つかりませんでした`)
+      setError(`L指令 ${row.line_code} が見つかりませんでした`)
       return
     }
 
@@ -606,7 +606,7 @@ export default function LinesPage() {
           <div>
             <p className="text-sky-200 text-sm uppercase tracking-[0.3em]">Line Master</p>
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-300 via-cyan-300 to-blue-300">
-              ラインマスタ
+              L指令マスタ
             </h1>
           </div>
           <Link href="/">
@@ -627,7 +627,7 @@ export default function LinesPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
               <p className="mt-1 text-sm text-slate-600">
-                各ラインの部品割り当てに共通明細（全機種、500・600系共通など）を設定し、確認後に一括で労賃を再計算します。
+                各L指令の部品割り当てに共通明細（全機種、500・600系共通など）を設定し、確認後に一括で労賃を再計算します。
                 計算式: 1個あたり工賃 = (制作所要時間 ÷ 製造計画部品数) から算出
               </p>
             </div>
@@ -661,7 +661,7 @@ export default function LinesPage() {
             <table className="w-full text-xs">
               <thead className="text-left bg-slate-50 text-slate-700">
                 <tr>
-                  <th className="px-3 py-2">ライン</th>
+                  <th className="px-3 py-2">L指令</th>
                   <th className="px-3 py-2">部品キー</th>
                   <th className="px-3 py-2">共通明細</th>
                   <th className="px-3 py-2 text-right">制作所要</th>
@@ -752,11 +752,11 @@ export default function LinesPage() {
         <div className="grid grid-cols-[500px_1fr] gap-6">
           <div id="line-edit-form" className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit sticky top-8">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
-              {editingId ? 'ラインを編集' : '新しいラインを追加'}
+              {editingId ? 'L指令を編集' : '新しいL指令を追加'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-black mb-1">ラインコード *</label>
+                <label className="block text-sm font-medium text-black mb-1">L指令コード *</label>
                 <input
                   type="text"
                   value={formData.line_code}
@@ -768,12 +768,12 @@ export default function LinesPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-black mb-1">ライン名 *</label>
+                <label className="block text-sm font-medium text-black mb-1">L指令名 *</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-                  placeholder="例: 組立第2ライン"
+                  placeholder="例: 組立第2L指令"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg text-black focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
@@ -950,7 +950,7 @@ export default function LinesPage() {
 
           <div className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">登録ライン一覧</h2>
+              <h2 className="text-lg font-semibold text-slate-900">登録L指令一覧</h2>
               <div className="text-sm text-slate-500">
                 {isLoading ? '読み込み中...' : `${lines.length} 件`}
               </div>
@@ -961,14 +961,14 @@ export default function LinesPage() {
                 type="text"
                 value={searchLineCode}
                 onChange={(event) => setSearchLineCode(event.target.value)}
-                placeholder="ラインコードで検索"
+                placeholder="L指令コードで検索"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <input
                 type="text"
                 value={searchLineName}
                 onChange={(event) => setSearchLineName(event.target.value)}
-                placeholder="ライン名で検索（あいまい）"
+                placeholder="L指令名で検索（あいまい）"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <div className="flex gap-2">
@@ -1012,7 +1012,7 @@ export default function LinesPage() {
                 <thead className="text-left text-black sticky top-0 bg-white/95">
                   <tr>
                     <th className="py-3 px-3 font-semibold">コード</th>
-                    <th className="py-3 px-3 font-semibold">ライン名</th>
+                    <th className="py-3 px-3 font-semibold">L指令名</th>
                     <th className="py-3 px-3 font-semibold">月別実績</th>
                     <th className="py-3 px-3 font-semibold">部品割り当て</th>
                     <th className="py-3 px-3 font-semibold">有効</th>
@@ -1023,7 +1023,7 @@ export default function LinesPage() {
                   {lines.length === 0 && !isLoading ? (
                     <tr>
                       <td colSpan={6} className="py-6 text-center text-slate-400">
-                        ラインが未登録です
+                        L指令が未登録です
                       </td>
                     </tr>
                   ) : (
@@ -1115,7 +1115,7 @@ export default function LinesPage() {
               <div className="mt-6 p-4 bg-sky-50 border-2 border-sky-200 rounded-lg">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-md font-semibold text-sky-900">
-                    📄 ライン {showHistoryFor}　月別実績
+                    📄 L指令 {showHistoryFor}　月別実績
                   </h3>
                   <button
                     onClick={() => setShowHistoryFor(null)}
@@ -1131,7 +1131,7 @@ export default function LinesPage() {
                   <p className="text-center text-sky-700">...読み込み中</p>
                 ) : history.length === 0 ? (
                   <p className="text-center text-sky-600">
-                    作業日報の実績がありません（ラインが未選択の日報は集計されません）
+                    作業日報の実績がありません（L指令が未選択の日報は集計されません）
                   </p>
                 ) : (
                   <div className="overflow-x-auto">

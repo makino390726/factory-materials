@@ -49,7 +49,12 @@ async function importWorkOrders(rawData: any[]) {
     const row = rawData[i]
     const rowNum = i + 2
 
-    const orderNo = String(row['作業指令番号'] || row['order_no'] || '').trim()
+    const orderNo = String(
+      row['D指令番号'] ||
+        row['作業指令番号'] ||
+        row['order_no'] ||
+        ''
+    ).trim()
     const productName = String(row['製品名'] || row['product_name'] || '').trim()
     const model = String(
       row['型式'] ||
@@ -65,7 +70,7 @@ async function importWorkOrders(rawData: any[]) {
 
     // 必須フィールド検証
     if (!orderNo) {
-      errors.push(`行${rowNum}: 作業指令番号が未入力`)
+      errors.push(`行${rowNum}: D指令番号が未入力`)
       continue
     }
 
@@ -116,9 +121,9 @@ async function importWorkOrders(rawData: any[]) {
     )
   }
 
-  // NOTE: allow duplicate order_no to support same 指令番号 with different 型式.
+  // NOTE: allow duplicate order_no to support same D指令番号 with different 型式.
   // 以前は既存の order_no をチェックして重複を拒否していたが、要件で
-  // 同一指令番号の複数登録を許可するためこのチェックを省略する。
+  // 同一D指令番号の複数登録を許可するためこのチェックを省略する。
 
   // トランザクション処理：全件一括挿入
   try {
@@ -131,7 +136,7 @@ async function importWorkOrders(rawData: any[]) {
         return NextResponse.json(
           {
             error:
-              'DB制約が旧仕様のため、同一指令番号を登録できません。`order_no + model(=code_type)` の複合ユニーク制約へ移行してください。',
+              'DB制約が旧仕様のため、同一D指令番号を登録できません。`order_no + model(=code_type)` の複合ユニーク制約へ移行してください。',
           },
           { status: 400 }
         )
@@ -144,7 +149,7 @@ async function importWorkOrders(rawData: any[]) {
 
     return NextResponse.json({
       success: true,
-      message: `${workOrders.length}件の作業指令をインポートしました`,
+      message: `${workOrders.length}件のD指令をインポートしました`,
       importCount: workOrders.length,
     })
   } catch (error: any) {

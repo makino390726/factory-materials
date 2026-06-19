@@ -27,7 +27,7 @@ const supabase = createClient(
  *       bom_quantity: number,           // BOM での使用数量
  *       unit_cost: number,              // parts_master.cost_price（1個当たり原価）
  *       subtotal: number,               // unit_cost × bom_quantity
- *       cost_items: [                   // 原価明細行（ライン原価）
+ *       cost_items: [                   // 原価明細行（L指令原価）
  *         {
  *           id: string,
  *           product_code: string,
@@ -155,7 +155,7 @@ export async function GET(req: Request) {
       const partInfo = partsMap[partKey] ?? { part_name: null, product_code: null, cost_price: 0 }
       const items = costItemsMap[partKey] ?? []
 
-      // unit_cost = parts_master.cost_price（ライン原価集計済み値）
+      // unit_cost = parts_master.cost_price（L指令原価集計済み値）
       // cost_items が存在する場合は items の sum でも確認可能だが、parts_master を正値とする
       const unitCost = partInfo.cost_price
       const subtotal = Math.round(unitCost * bomQty)

@@ -7,6 +7,10 @@ import {
   getEffectiveBreakMinutes,
   toMinutes,
 } from '@/lib/work-report-time'
+import {
+  hasWorkTarget,
+  WORK_TARGET_VALIDATION_MESSAGE,
+} from '@/lib/work-report-item-validation'
 import { parseYearMonthFromDate, syncMonthFromWorkReports } from '@/lib/work-report-monthly-sync'
 
 export const runtime = 'nodejs'
@@ -186,6 +190,10 @@ export async function POST(request: NextRequest) {
       if (!hasRequiredFields) {
         if (isDraft) return acc
         throw new Error('作業区分・開始/終了時間は必須です')
+      }
+
+      if (!hasWorkTarget(item)) {
+        throw new Error(WORK_TARGET_VALIDATION_MESSAGE)
       }
 
       const rawDuration = diffMinutes(item.start_time!, item.end_time!)

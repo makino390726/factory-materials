@@ -68,7 +68,7 @@ export default function WorkOrdersImportPage() {
 
   const downloadTemplate = () => {
     // テンプレートCSVをダウンロード
-    const header = '作業指令番号,製品名,型式,code_type,作業内容,数量,ステータス'
+    const header = 'D指令番号,製品名,型式,code_type,作業内容,数量,ステータス'
     const template = [
       header,
       'ORD-001,ヒーター本体,HT-2000,特A/B,組立作業,10,未開始',
@@ -102,7 +102,7 @@ export default function WorkOrdersImportPage() {
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-12">
         {/* ヘッダー */}
         <div className="mb-12 space-y-3 text-center">
-          <h1 className="text-5xl font-bold text-white">作業指令</h1>
+          <h1 className="text-5xl font-bold text-white">D指令</h1>
           <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-indigo-400">
             CSVインポート
           </h2>
@@ -215,7 +215,7 @@ export default function WorkOrdersImportPage() {
             <h3 className="text-lg font-bold text-indigo-300 mb-4">📌 CSVフォーマット仕様</h3>
             <div className="space-y-2 text-indigo-200 text-sm">
               <div className="grid grid-cols-2 gap-2">
-                <div className="font-mono text-indigo-400">作業指令番号*</div>
+                <div className="font-mono text-indigo-400">D指令番号*</div>
                 <div>必須、ユニーク</div>
                 <div className="font-mono text-indigo-400">製品名</div>
                 <div>オプション</div>

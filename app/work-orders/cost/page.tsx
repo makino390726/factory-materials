@@ -156,7 +156,7 @@ export default function WorkOrderCostPage() {
         }
         setMonthlyLineMinutes(map)
       } catch (err) {
-        console.error('月別ライン実績の取得エラー:', err)
+        console.error('月別L指令実績の取得エラー:', err)
       }
     }
     loadMonthlyLineMinutes()
@@ -168,7 +168,7 @@ export default function WorkOrderCostPage() {
       setError(null)
       try {
         const response = await fetch('/api/work-orders')
-        if (!response.ok) throw new Error('作業指令の取得に失敗しました')
+        if (!response.ok) throw new Error('D指令の取得に失敗しました')
         const data = await response.json()
         setWorkOrders(data || [])
       } catch (fetchError) {
@@ -261,7 +261,7 @@ export default function WorkOrderCostPage() {
     restore()
   }, [selectedPartKey])
 
-  // ラインモードの場合は parts master を取得してクライアント側検索に使う
+  // L指令モードの場合は parts master を取得してクライアント側検索に使う
   useEffect(() => {
     if (mode !== 'line') return
     const load = async () => {
@@ -287,7 +287,7 @@ export default function WorkOrderCostPage() {
     setSelectedWorkOrderId('')
   }, [mode])
 
-  // ラインモードで所要時間を参照するため、ラインマスタを取得
+  // L指令モードで所要時間を参照するため、L指令マスタを取得
   useEffect(() => {
     if (mode !== 'line') return
 
@@ -305,7 +305,7 @@ export default function WorkOrderCostPage() {
     loadLines()
   }, [mode])
 
-  // 追加: ページ読み込み時に parts master を先読みしておく（ライン切替の遅延対策）
+  // 追加: ページ読み込み時に parts master を先読みしておく（L指令切替の遅延対策）
   useEffect(() => {
     const preload = async () => {
       try {
@@ -412,7 +412,7 @@ export default function WorkOrderCostPage() {
         const minutes = getMonthMinutes(rows)
         setMonthlyOrderMinutes(minutes > 0 ? minutes : null)
       } catch (err) {
-        console.error('月別指令実績の取得エラー:', err)
+        console.error('月別D指令実績の取得エラー:', err)
         setMonthlyOrderMinutes(null)
       }
     }
@@ -493,7 +493,7 @@ export default function WorkOrderCostPage() {
     )
   }, [matchingLines])
 
-  /** ラインの制作所要時間（標準所要時間を優先、なければ月次実績） */
+  /** L指令の制作所要時間（標準所要時間を優先、なければ月次実績） */
   const totalProductionDurationMinutes = useMemo(() => {
     if (aggregatedStandardLineDurationMinutes > 0) {
       return aggregatedStandardLineDurationMinutes
@@ -518,7 +518,7 @@ export default function WorkOrderCostPage() {
       if (!selectedPartKey) return null
       return perUnitDurationMinutes ?? totalProductionDurationMinutes ?? null
     }
-    // 指令: 完了かつ月次実績ありなら実績優先。それ以外は指令マスタの所要時間
+    // D指令: 完了かつ月次実績ありなら実績優先。それ以外はD指令マスタの所要時間
     if (isOrderCompleted && orderMonthlyMinutes > 0) return orderMonthlyMinutes
     if (orderStandardMinutes > 0) return orderStandardMinutes
     if (orderMonthlyMinutes > 0) return orderMonthlyMinutes
@@ -1087,7 +1087,7 @@ export default function WorkOrderCostPage() {
     }
   }
 
-  // 選択した指令（work_order_id）に既存の原価データがあればロードする
+  // 選択したD指令（work_order_id）に既存の原価データがあればロードする
   useEffect(() => {
     const load = async () => {
       if (!selectedWorkOrderId) return
@@ -1238,7 +1238,7 @@ export default function WorkOrderCostPage() {
   const handleSave = async () => {
     if (mode === 'order') {
       if (!selectedWorkOrderId) {
-        alert('指令を選択してください')
+        alert('D指令を選択してください')
         return
       }
     } else {
@@ -1303,7 +1303,7 @@ export default function WorkOrderCostPage() {
 
     try {
       if (mode === 'line' && !selectedWorkOrderId) {
-        // ラインモードで指令未選択: work-order-costs へは保存せず、parts master の更新のみ行う
+        // L指令モードでD指令未選択: work-order-costs へは保存せず、parts master の更新のみ行う
         try {
           const orderNo = buildLineOrderNo(selectedPartKey)
           await saveLineCostToDb(orderNo)
@@ -1386,7 +1386,7 @@ export default function WorkOrderCostPage() {
           }
         }
       }
-      // ラインモードなら、パーツマスタの原価欄を更新する
+      // L指令モードなら、パーツマスタの原価欄を更新する
       if (mode === 'line' && selectedPartKey) {
         try {
           const partRes = await fetch('/api/heater/parts-master', {
@@ -1437,7 +1437,7 @@ export default function WorkOrderCostPage() {
   }
 
   const handleMigrateLineLocalStorage = async () => {
-    if (!confirm('ローカル保存のライン明細をDBに移行します。よろしいですか？')) return
+    if (!confirm('ローカル保存のL指令明細をDBに移行します。よろしいですか？')) return
 
     const keys = Object.keys(localStorage).filter(key => key.startsWith('linecost:'))
     if (keys.length === 0) {
@@ -1654,15 +1654,15 @@ export default function WorkOrderCostPage() {
             <div className="flex items-center gap-4">
               <p className="text-rose-200 text-sm uppercase tracking-[0.35em]">Order Costing</p>
               <div className="ml-4 inline-flex bg-slate-800 rounded-full p-1">
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>指令原価計算</button>
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>ライン原価計算</button>
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>D指令原価計算</button>
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>L指令原価計算</button>
               </div>
             </div>
             <h1 className="text-3xl sm:text-4xl font-semibold text-white">
-              {mode === 'order' ? '指令書原価計算' : 'ライン原価計算'}
+              {mode === 'order' ? 'D指令書原価計算' : 'L指令原価計算'}
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              {mode === 'order' ? '指令別の材料費・工賃・間接費を集計するイメージ画面' : 'パーツマスタを参照してライン単位の原価計算を行います'}
+              {mode === 'order' ? 'D指令別の材料費・工賃・間接費を集計するイメージ画面' : 'パーツマスタを参照してL指令単位の原価計算を行います'}
             </p>
           </div>
           <Link href="/">
@@ -1675,7 +1675,7 @@ export default function WorkOrderCostPage() {
         <div className="bg-slate-900/95 rounded-3xl border-2 border-slate-700 shadow-2xl p-6 sm:p-8">
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_1fr]">
             <div>
-                <label className="text-sm font-semibold text-slate-200">{mode === 'order' ? '作業指令' : 'パーツリスト選択'}</label>
+                <label className="text-sm font-semibold text-slate-200">{mode === 'order' ? 'D指令' : 'パーツリスト選択'}</label>
                 <div className="mt-2 flex gap-2">
                   {mode === 'order' ? (
                     <>
@@ -1684,7 +1684,7 @@ export default function WorkOrderCostPage() {
                         onChange={(event) => setSelectedWorkOrderId(event.target.value)}
                         className="flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-500/50 focus:outline-none"
                       >
-                        <option value="">指令を選択してください</option>
+                        <option value="">D指令を選択してください</option>
                         {getSortedOrders().map((order) => (
                           <option key={order.id} value={order.id}>
                             {order.order_no} {order.product_name ? `- ${order.product_name}` : ''}
@@ -1695,7 +1695,7 @@ export default function WorkOrderCostPage() {
                         type="button"
                         onClick={() => handleSort('order_no')}
                         className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-medium transition border-2 border-slate-600"
-                        title="指令番号でソート"
+                        title="D指令番号でソート"
                       >
                         {sortDirection === 'asc' ? '↑' : '↓'}
                       </button>
@@ -1794,7 +1794,7 @@ export default function WorkOrderCostPage() {
                       )}
                       {mode === 'order' && isAutoLaborMode && !isOrderCompleted && orderStandardMinutes > 0 && (
                         <span className="text-xs font-semibold text-emerald-300 bg-emerald-900/60 px-2 py-1 rounded">
-                          指令マスタ {orderStandardMinutes.toLocaleString('ja-JP')}分
+                          D指令マスタ {orderStandardMinutes.toLocaleString('ja-JP')}分
                         </span>
                       )}
                     </div>

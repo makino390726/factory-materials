@@ -347,7 +347,7 @@ export default function BomPage() {
               <span className="text-slate-400 text-sm">構成部品マスタ</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white">BOM（構成部品）</h1>
-            <p className="mt-2 text-sm text-slate-400">機種別の構成部品と原価を管理します。指令BOMと同じ表示トーンで確認できます。</p>
+            <p className="mt-2 text-sm text-slate-400">機種別の構成部品と原価を管理します。D指令BOMと同じ表示トーンで確認できます。</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link href="/masters/import#ec30-bom">
@@ -357,7 +357,7 @@ export default function BomPage() {
             </Link>
             <Link href="/heater/models/dr8008">
               <button className="px-5 py-2 rounded-full border border-slate-500/60 text-slate-300 hover:text-white hover:border-slate-400 transition text-sm">
-                ← 指令原価BOM
+                ← D指令原価BOM
               </button>
             </Link>
             <Link href="/">

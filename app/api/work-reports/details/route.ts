@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // ライン情報を取得
+    // L指令情報を取得
     const { data: lines } = await supabase
       .from('lines')
       .select('id, line_code, name')

@@ -41,8 +41,8 @@ export default function CostReportsPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const reportTitle = reportType === 'order' ? '指令原価一覧' : 'ライン原価一覧'
-  const firstColumnTitle = reportType === 'order' ? '指令番号' : '部品キー'
+  const reportTitle = reportType === 'order' ? 'D指令原価一覧' : 'L指令原価一覧'
+  const firstColumnTitle = reportType === 'order' ? 'D指令番号' : '部品キー'
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -117,13 +117,13 @@ export default function CostReportsPage() {
               onClick={() => setReportType('order')}
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${reportType === 'order' ? 'border border-violet-400/50 bg-violet-600 text-white shadow-[0_0_16px_rgba(139,92,246,0.35)]' : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500 hover:text-white'}`}
             >
-              指令原価
+              D指令原価
             </button>
             <button
               onClick={() => setReportType('line')}
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${reportType === 'line' ? 'border border-violet-400/50 bg-violet-600 text-white shadow-[0_0_16px_rgba(139,92,246,0.35)]' : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500 hover:text-white'}`}
             >
-              ライン原価
+              L指令原価
             </button>
           </div>
         </div>

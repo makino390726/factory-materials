@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import PushNotificationManager from '@/app/components/PushNotificationManager'
 import {
+  hasWorkTarget,
+  WORK_TARGET_VALIDATION_MESSAGE,
+} from '@/lib/work-report-item-validation'
+import {
   computeItemDurationMinutes,
   computeWorkMinutes,
   getEffectiveBreakMinutes,
@@ -100,7 +104,7 @@ const formatMinutes = (value: number) => {
 }
 
 const isSelectableWorkOrder = (order: WorkOrderOption) => {
-  // D指令リストでは「完了」状態および「日報非表示」の指令は選択対象外
+  // D指令リストでは「完了」状態および「日報非表示」のD指令は選択対象外
   if (order.exclude_from_work_report) return false
   return order.status !== '完了'
 }
@@ -189,7 +193,7 @@ export default function WorkReportsPage() {
         const data = await response.json()
         setLines((data || []).filter((line: LineItem) => line.is_active))
       } catch (lineError) {
-        console.error('ライン取得エラー:', lineError)
+        console.error('L指令取得エラー:', lineError)
       }
     }
 
@@ -207,7 +211,7 @@ export default function WorkReportsPage() {
       )
       setWorkOrders(sorted)
     } catch (orderError) {
-      console.error('作業指令取得エラー:', orderError)
+      console.error('D指令取得エラー:', orderError)
     }
   }
 
@@ -442,7 +446,7 @@ export default function WorkReportsPage() {
           return { ...item, work_type: value as string, work_content: '' }
         }
         if (key === 'instruction_text') {
-          // D指令が選択されたら、該当する指令から型式を取得して自動入力
+          // D指令が選択されたら、該当するD指令から型式を取得して自動入力
           const selectedOrder = workOrders.find((order) => order.order_no === value)
           const model = selectedOrder?.model || ''
           return { ...item, instruction_text: value as string, model }
@@ -595,6 +599,18 @@ export default function WorkReportsPage() {
         setError('作業区分・開始/終了時間は必須です')
         return
       }
+    }
+
+    const targetInvalidItem = items.find((item) => {
+      if (!isDraft) {
+        return !hasWorkTarget(item)
+      }
+      if (!item.start_time || !item.end_time) return false
+      return !hasWorkTarget(item)
+    })
+    if (targetInvalidItem) {
+      setError(WORK_TARGET_VALIDATION_MESSAGE)
+      return
     }
 
     if (!isDraft && hasMachineInItems) {
@@ -905,7 +921,7 @@ export default function WorkReportsPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="text-sm font-bold text-slate-900">ライン</label>
+                      <label className="text-sm font-bold text-slate-900">L指令</label>
                       <select
                         value={item.line_id}
                         onChange={(event) =>
@@ -1190,8 +1206,9 @@ export default function WorkReportsPage() {
                     <ul className="space-y-2 text-sm">
                       <li>• 作業内訳の合計所要時間が勤務時間と一致する必要があります。</li>
                       <li>• 作業区分と作業内容は作業内容マスタから選択してください。</li>
-                      <li>• D指令は作業指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
-                      <li>• ラインは事前にラインマスタで登録します。</li>
+                      <li>• D指令はD指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
+                      <li>• L指令は事前にL指令マスタで登録します。</li>
+                      <li>• 各作業内訳に、D指令・L指令のいずれか、または作業区分（直接・間接）の入力が必要です。</li>
                     </ul>
                   </div>
                 </div>
@@ -1219,13 +1236,13 @@ export default function WorkReportsPage() {
           </div>
         )}
 
-        {/* 作業指令新規登録モーダル */}
+        {/* D指令新規登録モーダル */}
         {showAddOrderModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="relative max-w-2xl w-full rounded-2xl border border-blue-200/30 bg-white shadow-2xl max-h-[90vh] flex flex-col">
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-slate-900">作業指令新規登録</h2>
+                  <h2 className="text-2xl font-bold text-slate-900">D指令新規登録</h2>
                   <button
                     onClick={handleAddOrderCancel}
                     className="text-slate-400 hover:text-slate-600 transition"

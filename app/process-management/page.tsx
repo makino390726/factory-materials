@@ -236,7 +236,7 @@ function ProcessManagementContent() {
     return lotsResult.lots[lotsResult.lots.length - 1]
   }, [lotsResult, selectedLotId])
 
-  const targetTypeLabel = selectedTarget?.target_type === 'instruction' ? 'D指令' : 'ライン'
+  const targetTypeLabel = selectedTarget?.target_type === 'instruction' ? 'D指令' : 'L指令'
 
   useEffect(() => {
     const loadTargets = async () => {
@@ -426,13 +426,13 @@ function ProcessManagementContent() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
             <div className="lg:col-span-2">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-sm font-medium text-black">対象（ライン / D指令）</label>
+                <label className="text-sm font-medium text-black">対象（L指令 / D指令）</label>
                 <div className="flex gap-2 text-xs">
                   <Link href="/lines" className="text-indigo-600 hover:underline">
-                    ラインマスタ
+                    L指令マスタ
                   </Link>
                   <Link href="/work-orders" className="text-indigo-600 hover:underline">
-                    指令マスタ
+                    D指令マスタ
                   </Link>
                 </div>
               </div>
@@ -445,11 +445,11 @@ function ProcessManagementContent() {
                 {targetsLoading ? (
                   <option value="">読み込み中...</option>
                 ) : targets.length === 0 ? (
-                  <option value="">ライン・指令が未登録です</option>
+                  <option value="">L指令・D指令が未登録です</option>
                 ) : (
                   <>
                     {lineTargets.length > 0 && (
-                      <optgroup label="ライン">
+                      <optgroup label="L指令">
                         {lineTargets.map((item) => (
                           <option
                             key={toProcessTargetKey(item.target_type, item.target_code)}
@@ -655,7 +655,7 @@ function ProcessManagementContent() {
                   会計年度 作業グループ別 平均ST
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">
-                  {selectedTarget.target_type === 'instruction' ? 'D指令' : 'ライン'}{' '}
+                  {selectedTarget.target_type === 'instruction' ? 'D指令' : 'L指令'}{' '}
                   {selectedTarget.target_code}（9月1日〜翌年8月31日）
                 </p>
               </div>

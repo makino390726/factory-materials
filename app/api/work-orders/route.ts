@@ -153,8 +153,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(data || [])
   } catch (error) {
-    console.error('作業指令取得エラー:', error)
-    return NextResponse.json({ error: '作業指令取得に失敗しました' }, { status: 500 })
+    console.error('D指令取得エラー:', error)
+    return NextResponse.json({ error: 'D指令取得に失敗しました' }, { status: 500 })
   }
 }
 
@@ -183,7 +183,7 @@ export async function POST(req: Request) {
 
     if (!normalizedOrderNo) {
       return NextResponse.json(
-        { error: '作業指令番号は必須です' },
+        { error: 'D指令番号は必須です' },
         { status: 400 }
       )
     }
@@ -196,8 +196,8 @@ export async function POST(req: Request) {
       )
     }
 
-    // NOTE: allow duplicate order_no (same 指令番号で型式違いを管理したいため)
-    // 以前は order_no の重複を拒否していたが、要件で同一指令番号で複数行を許可する。
+    // NOTE: allow duplicate order_no (same D指令番号で型式違いを管理したいため)
+    // 以前は order_no の重複を拒否していたが、要件で同一D指令番号で複数行を許可する。
 
     const basePayload = {
       order_no: normalizedOrderNo,
@@ -240,7 +240,7 @@ export async function POST(req: Request) {
 
     const saved = data?.[0]
     if (!saved) {
-      return NextResponse.json({ error: '作業指令登録結果が取得できませんでした' }, { status: 500 })
+      return NextResponse.json({ error: 'D指令登録結果が取得できませんでした' }, { status: 500 })
     }
 
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
@@ -250,8 +250,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(saved)
   } catch (error) {
-    console.error('作業指令登録エラー:', error)
-    return NextResponse.json({ error: '作業指令登録に失敗しました' }, { status: 500 })
+    console.error('D指令登録エラー:', error)
+    return NextResponse.json({ error: 'D指令登録に失敗しました' }, { status: 500 })
   }
 }
 
@@ -285,14 +285,14 @@ export async function PUT(req: Request) {
 
     if (!normalizedOrderNo) {
       return NextResponse.json(
-        { error: '作業指令番号は必須です' },
+        { error: 'D指令番号は必須です' },
         { status: 400 }
       )
     }
 
     // NOTE: allow updating even if the target order_no exists on other rows.
     // 以前は同一の order_no が別の id に存在すると更新を拒否していたが、
-    // 同一指令番号で複数型式を保持する要件に合わせてこのチェックを外す。
+    // 同一D指令番号で複数型式を保持する要件に合わせてこのチェックを外す。
 
     const basePayload = {
       order_no: normalizedOrderNo,
@@ -348,7 +348,7 @@ export async function PUT(req: Request) {
 
     const saved = data?.[0]
     if (!saved) {
-      return NextResponse.json({ error: '作業指令更新結果が取得できませんでした' }, { status: 500 })
+      return NextResponse.json({ error: 'D指令更新結果が取得できませんでした' }, { status: 500 })
     }
 
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
@@ -361,8 +361,8 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(saved)
   } catch (error) {
-    console.error('作業指令更新エラー:', error)
-    return NextResponse.json({ error: '作業指令更新に失敗しました' }, { status: 500 })
+    console.error('D指令更新エラー:', error)
+    return NextResponse.json({ error: 'D指令更新に失敗しました' }, { status: 500 })
   }
 }
 
@@ -404,13 +404,13 @@ export async function PATCH(req: Request) {
 
     const saved = data?.[0]
     if (!saved) {
-      return NextResponse.json({ error: '作業指令が見つかりません' }, { status: 404 })
+      return NextResponse.json({ error: 'D指令が見つかりません' }, { status: 404 })
     }
 
     return NextResponse.json(saved)
   } catch (error) {
-    console.error('作業指令部分更新エラー:', error)
-    return NextResponse.json({ error: '作業指令の更新に失敗しました' }, { status: 500 })
+    console.error('D指令部分更新エラー:', error)
+    return NextResponse.json({ error: 'D指令の更新に失敗しました' }, { status: 500 })
   }
 }
 
@@ -432,7 +432,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('作業指令削除エラー:', error)
-    return NextResponse.json({ error: '作業指令削除に失敗しました' }, { status: 500 })
+    console.error('D指令削除エラー:', error)
+    return NextResponse.json({ error: 'D指令削除に失敗しました' }, { status: 500 })
   }
 }

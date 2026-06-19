@@ -84,11 +84,11 @@ type BreakdownData = {
 }
 
 // =============================================================
-// 指令原価BOM ページ
+// D指令原価BOM ページ
 // =============================================================
 // 計算フロー:
-//   指令原価計算（/work-orders/cost）で保存された work_order_costs を表示
-//   一覧・枝番別とも保存結果を正とする（再集計・ライン原価フォールバックなし）
+//   D指令原価計算（/work-orders/cost）で保存された work_order_costs を表示
+//   一覧・枝番別とも保存結果を正とする（再集計・L指令原価フォールバックなし）
 // =============================================================
 export default function WorkOrderBomCostPage() {
   const searchParams = useSearchParams()
@@ -112,7 +112,7 @@ export default function WorkOrderBomCostPage() {
   const [summaryTotals, setSummaryTotals] = useState<OrderSummaryTotals | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
 
-  // 指令一覧を取得
+  // D指令一覧を取得
   useEffect(() => {
     fetch('/api/work-orders')
       .then(r => r.json())
@@ -120,13 +120,13 @@ export default function WorkOrderBomCostPage() {
       .catch(() => {})
   }, [])
 
-  // URL パラメータから初期指令 ID を設定
+  // URL パラメータから初期D指令 ID を設定
   useEffect(() => {
     const id = searchParams.get('work_order_id')
     if (id) setSelectedWorkOrderId(id)
   }, [searchParams])
 
-  // 指令が選択されたら bom_model をセット
+  // D指令が選択されたら bom_model をセット
   useEffect(() => {
     if (!selectedWorkOrderId) {
       setSelectedWorkOrder(null)
@@ -162,7 +162,7 @@ export default function WorkOrderBomCostPage() {
           }))
         : [],
     }))
-    const modelName = wo?.bom_model || wo?.order_no || bomModelInput || '指令BOM'
+    const modelName = wo?.bom_model || wo?.order_no || bomModelInput || 'D指令BOM'
     setData({
       model: modelName,
       product_code: null,
@@ -266,7 +266,7 @@ export default function WorkOrderBomCostPage() {
 
   const handleSync = async () => {
     if (!selectedWorkOrderId || !bomModelInput.trim()) {
-      setError('指令とBOMモデルを選択してください')
+      setError('D指令とBOMモデルを選択してください')
       return
     }
     setSyncing(true)
@@ -301,8 +301,8 @@ export default function WorkOrderBomCostPage() {
     setData(null)
     setSavedCostHeader(null)
     try {
-      // 指令が選択されている場合は、指令マスタ（work_order_branches）ベースで集計する。
-      // heater_bom はライン側用途として切り分ける。
+      // D指令が選択されている場合は、D指令マスタ（work_order_branches）ベースで集計する。
+      // heater_bom はL指令側用途として切り分ける。
       if (selectedWorkOrderId) {
         const orderRes = await fetch(
           `/api/work-orders/bom-cost?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`
@@ -363,7 +363,7 @@ export default function WorkOrderBomCostPage() {
   // =========================================================
   // 原価確定保存:
   //   ① products テーブル（製品コードがある場合）
-  //   ② work_order_costs スナップショット（指令が選択されている場合）
+  //   ② work_order_costs スナップショット（D指令が選択されている場合）
   // =========================================================
   const handleSaveCost = async () => {
     if (!data) return
@@ -373,7 +373,7 @@ export default function WorkOrderBomCostPage() {
       `算出原価: ¥${data.grand_total.toLocaleString()}`,
     ]
     if (data.product_code) lines.push(`製品コード: ${data.product_code}`)
-    if (selectedWorkOrder) lines.push(`指令番号: ${selectedWorkOrder.order_no}`)
+    if (selectedWorkOrder) lines.push(`D指令番号: ${selectedWorkOrder.order_no}`)
     lines.push('\nよろしいですか？')
     if (!confirm(lines.join('\n'))) return
 
@@ -407,12 +407,12 @@ export default function WorkOrderBomCostPage() {
           const body = await res2.json().catch(() => ({}))
           console.warn('work_order_costs snapshot failed:', body.error)
         } else {
-          results.push(`指令原価スナップショット（${selectedWorkOrder?.order_no}）`)
+          results.push(`D指令原価スナップショット（${selectedWorkOrder?.order_no}）`)
         }
       }
 
       if (results.length === 0) {
-        setSaveMessage('保存先がありません（製品コードまたは指令を選択してください）')
+        setSaveMessage('保存先がありません（製品コードまたはD指令を選択してください）')
       } else {
         setSaveMessage(`¥${data.grand_total.toLocaleString()} を ${results.join(' / ')} に保存しました`)
       }
@@ -466,19 +466,19 @@ export default function WorkOrderBomCostPage() {
             <span className="px-3 py-1 rounded-full bg-violet-500/20 border border-violet-400/40 text-violet-300 text-xs font-bold tracking-widest uppercase">
               BOM集計
             </span>
-            <span className="text-slate-400 text-sm">指令原価計算</span>
+            <span className="text-slate-400 text-sm">D指令原価計算</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-white">
-            指令原価BOM
+            D指令原価BOM
           </h1>
           <p className="mt-2 text-sm text-slate-400">
-            指令原価計算で保存した結果を表示します（1台分）。未保存の指令は指令原価計算画面で計算・保存してください。
+            D指令原価計算で保存した結果を表示します（1台分）。未保存のD指令はD指令原価計算画面で計算・保存してください。
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/work-orders">
             <button className="px-5 py-2 rounded-full border border-slate-500/60 text-slate-300 hover:text-white hover:border-slate-400 transition text-sm">
-              ← 指令一覧
+              ← D指令一覧
             </button>
           </Link>
           <Link href="/">
@@ -489,13 +489,13 @@ export default function WorkOrderBomCostPage() {
         </div>
       </div>
 
-      {/* ① 指令選択パネル */}
+      {/* ① D指令選択パネル */}
       <div className="max-w-screen-xl mx-auto mb-6 bg-slate-800/70 border border-slate-600/50 rounded-2xl p-5">
         <p className="text-sm font-semibold text-slate-300 mb-3">
-          ① 指令を選択（または BOM モデルを直接入力）
+          ① D指令を選択（または BOM モデルを直接入力）
         </p>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <span className="text-xs text-slate-400">指令リスト:</span>
+          <span className="text-xs text-slate-400">D指令リスト:</span>
           <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
             <input
               type="radio"
@@ -504,7 +504,7 @@ export default function WorkOrderBomCostPage() {
               onChange={() => setWorkOrderListFilter('bom')}
               className="accent-violet-500"
             />
-            BOM出力指令のみ
+            BOM出力D指令のみ
           </label>
           <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
             <input
@@ -514,7 +514,7 @@ export default function WorkOrderBomCostPage() {
               onChange={() => setWorkOrderListFilter('all')}
               className="accent-violet-500"
             />
-            全指令
+            全D指令
           </label>
           <span className="text-slate-600">|</span>
           <span className="text-xs text-slate-400">表示:</span>
@@ -543,13 +543,13 @@ export default function WorkOrderBomCostPage() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-3 items-end">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">指令</label>
+            <label className="block text-xs text-slate-400 mb-1">D指令</label>
             <select
               value={selectedWorkOrderId}
               onChange={e => setSelectedWorkOrderId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
             >
-              <option value="">─ 指令を選択 ─</option>
+              <option value="">─ D指令を選択 ─</option>
               {filteredWorkOrders.map(wo => (
                 <option key={wo.id} value={wo.id}>
                   {wo.order_no}
@@ -591,10 +591,10 @@ export default function WorkOrderBomCostPage() {
           )}
         </div>
 
-        {/* 選択中の指令情報 */}
+        {/* 選択中のD指令情報 */}
         {selectedWorkOrder && (
           <div className="mt-3 pt-3 border-t border-slate-700 flex flex-wrap gap-4 text-xs text-slate-400">
-            <span>指令: <span className="text-white font-semibold">{selectedWorkOrder.order_no}</span></span>
+            <span>D指令: <span className="text-white font-semibold">{selectedWorkOrder.order_no}</span></span>
             {selectedWorkOrder.product_name && (
               <span>製品名: <span className="text-slate-200">{selectedWorkOrder.product_name}</span></span>
             )}
@@ -614,14 +614,14 @@ export default function WorkOrderBomCostPage() {
         )}
       </div>
 
-      {/* 一覧表示（指令単位サマリ） */}
+      {/* 一覧表示（D指令単位サマリ） */}
       {viewMode === 'list' && (
         <div className="max-w-screen-xl mx-auto mb-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-white">指令BOM 一覧</h2>
+              <h2 className="text-lg font-semibold text-white">D指令BOM 一覧</h2>
               <p className="text-xs text-slate-400 mt-1">
-                指令原価計算の保存結果（材料費計・間接費計・工賃計・合計・1台分）を表示します。行をクリックすると枝番別の保存明細を開きます。
+                D指令原価計算の保存結果（材料費計・間接費計・工賃計・合計・1台分）を表示します。行をクリックすると枝番別の保存明細を開きます。
               </p>
             </div>
             <button
@@ -638,7 +638,7 @@ export default function WorkOrderBomCostPage() {
             <div className="text-center py-16 text-slate-400">一覧を読み込み中…</div>
           ) : summaryRows.length === 0 ? (
             <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-6 text-amber-300 text-center">
-              表示対象の指令がありません
+              表示対象のD指令がありません
             </div>
           ) : (
             <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
@@ -646,8 +646,8 @@ export default function WorkOrderBomCostPage() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-800 border-b border-slate-600">
                     <tr>
-                      <th className="px-4 py-3 text-left font-bold text-slate-300">指令番号</th>
-                      <th className="px-4 py-3 text-left font-bold text-slate-300">指令名称</th>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">D指令番号</th>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">D指令名称</th>
                       <th className="px-4 py-3 text-right font-bold text-sky-300">材料費計</th>
                       <th className="px-4 py-3 text-right font-bold text-violet-300">間接費計</th>
                       <th className="px-4 py-3 text-right font-bold text-emerald-300">工賃計</th>
@@ -701,7 +701,7 @@ export default function WorkOrderBomCostPage() {
                     <tfoot className="bg-slate-800/90 border-t-2 border-yellow-500/40">
                       <tr>
                         <td colSpan={2} className="px-4 py-3 font-bold text-yellow-300">
-                          合計（{summaryRows.length} 指令・保存済みのみ集計）
+                          合計（{summaryRows.length} D指令・保存済みのみ集計）
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-sky-300">
                           ¥{summaryTotals.material_total.toLocaleString()}
@@ -750,7 +750,7 @@ export default function WorkOrderBomCostPage() {
             <span className="text-slate-400 text-sm">集計対象:</span>
             <span className="text-lg font-bold text-violet-300">{data.model}</span>
             {selectedWorkOrder && (
-              <span className="text-sm text-slate-400">（指令: {selectedWorkOrder.order_no}）</span>
+              <span className="text-sm text-slate-400">（D指令: {selectedWorkOrder.order_no}）</span>
             )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -784,15 +784,15 @@ export default function WorkOrderBomCostPage() {
 
           {selectedWorkOrderId && savedCostHeader && !savedCostHeader.has_saved_cost && (
             <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-5 text-amber-200">
-              <p className="font-bold mb-1">この指令は原価が未保存です</p>
+              <p className="font-bold mb-1">このD指令は原価が未保存です</p>
               <p className="text-sm text-amber-100/90">
-                指令原価計算画面で計算・保存すると、この画面に反映されます。
+                D指令原価計算画面で計算・保存すると、この画面に反映されます。
               </p>
               <Link
                 href={`/work-orders/cost?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`}
                 className="inline-block mt-3 px-4 py-2 rounded-lg bg-amber-700/60 hover:bg-amber-600/70 text-sm font-semibold text-white transition"
               >
-                指令原価計算へ →
+                D指令原価計算へ →
               </Link>
             </div>
           )}
@@ -829,13 +829,13 @@ export default function WorkOrderBomCostPage() {
               {selectedWorkOrderId && savedCostHeader && !savedCostHeader.has_saved_cost ? (
                 <>
                   <p className="font-bold">保存済みの原価明細がありません</p>
-                  <p className="text-sm mt-1">指令原価計算で保存してください。</p>
+                  <p className="text-sm mt-1">D指令原価計算で保存してください。</p>
                 </>
               ) : (
                 <>
                   <p className="font-bold">{data.model} の保存明細がありません</p>
                   <p className="text-sm mt-1">
-                    枝番が未登録の場合は BOM 同期後、指令原価計算で保存してください。
+                    枝番が未登録の場合は BOM 同期後、D指令原価計算で保存してください。
                   </p>
                 </>
               )}
@@ -1051,10 +1051,10 @@ export default function WorkOrderBomCostPage() {
                 {data.product_code && <span>製品原価（{data.product_code}）</span>}
                 {data.product_code && selectedWorkOrderId && <span> および </span>}
                 {selectedWorkOrderId && selectedWorkOrder && (
-                  <span>指令原価スナップショット（{selectedWorkOrder.order_no}）</span>
+                  <span>D指令原価スナップショット（{selectedWorkOrder.order_no}）</span>
                 )}
                 {!data.product_code && !selectedWorkOrderId && (
-                  <span className="text-amber-400">（製品コードまたは指令を選択してください）</span>
+                  <span className="text-amber-400">（製品コードまたはD指令を選択してください）</span>
                 )}
               </p>
               {saveMessage && (

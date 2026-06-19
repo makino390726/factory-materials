@@ -68,7 +68,7 @@ export default function BomCostPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // 指令一覧取得
+  // D指令一覧取得
   useEffect(() => {
     fetch('/api/work-orders')
       .then(r => r.json())
@@ -78,7 +78,7 @@ export default function BomCostPage() {
       .catch(() => setWorkOrders([]))
   }, [])
 
-  // 選択指令が変わったら BOM コスト取得
+  // 選択D指令が変わったら BOM コスト取得
   useEffect(() => {
     if (!selectedId) {
       setWorkOrder(null)
@@ -222,7 +222,7 @@ export default function BomCostPage() {
           <div className="flex gap-3">
             <Link href="/work-orders">
               <button className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg transition border border-slate-600">
-                ← 指令一覧
+                ← D指令一覧
               </button>
             </Link>
             <Link href="/">
@@ -244,12 +244,12 @@ export default function BomCostPage() {
           </div>
         )}
 
-        {/* 指令選択 + BOM同期 */}
+        {/* D指令選択 + BOM同期 */}
         <div className="bg-white/95 rounded-2xl shadow-xl border border-violet-100 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">指令選択 / BOM同期</h2>
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">D指令選択 / BOM同期</h2>
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">指令</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">D指令</label>
               <select
                 value={selectedId}
                 onChange={e => setSelectedId(e.target.value)}
@@ -293,13 +293,13 @@ export default function BomCostPage() {
           )}
         </div>
 
-        {/* 指令情報 */}
+        {/* D指令情報 */}
         {workOrder && (
           <div className="bg-white/95 rounded-2xl shadow-xl border border-violet-100 p-6 mb-6">
             <div className="flex items-center justify-between">
               <div className="flex flex-wrap gap-4 text-sm">
                 <div>
-                  <span className="text-slate-500">指令番号:</span>{' '}
+                  <span className="text-slate-500">D指令番号:</span>{' '}
                   <span className="font-semibold text-slate-900">{workOrder.order_no}</span>
                 </div>
                 {workOrder.product_name && (
@@ -443,13 +443,13 @@ export default function BomCostPage() {
                         <tr key={`${branch.id}-detail`} className="bg-violet-50/50">
                           <td colSpan={10} className="px-8 py-4">
                             <p className="text-xs font-semibold text-violet-700 mb-2">
-                              ライン原価明細（part_key: {branch.part_key}）
+                              L指令原価明細（part_key: {branch.part_key}）
                             </p>
                             {branch.cost_items.length === 0 ? (
                               <p className="text-xs text-slate-400">
-                                ライン原価明細がありません。
+                                L指令原価明細がありません。
                                 <Link href="/line-costs" className="ml-2 text-violet-600 underline hover:text-violet-800">
-                                  ライン原価ページで入力
+                                  L指令原価ページで入力
                                 </Link>
                               </p>
                             ) : (
@@ -537,9 +537,9 @@ export default function BomCostPage() {
         {/* 操作説明 */}
         <div className="bg-slate-800/60 rounded-xl border border-slate-700 p-5 text-xs text-slate-400 space-y-1">
           <p className="text-slate-300 font-semibold mb-2">操作フロー</p>
-          <p>① 指令を選択 → ② BOMモデルを入力（例: DR8-008）→ ③「BOM同期」ボタンで枝番を自動生成</p>
-          <p>④ 各枝番の▶をクリックすると、その部品のライン原価明細を展開表示</p>
-          <p>⑤ ライン原価明細がない場合は「ライン原価ページ」から各 part_key の原価を入力</p>
+          <p>① D指令を選択 → ② BOMモデルを入力（例: DR8-008）→ ③「BOM同期」ボタンで枝番を自動生成</p>
+          <p>④ 各枝番の▶をクリックすると、その部品のL指令原価明細を展開表示</p>
+          <p>⑤ L指令原価明細がない場合は「L指令原価ページ」から各 part_key の原価を入力</p>
           <p>⑥「原価スナップショット保存」で現在の集計合計を work_order_costs テーブルに記録</p>
         </div>
       </div>

@@ -41,7 +41,7 @@ export default function ProductsPage() {
   const [labelQuantity, setLabelQuantity] = useState(1)
   const [isPrinting, setIsPrinting] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
-  // 全指令・全ライン一括単価更新
+  // 全D指令・全L指令一括単価更新
   const [isBulkApplyingAll, setIsBulkApplyingAll] = useState(false)
   const [showBulkPreview, setShowBulkPreview] = useState(false)
   const [bulkPreview, setBulkPreview] = useState<{
@@ -403,7 +403,7 @@ export default function ProductsPage() {
                 disabled={isBulkApplyingAll}
                 className="px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-all duration-300 shadow-lg hover:shadow-emerald-500/40 text-sm"
               >
-                {isBulkApplyingAll ? '更新中...' : '全指令・全ライン\n単価一括更新'}
+                {isBulkApplyingAll ? '更新中...' : '全D指令・全L指令\n単価一括更新'}
               </button>
               <button
                 onClick={openNewModal}
@@ -755,7 +755,7 @@ export default function ProductsPage() {
                   { label: '未変更', value: bulkPreview.summary.unchanged, color: 'text-slate-400' },
                   { label: '未登録', value: bulkPreview.summary.skippedNoProduct, color: 'text-orange-400' },
                   { label: '原価0/null', value: bulkPreview.summary.skippedNoCost, color: 'text-orange-400' },
-                  { label: '影響指令数', value: bulkPreview.summary.affectedWorkOrders, color: 'text-cyan-400' },
+                  { label: '影響D指令数', value: bulkPreview.summary.affectedWorkOrders, color: 'text-cyan-400' },
                 ].map((stat) => (
                   <div
                     key={stat.label}
@@ -831,7 +831,7 @@ export default function ProductsPage() {
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 border-2 border-emerald-500/60 rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
             {/* ヘッダ */}
             <div className="p-6 border-b border-emerald-500/30 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-emerald-300">全指令・全ライン 単価一括更新レポート</h2>
+              <h2 className="text-xl font-bold text-emerald-300">全D指令・全L指令 単価一括更新レポート</h2>
               <button
                 onClick={() => setShowBulkReport(false)}
                 className="text-slate-400 hover:text-white text-2xl leading-none"
@@ -848,7 +848,7 @@ export default function ProductsPage() {
                   { label: '未変更', value: bulkReport.summary.unchanged, color: 'text-slate-400' },
                   { label: 'スキップ\n(製品未登録)', value: bulkReport.summary.skippedNoProduct, color: 'text-yellow-400' },
                   { label: 'スキップ\n(原価0/null)', value: bulkReport.summary.skippedNoCost, color: 'text-yellow-400' },
-                  { label: '影響指令数', value: bulkReport.summary.affectedWorkOrders, color: 'text-cyan-400' },
+                  { label: '影響D指令数', value: bulkReport.summary.affectedWorkOrders, color: 'text-cyan-400' },
                 ].map((stat) => (
                   <div
                     key={stat.label}
@@ -873,7 +873,7 @@ export default function ProductsPage() {
                   <table className="w-full text-xs">
                     <thead className="bg-emerald-900/30 border-b border-emerald-500/30">
                       <tr>
-                        <th className="px-3 py-2 text-left text-emerald-300 font-semibold">指令No</th>
+                        <th className="px-3 py-2 text-left text-emerald-300 font-semibold">D指令No</th>
                         <th className="px-3 py-2 text-left text-emerald-300 font-semibold">区分</th>
                         <th className="px-3 py-2 text-left text-emerald-300 font-semibold">行No</th>
                         <th className="px-3 py-2 text-left text-emerald-300 font-semibold">商品コード</th>
@@ -895,7 +895,7 @@ export default function ProductsPage() {
                                   : 'bg-purple-900/50 text-purple-300'
                               }`}
                             >
-                              {row.master_type === 'ライン原価' ? 'ライン' : '指令'}
+                              {row.master_type === 'ライン原価' ? 'L指令' : 'D指令'}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-slate-400">{row.line_no}</td>

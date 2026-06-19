@@ -40,7 +40,7 @@ async function ensureLaborSettingsSchema() {
   return { ok: true as const }
 }
 
-/** GET: 全ラインパーツ割り当ての按分設定一覧（プレビュー付き） */
+/** GET: 全L指令パーツ割り当ての按分設定一覧（プレビュー付き） */
 export async function GET(req: NextRequest) {
   try {
     const schema = await ensureLaborSettingsSchema()

@@ -151,7 +151,7 @@ export default function Ec30BomImportSection() {
             <span>📐</span> EC30 図番管理表（BOM）取込
           </h2>
           <p className="text-sm text-emerald-100/80 mt-2 leading-relaxed">
-            Excel の部品名を、製品マスタ・ラインマスタ・指令マスタ・パーツリスト（heater_parts_master）から候補検索します。
+            Excel の部品名を、製品マスタ・L指令マスタ・D指令マスタ・パーツリスト（heater_parts_master）から候補検索します。
             <strong className="text-white">解析</strong>のあと、各行のドロップダウンで紐付けを確認・修正し、
             <strong className="text-white">取り込み実行</strong>で DB に反映します（マッピングなしも可）。
           </p>

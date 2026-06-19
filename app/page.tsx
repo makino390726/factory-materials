@@ -308,14 +308,14 @@ export default function Home() {
               </div>
             </Link>
 
-            {/* 指令原価BOM */}
+            {/* D指令原価BOM */}
             <Link href="/heater/models/dr8008">
               <div className="group relative h-32 cursor-pointer">
                 <div className="absolute inset-0 bg-gradient-to-br from-amber-600/30 to-orange-900/30 rounded-2xl border-2 border-amber-400 group-hover:border-amber-300 group-hover:shadow-[0_0_20px_rgba(251,191,36,0.6)] transition-all duration-300" />
                 <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
                   <div className="text-3xl">🔢</div>
                   <h3 className="text-base font-bold text-amber-300 group-hover:text-amber-200 transition">
-                    指令原価BOM
+                    D指令原価BOM
                   </h3>
                 </div>
               </div>
@@ -373,7 +373,7 @@ export default function Home() {
                 <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
                   <div className="text-4xl">🧭</div>
                   <h3 className="text-lg font-bold text-sky-300 group-hover:text-sky-200 transition">
-                    ラインマスタ
+                    L指令マスタ
                   </h3>
                 </div>
               </div>
@@ -409,7 +409,7 @@ export default function Home() {
                 <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
                   <div className="text-4xl">📋</div>
                   <h3 className="text-lg font-bold text-indigo-300 group-hover:text-indigo-200 transition">
-                    作業指令マスタ
+                    D指令マスタ
                   </h3>
                 </div>
               </div>

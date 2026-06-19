@@ -138,8 +138,8 @@ function resolveMappingToDb(
   const ref = (m.ref || '').trim()
   if (kind === 'skip' || !kind) return { product_code: null, spec: null }
   if (kind === 'product') return { product_code: ref || null, spec: null }
-  if (kind === 'line') return { product_code: null, spec: ref ? `照合:ライン ${ref}` : null }
-  if (kind === 'work_order') return { product_code: null, spec: ref ? `照合:指令 ${ref}` : null }
+  if (kind === 'line') return { product_code: null, spec: ref ? `照合:L指令 ${ref}` : null }
+  if (kind === 'work_order') return { product_code: null, spec: ref ? `照合:D指令 ${ref}` : null }
   if (kind === 'parts_master') {
     const pm = pmLookup.get(ref)
     return {

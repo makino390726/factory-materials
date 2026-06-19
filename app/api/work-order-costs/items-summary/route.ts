@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// ライン原価の明細を part_key (master_id) 単位で集計
+// L指令原価の明細を part_key (master_id) 単位で集計
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)

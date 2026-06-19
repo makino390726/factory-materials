@@ -79,7 +79,7 @@ const mapRow = (row: Record<string, unknown>, index: number): ImportRow | null =
     return String(parseInt(stripped)).padStart(2, '0')
   }
 
-  // 指令原価インポートは order_no + branch_no (2桁化) を優先キーにする
+  // D指令原価インポートは order_no + branch_no (2桁化) を優先キーにする
   const derivedMasterId = orderNo && branchNo ? `${orderNo}-${formatBranchNo(branchNo)}` : ''
   const rawMasterId = String(masterIdRaw ?? '').trim()
   const masterId = masterType === '指令原価'
@@ -235,7 +235,7 @@ export async function POST(req: Request) {
         targetWorkOrderId = workOrders && workOrders.length > 0 ? String(workOrders[0].id) : null
 
         if (targetWorkOrderId) {
-          // 指令原価インポート時は枝番マスタも同期して、画面の枝番選択に反映する
+          // D指令原価インポート時は枝番マスタも同期して、画面の枝番選択に反映する
           const now = new Date().toISOString()
           const branchMap = new Map<string, { masterId: string; partName: string; subtotal: number }>()
           for (const row of rows) {
@@ -284,7 +284,7 @@ export async function POST(req: Request) {
             branchUpsertedCount += (upsertedBranches || []).length
           }
 
-          // BOM運用の指令として扱えるようにモードを更新（未マイグレーション環境は失敗を無視）
+          // BOM運用のD指令として扱えるようにモードを更新（未マイグレーション環境は失敗を無視）
           const { error: woUpdateError } = await supabase
             .from('work_orders')
             .update({ cost_mode: 'bom', bom_model: representativeOrderNo, updated_at: now })
@@ -522,7 +522,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: 'ライン原価明細をインポートしました',
+      message: 'L指令原価明細をインポートしました',
       summary: {
         totalRows: normalizedRows.length,
         importedRows: importedRowCount,

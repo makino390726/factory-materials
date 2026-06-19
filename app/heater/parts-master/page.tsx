@@ -97,7 +97,7 @@ export default function PartsListPage() {
       let message = `原価再計算が完了しました。\n対象: ${result.totalParts}件\n更新: ${result.updatedCount}件`;
       
       if (result.skippedCount && result.skippedCount > 0) {
-        message += `\n保持: ${result.skippedCount}件（ライン原価データなし）`;
+        message += `\n保持: ${result.skippedCount}件（L指令原価データなし）`;
       }
       
       alert(message);

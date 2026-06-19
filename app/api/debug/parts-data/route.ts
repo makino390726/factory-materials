@@ -17,7 +17,7 @@ export async function GET() {
 
     if (partsError) throw partsError;
 
-    // 2. work_order_cost_items でライン原価のデータを取得
+    // 2. work_order_cost_items でL指令原価のデータを取得
     const { data: costItems, error: costItemsError } = await supabase
       .from('work_order_cost_items')
       .select('*')

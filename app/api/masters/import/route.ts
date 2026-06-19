@@ -57,7 +57,7 @@ export async function POST(req: Request) {
   }
 }
 
-// 作業指令インポート
+// D指令インポート
 async function importWorkOrders(rawData: any[]) {
   const errors: string[] = []
   const workOrders: any[] = []
@@ -66,7 +66,12 @@ async function importWorkOrders(rawData: any[]) {
     const row = rawData[i]
     const rowNum = i + 2
 
-    const orderNo = String(row['作業指令番号'] || row['order_no'] || '').trim()
+    const orderNo = String(
+      row['D指令番号'] ||
+        row['作業指令番号'] ||
+        row['order_no'] ||
+        ''
+    ).trim()
     const productName = String(row['製品名'] || row['product_name'] || '').trim()
     const model = String(
       row['型式'] ||
@@ -81,7 +86,7 @@ async function importWorkOrders(rawData: any[]) {
     const status = String(row['ステータス'] || row['status'] || '').trim()
 
     if (!orderNo) {
-      errors.push(`行${rowNum}: 作業指令番号が未入力`)
+      errors.push(`行${rowNum}: D指令番号が未入力`)
       continue
     }
 
@@ -156,7 +161,7 @@ async function importWorkOrders(rawData: any[]) {
     return NextResponse.json(
       {
         success: false,
-        error: `重複する作業指令(指令番号+型式)が見つかりました: ${conflicts
+        error: `重複するD指令(D指令番号+型式)が見つかりました: ${conflicts
           .map((c) => `${c.order_no}${c.model ? `(${c.model})` : '(型式なし)'}`)
           .join(', ')}`,
         errorCount: conflicts.length,
@@ -177,7 +182,7 @@ async function importWorkOrders(rawData: any[]) {
 
     return NextResponse.json({
       success: true,
-      message: `${workOrders.length}件の作業指令をインポートしました`,
+      message: `${workOrders.length}件のD指令をインポートしました`,
       importCount: workOrders.length,
     })
   } catch (error: any) {
@@ -423,7 +428,7 @@ async function importWorkContents(rawData: any[]) {
   }
 }
 
-// ラインマスタインポート
+// L指令マスタインポート
 async function importLines(rawData: any[]) {
   const errors: string[] = []
   const lines: any[] = []
@@ -432,18 +437,22 @@ async function importLines(rawData: any[]) {
     const row = rawData[i]
     const rowNum = i + 2
 
-    const lineCode = String(row['ラインコード'] || row['line_code'] || '').trim()
-    const lineName = String(row['ライン名'] || row['line_name'] || row['name'] || '').trim()
+    const lineCode = String(
+      row['L指令コード'] || row['ラインコード'] || row['line_code'] || ''
+    ).trim()
+    const lineName = String(
+      row['L指令名'] || row['ライン名'] || row['line_name'] || row['name'] || ''
+    ).trim()
     const sortOrderRaw = String(row['表示順'] || row['sort_order'] || '').trim()
     const isActiveRaw = String(row['有効'] || row['is_active'] || '').trim()
 
     if (!lineCode) {
-      errors.push(`行${rowNum}: ラインコードが未入力`)
+      errors.push(`行${rowNum}: L指令コードが未入力`)
       continue
     }
 
     if (!lineName) {
-      errors.push(`行${rowNum}: ライン名が未入力`)
+      errors.push(`行${rowNum}: L指令名が未入力`)
       continue
     }
 
@@ -510,7 +519,7 @@ async function importLines(rawData: any[]) {
     return NextResponse.json(
       {
         success: false,
-        error: `重複するラインコードが見つかりました: ${conflicts.map((c) => c.line_code).join(', ')}`,
+        error: `重複するL指令コードが見つかりました: ${conflicts.map((c) => c.line_code).join(', ')}`,
         errorCount: conflicts.length,
       },
       { status: 400 }
@@ -529,7 +538,7 @@ async function importLines(rawData: any[]) {
 
     return NextResponse.json({
       success: true,
-      message: `${lines.length}件のラインをインポートしました`,
+      message: `${lines.length}件のL指令をインポートしました`,
       importCount: lines.length,
     })
   } catch (error: any) {

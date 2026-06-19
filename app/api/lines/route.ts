@@ -38,7 +38,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // 各ラインの割り当てを取得
+    // 各L指令の割り当てを取得
     const lines = data || []
     const enriched = await Promise.all(
       lines.map(async (line: any) => {
@@ -60,8 +60,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(enriched)
   } catch (error) {
-    console.error('ライン取得エラー:', error)
-    return NextResponse.json({ error: 'ライン取得に失敗しました' }, { status: 500 })
+    console.error('L指令取得エラー:', error)
+    return NextResponse.json({ error: 'L指令取得に失敗しました' }, { status: 500 })
   }
 }
 
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
 
     if (!line_code || !name) {
       return NextResponse.json(
-        { error: 'ラインコードとライン名は必須です' },
+        { error: 'L指令コードとL指令名は必須です' },
         { status: 400 }
       )
     }
@@ -85,7 +85,7 @@ export async function POST(req: Request) {
 
     if (existing) {
       return NextResponse.json(
-        { error: 'このラインコードは既に登録されています' },
+        { error: 'このL指令コードは既に登録されています' },
         { status: 400 }
       )
     }
@@ -111,8 +111,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(data[0])
   } catch (error) {
-    console.error('ライン登録エラー:', error)
-    return NextResponse.json({ error: 'ライン登録に失敗しました' }, { status: 500 })
+    console.error('L指令登録エラー:', error)
+    return NextResponse.json({ error: 'L指令登録に失敗しました' }, { status: 500 })
   }
 }
 
@@ -127,7 +127,7 @@ export async function PUT(req: Request) {
 
     if (!line_code || !name) {
       return NextResponse.json(
-        { error: 'ラインコードとライン名は必須です' },
+        { error: 'L指令コードとL指令名は必須です' },
         { status: 400 }
       )
     }
@@ -141,7 +141,7 @@ export async function PUT(req: Request) {
 
     if (existing) {
       return NextResponse.json(
-        { error: 'このラインコードは既に登録されています' },
+        { error: 'このL指令コードは既に登録されています' },
         { status: 400 }
       )
     }
@@ -170,8 +170,8 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(data[0])
   } catch (error) {
-    console.error('ライン更新エラー:', error)
-    return NextResponse.json({ error: 'ライン更新に失敗しました' }, { status: 500 })
+    console.error('L指令更新エラー:', error)
+    return NextResponse.json({ error: 'L指令更新に失敗しました' }, { status: 500 })
   }
 }
 
@@ -193,7 +193,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('ライン削除エラー:', error)
-    return NextResponse.json({ error: 'ライン削除に失敗しました' }, { status: 500 })
+    console.error('L指令削除エラー:', error)
+    return NextResponse.json({ error: 'L指令削除に失敗しました' }, { status: 500 })
   }
 }

@@ -79,7 +79,7 @@ export default function LineCostPage() {
         fetchedParts = parts
       }
 
-      // まずローカルに保存されたライン原価があれば復元する（保存時に localStorage に退避）
+      // まずローカルに保存されたL指令原価があれば復元する（保存時に localStorage に退避）
       try {
         const key = `linecost:${selectedPartKey}`
         const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null
@@ -416,8 +416,8 @@ export default function LineCostPage() {
     <div className="p-8 min-h-screen bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-white">
       <header className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold text-white mb-2">ライン原価計算書</h1>
-            <p className="text-sm text-zinc-300">ライン作業の、材料費、工賃、間接費を主受けするイメージ画面</p>
+          <h1 className="text-4xl font-extrabold text-white mb-2">L指令原価計算書</h1>
+            <p className="text-sm text-zinc-300">L指令作業の、材料費、工賃、間接費を主受けするイメージ画面</p>
         </div>
         <div>
           <Link href="/" className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded hover:bg-slate-700">

@@ -23,7 +23,7 @@ const supabase = createClient(
 
 /**
  * GET /api/work-orders/branches?work_order_id=xxx
- * 指定の指令に紐づく枝番一覧を取得する
+ * 指定のD指令に紐づく枝番一覧を取得する
  */
 export async function GET(req: Request) {
   try {
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
 
       if (!model) {
         return NextResponse.json(
-          { error: 'BOMモデルが指定されていません。指令の bom_model を設定してください。' },
+          { error: 'BOMモデルが指定されていません。D指令の bom_model を設定してください。' },
           { status: 400 }
         )
       }
@@ -258,7 +258,7 @@ export async function POST(req: Request) {
 
       const orderNo = String(workOrderData?.order_no || '').trim()
       if (!orderNo) {
-        return NextResponse.json({ error: '指令番号が取得できませんでした' }, { status: 400 })
+        return NextResponse.json({ error: 'D指令番号が取得できませんでした' }, { status: 400 })
       }
 
       const rows = branches.map((b: any, index: number) => {

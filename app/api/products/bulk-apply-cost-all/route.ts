@@ -19,7 +19,7 @@ const PAGE_SIZE = 1000
 
 /**
  * POST /api/products/bulk-apply-cost-all
- * products.cost_price を全 work_order_cost_items（指令原価・ライン原価）の
+ * products.cost_price を全 work_order_cost_items（D指令原価・L指令原価）の
  * unit_price に一括反映し、material_cost / indirect_cost / line_total を再計算する。
  *
  * リクエストボディ: { execute?: boolean }
