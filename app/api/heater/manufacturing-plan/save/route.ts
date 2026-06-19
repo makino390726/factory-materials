@@ -1,13 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { syncConfirmedLaborFromManufacturingPlan } from '@/lib/manufacturing-plan-labor-sync';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const runtime = 'nodejs';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+async function runLaborSyncAfterPlanSave(planId: string) {
+  try {
+    return await syncConfirmedLaborFromManufacturingPlan(supabase, planId);
+  } catch (err) {
+    console.error('labor sync after manufacturing plan save failed:', err);
+    return null;
+  }
+}
 
 // 製造計画一覧取得
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { searchParams } = req.nextUrl;
     const planId = searchParams.get('id');
 
@@ -17,9 +30,12 @@ export async function GET(req: NextRequest) {
         .from('heater_manufacturing_plans')
         .select('*')
         .eq('id', planId)
-        .single();
+        .maybeSingle();
 
       if (planError) throw planError;
+      if (!plan) {
+        return NextResponse.json({ error: '計画が見つかりません' }, { status: 404 });
+      }
 
       const { data: details, error: detailsError } = await supabase
         .from('heater_manufacturing_plan_details')
@@ -57,8 +73,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
     // トランザクション的に処理（計画マスター→明細の順で保存）
     const { data: planData, error: planError } = await supabase
       .from('heater_manufacturing_plans')
@@ -85,7 +99,12 @@ export async function POST(req: NextRequest) {
       if (detailsError) throw detailsError;
     }
 
-    return NextResponse.json({ ...planData, details: detailsToInsert }, { status: 201 });
+    const labor_sync = await runLaborSyncAfterPlanSave(planData.id);
+
+    return NextResponse.json(
+      { ...planData, details: detailsToInsert, labor_sync },
+      { status: 201 }
+    );
   } catch (err: any) {
     console.error('POST error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -100,8 +119,6 @@ export async function PUT(req: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     // 計画マスターを更新
     const { error: planError } = await supabase
@@ -138,7 +155,9 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, id });
+    const labor_sync = await runLaborSyncAfterPlanSave(id);
+
+    return NextResponse.json({ success: true, id, labor_sync });
   } catch (err: any) {
     console.error('PUT error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -154,8 +173,6 @@ export async function DELETE(req: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     // CASCADE設定により明細も自動削除される
     const { error } = await supabase

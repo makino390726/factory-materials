@@ -96,14 +96,20 @@ export default function ManufacturingPlanPage() {
     }
   };
 
-  const fetchManufacturingPlan = async () => {
+  const fetchManufacturingPlan = async (plansOverride?: ManufacturingPlanItem[]) => {
+    const targetPlans = plansOverride ?? plans;
+    if (targetPlans.every((p) => p.quantity === 0)) {
+      setResponse(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/heater/manufacturing-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plans }),
+        body: JSON.stringify({ plans: targetPlans }),
       });
       if (!res.ok) throw new Error('Failed to fetch manufacturing plan');
       const data = await res.json();
@@ -118,39 +124,66 @@ export default function ManufacturingPlanPage() {
   const fetchSavedPlans = async () => {
     try {
       const res = await fetch('/api/heater/manufacturing-plan/save');
-      if (!res.ok) throw new Error('Failed to fetch saved plans');
       const data = await res.json();
-      setSavedPlans(data || []);
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to fetch saved plans');
+      }
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+      setSavedPlans(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch saved plans:', err);
+      setError(err instanceof Error ? err.message : '保存済み計画の取得に失敗しました');
     }
   };
 
+  const buildPlanItemsFromModels = (
+    modelList: { model: string; name: string | null }[],
+    detailsMap?: Map<string, number>
+  ): ManufacturingPlanItem[] =>
+    modelList.map((m) => ({
+      model: m.model,
+      modelName: m.name,
+      quantity: detailsMap?.get(m.model) ?? 0,
+    }));
+
   const loadPlan = async (planId: string) => {
     try {
-      const res = await fetch(`/api/heater/manufacturing-plan/save?id=${planId}`);
-      if (!res.ok) throw new Error('Failed to load plan');
+      setError(null);
+      const res = await fetch(`/api/heater/manufacturing-plan/save?id=${encodeURIComponent(planId)}`);
       const data = await res.json();
-      
+      if (!res.ok || data?.error) {
+        throw new Error(data?.error || 'Failed to load plan');
+      }
+      if (!Array.isArray(data.details)) {
+        throw new Error('計画明細の取得に失敗しました');
+      }
+
       setCurrentPlanId(data.id);
       setPlanName(data.plan_name);
       setFiscalYear(data.fiscal_year);
       setPlanPeriod(data.plan_period || '');
       setNotes(data.notes || '');
-      
-      // 台数データを復元
+
       const detailsMap = new Map<string, number>(
-        data.details.map((d: any) => [String(d.model), Number(d.quantity) || 0])
+        data.details.map((d: { model: string; quantity: number }) => [
+          String(d.model),
+          Number(d.quantity) || 0,
+        ])
       );
-      setPlans((prev) =>
-        prev.map((p) => ({
-          ...p,
-          quantity: detailsMap.get(p.model) ?? 0,
-        }))
-      );
-      
-      // 自動で計算実行
-      setTimeout(() => fetchManufacturingPlan(), 100);
+
+      let modelList = models;
+      if (modelList.length === 0) {
+        const modelRes = await fetch('/api/heater/models');
+        if (!modelRes.ok) throw new Error('機種マスタの取得に失敗しました');
+        modelList = await modelRes.json();
+        setModels(modelList || []);
+      }
+
+      const nextPlans = buildPlanItemsFromModels(modelList, detailsMap);
+      setPlans(nextPlans);
+      await fetchManufacturingPlan(nextPlans);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
@@ -193,7 +226,18 @@ export default function ManufacturingPlanPage() {
       setCurrentPlanId(data.id || currentPlanId);
       setShowSaveDialog(false);
       await fetchSavedPlans();
-      alert('保存しました');
+
+      const sync = data.labor_sync;
+      if (sync && typeof sync.success_count === 'number') {
+        alert(
+          `保存しました\n` +
+            `共通按分の労賃再計算: 成功 ${sync.success_count}件` +
+            (sync.skipped_count ? ` / スキップ ${sync.skipped_count}件` : '') +
+            (sync.failed_count ? ` / 失敗 ${sync.failed_count}件` : '')
+        );
+      } else {
+        alert('保存しました');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
@@ -367,15 +411,15 @@ export default function ManufacturingPlanPage() {
                   min="0"
                   value={plan.quantity}
                   onChange={(e) => handleQuantityChange(plan.model, parseInt(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="台数を入力"
+                  className="w-full px-3 py-2 border-2 border-slate-400 rounded-lg bg-white text-black font-bold text-xl text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="0"
                 />
-                <span className="text-sm text-slate-600 mt-1 block">台</span>
+                <span className="text-sm font-semibold text-slate-800 mt-1 block">台</span>
               </div>
             ))}
           </div>
           <button
-            onClick={fetchManufacturingPlan}
+            onClick={() => fetchManufacturingPlan()}
             disabled={loading || plans.every((p) => p.quantity === 0)}
             className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors text-lg"
           >
