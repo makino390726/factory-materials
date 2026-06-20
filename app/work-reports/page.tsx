@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import ModalOverlay from '@/app/components/ModalOverlay'
 import PushNotificationManager from '@/app/components/PushNotificationManager'
 import { validateWorkReportItem } from '@/lib/work-report-item-validation'
 import {
@@ -122,6 +123,7 @@ export default function WorkReportsPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isDraftLoaded, setIsDraftLoaded] = useState(false)
   const [showGuideModal, setShowGuideModal] = useState(false)
+  const [guideDismissedThisSession, setGuideDismissedThisSession] = useState(false)
   const [dontShowAgain, setDontShowAgain] = useState(false)
   const [notifications, setNotifications] = useState<any[]>([])
   const [showNotifications, setShowNotifications] = useState(false)
@@ -152,12 +154,17 @@ export default function WorkReportsPage() {
       }
     }
 
-    // 入力ガイドの表示チェック
-    const hideGuide = localStorage.getItem('hideWorkReportGuide')
-    if (!hideGuide) {
-      setShowGuideModal(true)
+    // 入力ガイドは通知モーダルの後に表示（同時表示でタップ不能になるのを防ぐ）
+    if (localStorage.getItem('hideWorkReportGuide')) {
+      setGuideDismissedThisSession(true)
     }
   }, [])
+
+  const openGuideIfNeeded = () => {
+    if (guideDismissedThisSession) return
+    if (localStorage.getItem('hideWorkReportGuide')) return
+    setShowGuideModal(true)
+  }
 
   // 未読通知を取得
   useEffect(() => {
@@ -169,9 +176,10 @@ export default function WorkReportsPage() {
         if (response.ok) {
           const data = await response.json()
           setNotifications(data.notifications || [])
-          // 未読通知があればモーダルを表示
           if (data.notifications && data.notifications.length > 0) {
             setShowNotifications(true)
+          } else {
+            openGuideIfNeeded()
           }
         }
       } catch (error) {
@@ -383,6 +391,7 @@ export default function WorkReportsPage() {
     if (dontShowAgain) {
       localStorage.setItem('hideWorkReportGuide', 'true')
     }
+    setGuideDismissedThisSession(true)
     setShowGuideModal(false)
   }
 
@@ -409,11 +418,11 @@ export default function WorkReportsPage() {
   }
 
   const handleCloseNotifications = () => {
-    // 全ての未読通知を既読にする
-    notifications.forEach(notification => {
+    notifications.forEach((notification) => {
       handleMarkAsRead(notification.id)
     })
     setShowNotifications(false)
+    openGuideIfNeeded()
   }
 
   const handleItemChange = (id: string, key: keyof WorkItem, value: string | boolean) => {
@@ -631,11 +640,11 @@ export default function WorkReportsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-amber-950 to-slate-950 relative overflow-hidden pb-12">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-amber-950 to-slate-950 relative overflow-x-hidden pb-12">
       {/* プッシュ通知マネージャー */}
       {staff?.id && <PushNotificationManager staffId={staff.id} />}
       
-      <div className="absolute inset-0 opacity-10">
+      <div className="pointer-events-none absolute inset-0 opacity-10" aria-hidden="true">
         <svg className="w-full h-full" viewBox="0 0 1200 800">
           <pattern id="circuit-work" x="0" y="0" width="220" height="220" patternUnits="userSpaceOnUse">
             <path d="M 0 60 L 60 60 L 60 0" stroke="currentColor" strokeWidth="2" fill="none" className="text-amber-400" />
@@ -1017,10 +1026,14 @@ export default function WorkReportsPage() {
         </div>
 
         {/* 使用機械稼働時間の確認（本保存時・明細に使用機械がある場合） */}
-        {showMachineConfirmModal && machineModalRows.length > 0 && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <ModalOverlay
+          open={showMachineConfirmModal && machineModalRows.length > 0}
+          onClose={() => setShowMachineConfirmModal(false)}
+          zIndex={60}
+          panelClassName="w-full max-w-lg"
+        >
             <div
-              className="relative w-full max-w-lg rounded-2xl border border-amber-200/40 bg-white shadow-2xl"
+              className="rounded-2xl border border-amber-200/40 bg-white shadow-2xl"
               role="dialog"
               aria-labelledby="machine-confirm-title"
             >
@@ -1089,13 +1102,15 @@ export default function WorkReportsPage() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
+        </ModalOverlay>
 
         {/* 通知モーダル */}
-        {showNotifications && notifications.length > 0 && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="relative mx-4 max-w-2xl w-full rounded-2xl border border-rose-200/30 bg-white shadow-2xl max-h-[80vh] flex flex-col">
+        <ModalOverlay
+          open={showNotifications && notifications.length > 0}
+          onClose={handleCloseNotifications}
+          panelClassName="mx-4 w-full max-w-2xl max-h-[80vh]"
+        >
+            <div className="flex max-h-[80vh] flex-col rounded-2xl border border-rose-200/30 bg-white shadow-2xl">
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -1170,13 +1185,15 @@ export default function WorkReportsPage() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
+        </ModalOverlay>
 
         {/* 入力ガイドモーダル */}
-        {showGuideModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="relative mx-4 max-w-2xl w-full rounded-2xl border border-amber-200/30 bg-white shadow-2xl">
+        <ModalOverlay
+          open={showGuideModal}
+          onClose={handleCloseGuide}
+          panelClassName="mx-4 w-full max-w-2xl"
+        >
+            <div className="rounded-2xl border border-amber-200/30 bg-white shadow-2xl">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-2xl font-bold text-slate-900">📝 入力ガイド</h2>
@@ -1234,13 +1251,15 @@ export default function WorkReportsPage() {
                 </div>
               </div>
             </div>
-          </div>
-        )}
+        </ModalOverlay>
 
         {/* D指令新規登録モーダル */}
-        {showAddOrderModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="relative max-w-2xl w-full rounded-2xl border border-blue-200/30 bg-white shadow-2xl max-h-[90vh] flex flex-col">
+        <ModalOverlay
+          open={showAddOrderModal}
+          onClose={handleAddOrderCancel}
+          panelClassName="w-full max-w-2xl max-h-[90vh]"
+        >
+            <div className="flex max-h-[90vh] flex-col rounded-2xl border border-blue-200/30 bg-white shadow-2xl">
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-slate-900">D指令新規登録</h2>
@@ -1279,8 +1298,8 @@ export default function WorkReportsPage() {
                 </button>
               </div>
             </div>
-          </div>
-        )}      </div>
+        </ModalOverlay>
+      </div>
     </div>
   )
 }
