@@ -6,6 +6,7 @@ import {
   ensureMonthlyStoreInitialized,
   fetchMonthlyDurationsFromStore,
   rebuildAllMonthlyDurations,
+  registerMonthlyDuration,
   rowsToMonthlyDurationList,
   syncMonthFromWorkReports,
 } from '@/lib/work-report-monthly-sync'
@@ -165,6 +166,53 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '月別集計に失敗しました'
     console.error('月別集計エラー:', error)
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+/** 月別実績を手動修正（L指令・D指令マスタ編集用） */
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const category = body?.category
+    const code = String(body?.code || '').trim()
+    const year = Number(body?.year)
+    const month = Number(body?.month)
+    const durationMinutes = Number(body?.duration_minutes)
+
+    if (category !== 'line' && category !== 'instruction') {
+      return NextResponse.json(
+        { error: 'category は line または instruction です' },
+        { status: 400 }
+      )
+    }
+
+    if (!code) {
+      return NextResponse.json({ error: 'code が必要です' }, { status: 400 })
+    }
+
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return NextResponse.json({ error: 'year, month が必要です' }, { status: 400 })
+    }
+
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
+      return NextResponse.json({ error: 'duration_minutes は0以上の数値です' }, { status: 400 })
+    }
+
+    await ensureMonthlyStoreInitialized(supabase)
+    await registerMonthlyDuration(
+      supabase,
+      category,
+      code,
+      year,
+      month,
+      Math.round(durationMinutes)
+    )
+
+    return NextResponse.json({ success: true, year, month, duration_minutes: Math.round(durationMinutes) })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '月別実績の更新に失敗しました'
+    console.error('月別実績更新エラー:', error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

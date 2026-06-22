@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { buildProcessManagementPath } from '@/lib/process-management'
+import { formatDurationHours } from '@/lib/work-report-aggregation'
 
 type LineItem = {
   id: string
@@ -71,6 +72,12 @@ type MonthlyDurationHistory = {
   duration_hours: string
 }
 
+type EditableMonthlyRow = {
+  month: string
+  month_label: string
+  duration_minutes: string
+}
+
 export default function LinesPage() {
   const [lines, setLines] = useState<LineItem[]>([])
   const [parts, setParts] = useState<Part[]>([])
@@ -99,6 +106,142 @@ export default function LinesPage() {
   const [laborSettingsLoading, setLaborSettingsLoading] = useState(false)
   const [laborSettingsError, setLaborSettingsError] = useState<string | null>(null)
   const [laborActionLoading, setLaborActionLoading] = useState(false)
+  const [monthlyEdits, setMonthlyEdits] = useState<EditableMonthlyRow[]>([])
+  const [monthlyEditsLoading, setMonthlyEditsLoading] = useState(false)
+  const [deletedMonthlyMonths, setDeletedMonthlyMonths] = useState<Set<string>>(new Set())
+  const [newMonthlyMonth, setNewMonthlyMonth] = useState('')
+  const [newMonthlyMinutes, setNewMonthlyMinutes] = useState('')
+
+  const formatMonthLabel = (monthKey: string) => {
+    const [year, month] = monthKey.split('-')
+    return `${year}年${Number(month)}月`
+  }
+
+  const loadMonthlyEdits = async (lineCode: string) => {
+    setMonthlyEditsLoading(true)
+    try {
+      let rows = monthlyByLine[lineCode]
+      if (!rows) {
+        const response = await fetch(
+          `/api/work-reports/aggregations/monthly?category=line&code=${encodeURIComponent(lineCode)}`
+        )
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(typeof data?.error === 'string' ? data.error : '月別実績の取得に失敗しました')
+        }
+        rows = Array.isArray(data) ? data : []
+      }
+
+      setMonthlyEdits(
+        (rows || []).map((row) => ({
+          month: row.month,
+          month_label: row.month_label,
+          duration_minutes: String(row.duration_minutes),
+        }))
+      )
+      setDeletedMonthlyMonths(new Set())
+      setNewMonthlyMonth('')
+      setNewMonthlyMinutes('')
+    } catch (err) {
+      console.error('月別実績読み込みエラー:', err)
+      setMonthlyEdits([])
+      setError(err instanceof Error ? err.message : '月別実績の取得に失敗しました')
+    } finally {
+      setMonthlyEditsLoading(false)
+    }
+  }
+
+  const saveMonthlyDurations = async (lineCode: string) => {
+    const code = lineCode.trim()
+    if (!code) return
+
+    for (const monthKey of deletedMonthlyMonths) {
+      const [year, month] = monthKey.split('-').map(Number)
+      const response = await fetch('/api/work-reports/aggregations/monthly', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: 'line',
+          code,
+          year,
+          month,
+          duration_minutes: 0,
+        }),
+      })
+      if (!response.ok) {
+        const result = await response.json()
+        throw new Error(result?.error || '月別実績の削除に失敗しました')
+      }
+    }
+
+    for (const row of monthlyEdits) {
+      const [year, month] = row.month.split('-').map(Number)
+      const durationMinutes = Math.round(Number(row.duration_minutes) || 0)
+      const response = await fetch('/api/work-reports/aggregations/monthly', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: 'line',
+          code,
+          year,
+          month,
+          duration_minutes: durationMinutes,
+        }),
+      })
+      if (!response.ok) {
+        const result = await response.json()
+        throw new Error(result?.error || '月別実績の保存に失敗しました')
+      }
+    }
+  }
+
+  const handleAddMonthlyRow = () => {
+    if (!newMonthlyMonth) {
+      setError('追加する月を選択してください')
+      return
+    }
+
+    const minutes = Math.round(Number(newMonthlyMinutes) || 0)
+    if (minutes <= 0) {
+      setError('時間（分）は1以上を入力してください')
+      return
+    }
+
+    if (monthlyEdits.some((row) => row.month === newMonthlyMonth)) {
+      setError('この月は既に登録されています')
+      return
+    }
+
+    setMonthlyEdits((prev) =>
+      [
+        ...prev,
+        {
+          month: newMonthlyMonth,
+          month_label: formatMonthLabel(newMonthlyMonth),
+          duration_minutes: String(minutes),
+        },
+      ].sort((a, b) => b.month.localeCompare(a.month))
+    )
+    setDeletedMonthlyMonths((prev) => {
+      const next = new Set(prev)
+      next.delete(newMonthlyMonth)
+      return next
+    })
+    setNewMonthlyMonth('')
+    setNewMonthlyMinutes('')
+    setError(null)
+  }
+
+  const handleRemoveMonthlyRow = (monthKey: string) => {
+    setMonthlyEdits((prev) => prev.filter((row) => row.month !== monthKey))
+    setDeletedMonthlyMonths((prev) => new Set(prev).add(monthKey))
+  }
+
+  const handleMonthlyMinutesChange = (monthKey: string, value: string) => {
+    setMonthlyEdits((prev) =>
+      prev.map((row) => (row.month === monthKey ? { ...row, duration_minutes: value } : row))
+    )
+  }
 
   const fetchMonthlyDurations = async () => {
     setMonthlyLoading(true)
@@ -318,6 +461,10 @@ export default function LinesPage() {
     setNewPartKey('')
     setNewRatio('100')
     setEditingId(null)
+    setMonthlyEdits([])
+    setDeletedMonthlyMonths(new Set())
+    setNewMonthlyMonth('')
+    setNewMonthlyMinutes('')
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -357,7 +504,12 @@ export default function LinesPage() {
         await savePartAssignments(lineId)
       }
 
+      if (editingId && (monthlyEdits.length > 0 || deletedMonthlyMonths.size > 0)) {
+        await saveMonthlyDurations(formData.line_code.trim())
+      }
+
       await fetchLines()
+      await fetchMonthlyDurations()
       await fetchLaborSettings()
       resetForm()
     } catch (submitError) {
@@ -386,6 +538,7 @@ export default function LinesPage() {
       settings_confirmed: Boolean(a.settings_confirmed),
     }))
     setCurrentAssignments(assignments)
+    void loadMonthlyEdits(line.line_code)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -928,6 +1081,103 @@ export default function LinesPage() {
                   )}
                 </div>
               </div>
+
+              {editingId && (
+                <div className="border-t border-slate-200 pt-4">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-1">月別時間（修正）</h3>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    作業日報から自動登録された月別実績を手動で修正できます。0分にすると該当月の記録を削除します。
+                  </p>
+
+                  {monthlyEditsLoading ? (
+                    <p className="text-sm text-slate-500">月別実績を読み込み中...</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {monthlyEdits.length > 0 ? (
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-slate-50">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-medium text-slate-700">月</th>
+                                <th className="px-3 py-2 text-right font-medium text-slate-700">時間（分）</th>
+                                <th className="px-3 py-2 text-right font-medium text-slate-700">換算</th>
+                                <th className="px-3 py-2 text-center font-medium text-slate-700">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthlyEdits.map((row) => {
+                                const minutes = Math.round(Number(row.duration_minutes) || 0)
+                                return (
+                                  <tr key={row.month} className="border-t border-slate-100">
+                                    <td className="px-3 py-2 text-slate-900 whitespace-nowrap">
+                                      {row.month_label}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={row.duration_minutes}
+                                        onChange={(event) =>
+                                          handleMonthlyMinutesChange(row.month, event.target.value)
+                                        }
+                                        className="w-full px-2 py-1 border border-slate-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                      />
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-slate-600 text-xs whitespace-nowrap">
+                                      {formatDurationHours(minutes)}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveMonthlyRow(row.month)}
+                                        className="text-xs text-rose-600 hover:text-rose-800"
+                                      >
+                                        削除
+                                      </button>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-400">月別実績がありません</p>
+                      )}
+
+                      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">月を追加</label>
+                          <input
+                            type="month"
+                            value={newMonthlyMonth}
+                            onChange={(event) => setNewMonthlyMonth(event.target.value)}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">時間（分）</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={newMonthlyMinutes}
+                            onChange={(event) => setNewMonthlyMinutes(event.target.value)}
+                            placeholder="例: 6000"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddMonthlyRow}
+                          className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium rounded-lg transition"
+                        >
+                          追加
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex flex-wrap gap-3 pt-2">
                 <button
