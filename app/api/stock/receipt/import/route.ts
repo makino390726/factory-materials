@@ -7,6 +7,7 @@ import {
   registerProductCode,
   resolveProductCode,
 } from '@/lib/product-code'
+import { ensureCanonicalProductCode } from '@/lib/product-code-migrate'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -115,15 +116,26 @@ export async function POST(request: NextRequest) {
           throw new Error('単価が正しくありません')
         }
 
-        const { code: productCodeStr, isExisting } = resolveProductCode(importCode, productCodeLookup)
-        if (importCode !== productCodeStr && isExisting) {
-          const remapNote = `${importCode} → ${productCodeStr}`
+        const { code: resolvedCode, isExisting } = resolveProductCode(importCode, productCodeLookup)
+        const productCodeStr = await ensureCanonicalProductCode(supabase, resolvedCode)
+
+        const rawTrimmed = String(rawProductCode ?? '').trim()
+        if (rawTrimmed && productCodeStr !== rawTrimmed) {
+          const remapNote = `${rawTrimmed} → ${productCodeStr}`
           if (!codeRemappings.includes(remapNote)) {
             codeRemappings.push(remapNote)
           }
         }
 
-        if (!isExisting) {
+        const { data: existingProductRow } = await supabase
+          .from('products')
+          .select('id')
+          .eq('product_code', productCodeStr)
+          .maybeSingle()
+
+        const productExists = Boolean(existingProductRow) || isExisting
+
+        if (!productExists) {
           const { error: productError } = await supabase.from('products').insert({
             product_code: productCodeStr,
             name: productName ? String(productName).trim() : productCodeStr,

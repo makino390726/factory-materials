@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { createClient } from '@supabase/supabase-js'
+import { canonicalizeProductCode } from '@/lib/product-code'
+import { ensureCanonicalProductCode } from '@/lib/product-code-migrate'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -61,8 +63,8 @@ export async function POST(request: NextRequest) {
     const errors: string[] = []
     const debugInfo: Array<{ productCode: string; stockQty: number; result: string }> = []
 
-    // 商品コードはExcelの値をそのまま使用（10桁縛りなし）
-    const normalizeProductCode = (code: string): string => code.trim()
+    // 商品コード正規化（0084007700 → 84007700）
+    const normalizeProductCode = (code: string): string => canonicalizeProductCode(code.trim())
 
     for (const row of data as Record<string, unknown>[]) {
       try {
@@ -93,13 +95,15 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        const productCodeStr = await ensureCanonicalProductCode(supabase, productCode)
+
         // 商品マスタへ名前を反映（存在しない場合は新規作成）
         if (productName) {
           const { error: productUpsertError } = await supabase
             .from('products')
             .upsert(
               {
-                product_code: productCode,
+                product_code: productCodeStr,
                 name: productName,
               },
               { onConflict: 'product_code' }
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest) {
           .from('stocks')
           .upsert(
             {
-              product_code: productCode,
+              product_code: productCodeStr,
               stock_qty: stockQty,
               unit_price: unitPrice,
               total_amount: totalAmount,

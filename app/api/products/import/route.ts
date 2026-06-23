@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
+import {
+  buildProductCodeLookupMap,
+  canonicalizeProductCode,
+  resolveProductCode,
+} from '@/lib/product-code'
+import { ensureCanonicalProductCode } from '@/lib/product-code-migrate'
 
 export const runtime = 'nodejs'
 
@@ -156,7 +162,7 @@ async function importStocks(data: any[]) {
     const totalAmount = hasTotalAmount ? parsedTotalAmount : null
     const productName = String(row['商品名'] || '').trim() // 商品マスタ登録用
     const stockData = {
-      product_code: String(row['商品コード'] || row['製品コード'] || '').trim(),
+      product_code: canonicalizeProductCode(String(row['商品コード'] || row['製品コード'] || '').trim()),
       stock_qty: stockQtyRaw,
       unit_price: Number.isFinite(unitPrice as number) ? unitPrice : null,
       total_amount: Number.isFinite(totalAmount as number) ? totalAmount : null,
@@ -197,49 +203,34 @@ async function importStocks(data: any[]) {
     .from('products')
     .select('product_code')
   
-  // コードのマッピング（複数形式に対応）
-  const codeMap = new Map<string, string>()
-  if (existingProducts) {
-    for (const p of existingProducts) {
-      const normalizedCode = String(p.product_code).trim()
-      codeMap.set(normalizedCode, p.product_code)
-      // 数値に変換した形式も登録
-      try {
-        const numCode = String(parseFloat(normalizedCode))
-        if (numCode !== normalizedCode) {
-          codeMap.set(numCode, p.product_code)
-        }
-      } catch (e) {}
-    }
-  }
-  
-  // 存在しない商品コードを自動登録
-  const missingCodes: Array<{code: string; name: string; unitPrice: number | null}> = []
+  const productCodeLookup = buildProductCodeLookupMap(
+    (existingProducts || []).map((p) => String(p.product_code || ''))
+  )
+
+  const missingCodes: Array<{ code: string; name: string; unitPrice: number | null }> = []
   const validStocks = []
-  
+
   for (const stock of stocks) {
-    const normalizedStockCode = String(stock.product_code).trim()
-    const stockNumCode = String(parseFloat(normalizedStockCode))
-    
-    // 複数の形式で検索
-    let foundCode: string | null = null
-    if (codeMap.has(normalizedStockCode)) {
-      foundCode = codeMap.get(normalizedStockCode)!
-    } else if (codeMap.has(stockNumCode)) {
-      foundCode = codeMap.get(stockNumCode)!
-    }
-    
-    if (!foundCode) {
-      // 商品マスタに登録されていない場合、登録対象にする
+    const importCode = String(stock.product_code).trim()
+    const { code: resolvedCode, isExisting } = resolveProductCode(importCode, productCodeLookup)
+    const foundCode = await ensureCanonicalProductCode(supabase, resolvedCode)
+    stock.product_code = foundCode
+
+    const { data: existingProductRow } = await supabase
+      .from('products')
+      .select('id')
+      .eq('product_code', foundCode)
+      .maybeSingle()
+
+    if (!existingProductRow && !isExisting) {
       missingCodes.push({
-        code: stock.product_code,
-        name: (stock as any)._product_name || `商品${stock.product_code}`,
+        code: foundCode,
+        name: (stock as any)._product_name || `商品${foundCode}`,
         unitPrice: Number.isFinite(Number(stock.unit_price)) ? Number(stock.unit_price) : null,
       })
-    } else {
-      stock.product_code = foundCode
-      validStocks.push(stock)
     }
+
+    validStocks.push(stock)
   }
   
   // 未登録商品をproductsテーブルに追加（重複は無視）
@@ -257,13 +248,6 @@ async function importStocks(data: any[]) {
         .from('products')
         .upsert(newProducts, { onConflict: 'product_code' })
         .select()
-      
-      // 登録成功した商品も在庫データに追加
-      for (const stock of stocks) {
-        if (missingCodes.some(m => m.code === stock.product_code)) {
-          validStocks.push(stock)
-        }
-      }
     } catch (error: any) {
       // 対象外エラーのみ記録
       errors.push(`新規商品登録エラー: ${error.message}`)
