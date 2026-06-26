@@ -7,10 +7,27 @@ interface StockItem {
   product_code: string
   name: string
   stock_qty: number
+  unit_price: number | null
+  total_amount: number | null
   updated_at: string
   last_movement_at?: string | null
   has_movement?: boolean
   matches_movement_filter?: boolean
+}
+
+function getStockAmount(item: Pick<StockItem, 'stock_qty' | 'unit_price'>): number | null {
+  const price = item.unit_price
+  if (price == null || Number(price) === 0) return null
+  return (item.stock_qty || 0) * Number(price)
+}
+
+function formatYen(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  return new Intl.NumberFormat('ja-JP', {
+    style: 'currency',
+    currency: 'JPY',
+    maximumFractionDigits: 0,
+  }).format(value)
 }
 
 interface InventoryState {
@@ -146,6 +163,8 @@ export default function InventoryPage() {
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = startIndex + itemsPerPage
   const pagedStocks = filteredStocks.slice(startIndex, endIndex)
+  const totalStockAmount = stocks.reduce((sum, item) => sum + (getStockAmount(item) ?? 0), 0)
+  const filteredStockAmount = filteredStocks.reduce((sum, item) => sum + (getStockAmount(item) ?? 0), 0)
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 relative overflow-hidden">
@@ -315,10 +334,14 @@ export default function InventoryPage() {
               <div className="text-center p-3 border-2 border-cyan-400 rounded-lg bg-cyan-900/20">
                 <p className="text-2xl font-bold text-cyan-300">{stocks.length}</p>
                 <p className="text-xs text-gray-400 mt-1">全製品数</p>
+                <p className="text-lg font-bold text-cyan-200 mt-2">{formatYen(totalStockAmount)}</p>
+                <p className="text-xs text-gray-400 mt-1">在庫金額合計</p>
               </div>
               <div className="text-center p-3 border-2 border-green-400 rounded-lg bg-green-900/20">
                 <p className="text-2xl font-bold text-green-300">{filteredStocks.length}</p>
                 <p className="text-xs text-gray-400 mt-1">フィルタ後の件数</p>
+                <p className="text-lg font-bold text-green-200 mt-2">{formatYen(filteredStockAmount)}</p>
+                <p className="text-xs text-gray-400 mt-1">在庫金額</p>
               </div>
               <div className="text-center p-3 border-2 border-orange-400 rounded-lg bg-orange-900/20">
                 <p className="text-2xl font-bold text-orange-300">
@@ -349,6 +372,8 @@ export default function InventoryPage() {
                       <th className="px-6 py-4 text-left text-cyan-300 font-bold">製品コード</th>
                       <th className="px-6 py-4 text-left text-cyan-300 font-bold">製品名</th>
                       <th className="px-6 py-4 text-right text-cyan-300 font-bold">在庫数</th>
+                      <th className="px-6 py-4 text-right text-cyan-300 font-bold">単価</th>
+                      <th className="px-6 py-4 text-right text-cyan-300 font-bold">在庫金額</th>
                       <th className="px-6 py-4 text-left text-cyan-300 font-bold">最終更新</th>
                       <th className="px-6 py-4 text-center text-cyan-300 font-bold">操作</th>
                     </tr>
@@ -372,6 +397,12 @@ export default function InventoryPage() {
                           }`}>
                             {item.stock_qty}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 text-right text-gray-300 tabular-nums">
+                          {formatYen(item.unit_price)}
+                        </td>
+                        <td className="px-6 py-4 text-right text-gray-300 tabular-nums">
+                          {formatYen(getStockAmount(item))}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-400">
                           {new Date(item.updated_at).toLocaleString('ja-JP', {
