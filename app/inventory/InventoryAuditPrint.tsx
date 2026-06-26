@@ -56,6 +56,10 @@ export function InventoryAuditPrint({ items, printDate }: InventoryAuditPrintPro
             background: #fff !important;
           }
 
+          body[data-print-target='audit-tags'] #inventory-audit-report-print-root {
+            display: none !important;
+          }
+
           #inventory-audit-print-root,
           #inventory-audit-print-root * {
             font-family: ${PRINT_FONT} !important;
@@ -217,5 +221,8 @@ export function printInventoryAuditSheet(items: AuditPrintItem[]): void {
   )
   if (!confirmed) return
 
+  document.body.setAttribute('data-print-target', 'audit-tags')
+  const clearTarget = () => document.body.removeAttribute('data-print-target')
+  window.addEventListener('afterprint', clearTarget, { once: true })
   window.print()
 }

@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { InventoryAuditPrint, printInventoryAuditSheet } from './InventoryAuditPrint'
+import {
+  InventoryAuditReportPrint,
+  printAuditReportSheet,
+  type AuditReportPrintItem,
+  type AuditReportPrintMeta,
+} from './InventoryAuditReportPrint'
 
 interface StockItem {
   product_code: string
@@ -56,6 +62,9 @@ export default function InventoryPage() {
   const [movementEndDate, setMovementEndDate] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [printInStockOnly, setPrintInStockOnly] = useState(true)
+  const [auditReportLoading, setAuditReportLoading] = useState(false)
+  const [auditReportItems, setAuditReportItems] = useState<AuditReportPrintItem[]>([])
+  const [auditReportMeta, setAuditReportMeta] = useState<AuditReportPrintMeta | null>(null)
   const itemsPerPage = 50
   const printDate = useMemo(() => new Date(), [])
 
@@ -182,6 +191,71 @@ export default function InventoryPage() {
     printInventoryAuditSheet(auditPrintItems)
   }
 
+  const handlePrintAuditReport = async () => {
+    if (!movementStartDate || !movementEndDate) {
+      alert('棚卸日と現物監査日を入力してください')
+      return
+    }
+
+    setAuditReportLoading(true)
+    try {
+      const query = new URLSearchParams({
+        countDate: movementStartDate,
+        auditDate: movementEndDate,
+      })
+      const response = await fetch(`/api/inventory/movement-detail?${query.toString()}`)
+      const json = await response.json()
+
+      if (!response.ok || !json.success) {
+        alert(json.error || '監査帳票データの取得に失敗しました')
+        return
+      }
+
+      const apiMap = new Map<string, AuditReportPrintItem>(
+        (json.data || []).map((row: AuditReportPrintItem) => [row.product_code, row])
+      )
+
+      const rows: AuditReportPrintItem[] = filteredStocks
+        .filter((item) => !printInStockOnly || item.stock_qty > 0)
+        .map((item) => {
+          const fromApi = apiMap.get(item.product_code)
+          if (fromApi) return fromApi
+          return {
+            shelf_no: item.shelf_no,
+            product_code: item.product_code,
+            name: item.name,
+            count_day_stock: item.stock_qty,
+            inbound_qty: 0,
+            outbound_qty: 0,
+            audit_stock_qty: item.stock_qty,
+          }
+        })
+
+      if (rows.length === 0) {
+        alert('印刷対象がありません')
+        return
+      }
+
+      const meta: AuditReportPrintMeta = {
+        countDate: movementStartDate,
+        auditDate: movementEndDate,
+        printDate: new Date(),
+      }
+
+      setAuditReportItems(rows)
+      setAuditReportMeta(meta)
+
+      window.setTimeout(() => {
+        printAuditReportSheet(rows, meta)
+      }, 300)
+    } catch (err) {
+      console.error(err)
+      alert('通信エラーが発生しました')
+    } finally {
+      setAuditReportLoading(false)
+    }
+  }
+
   return (
     <>
       <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 relative overflow-hidden print:hidden">
@@ -305,7 +379,7 @@ export default function InventoryPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2">
-                  移動日（開始）
+                  棚卸日
                 </label>
                 <input
                   type="date"
@@ -319,7 +393,7 @@ export default function InventoryPage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-300 mb-2">
-                  移動日（終了）
+                  現物監査日
                 </label>
                 <input
                   type="date"
@@ -364,8 +438,16 @@ export default function InventoryPage() {
               >
                 🖨 棚卸表印刷（A4）{auditPrintItems.length > 0 ? ` ${auditPrintItems.length}件` : ''}
               </button>
+              <button
+                type="button"
+                onClick={handlePrintAuditReport}
+                disabled={loading || auditReportLoading || !movementStartDate || !movementEndDate}
+                className="px-5 py-2 border-2 border-sky-400 text-sky-300 rounded-lg font-bold hover:bg-sky-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {auditReportLoading ? '取得中...' : '🖨 監査帳票印刷（A4横）'}
+              </button>
               <p className="text-xs text-gray-500">
-                棚番・QR・商品コード・商品名・在庫数・出力日（A4縦・1枚8件）
+                棚卸表: QR・棚番・商品名・在庫数（貼付用）｜監査帳票: 棚卸日〜現物監査日の入出庫・在庫推移
               </p>
             </div>
 
@@ -554,6 +636,7 @@ export default function InventoryPage() {
       </div>
 
       <InventoryAuditPrint items={auditPrintItems} printDate={printDate} />
+      <InventoryAuditReportPrint items={auditReportItems} meta={auditReportMeta} />
     </>
   )
 }
