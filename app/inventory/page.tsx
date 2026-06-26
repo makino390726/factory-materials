@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { InventoryAuditPrint, printInventoryAuditSheet } from './InventoryAuditPrint'
 
 interface StockItem {
   product_code: string
   name: string
+  shelf_no: string | null
   stock_qty: number
   unit_price: number | null
   total_amount: number | null
@@ -53,7 +55,9 @@ export default function InventoryPage() {
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [printInStockOnly, setPrintInStockOnly] = useState(true)
   const itemsPerPage = 50
+  const printDate = useMemo(() => new Date(), [])
 
   // 状態をセッション ストレージから復元
   useEffect(() => {
@@ -165,9 +169,22 @@ export default function InventoryPage() {
   const pagedStocks = filteredStocks.slice(startIndex, endIndex)
   const totalStockAmount = stocks.reduce((sum, item) => sum + (getStockAmount(item) ?? 0), 0)
   const filteredStockAmount = filteredStocks.reduce((sum, item) => sum + (getStockAmount(item) ?? 0), 0)
+  const auditPrintItems = filteredStocks
+    .filter((item) => !printInStockOnly || item.stock_qty > 0)
+    .map((item) => ({
+      product_code: item.product_code,
+      name: item.name,
+      shelf_no: item.shelf_no ?? null,
+      stock_qty: item.stock_qty,
+    }))
+
+  const handlePrintAuditSheet = () => {
+    printInventoryAuditSheet(auditPrintItems)
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 relative overflow-hidden">
+    <>
+      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 relative overflow-hidden print:hidden">
       {/* 背景パターン */}
       <div className="absolute inset-0 opacity-10">
         <svg className="w-full h-full" viewBox="0 0 1200 800">
@@ -327,6 +344,29 @@ export default function InventoryPage() {
                   移動条件クリア
                 </button>
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-purple-500/50">
+              <label className="flex items-center cursor-pointer text-gray-300 hover:text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={printInStockOnly}
+                  onChange={(e) => setPrintInStockOnly(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span className="ml-3 font-semibold">棚卸印刷は在庫ありのみ</span>
+              </label>
+              <button
+                type="button"
+                onClick={handlePrintAuditSheet}
+                disabled={loading || auditPrintItems.length === 0}
+                className="px-5 py-2 border-2 border-amber-400 text-amber-300 rounded-lg font-bold hover:bg-amber-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                🖨 棚卸表印刷（A4）{auditPrintItems.length > 0 ? ` ${auditPrintItems.length}件` : ''}
+              </button>
+              <p className="text-xs text-gray-500">
+                棚番・QR・商品コード・商品名・在庫数・出力日（A4縦・1枚8件）
+              </p>
             </div>
 
             {/* 統計情報 */}
@@ -511,6 +551,9 @@ export default function InventoryPage() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+
+      <InventoryAuditPrint items={auditPrintItems} printDate={printDate} />
+    </>
   )
 }

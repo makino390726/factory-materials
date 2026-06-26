@@ -42,6 +42,31 @@ async function fetchAllStocks() {
   return rows
 }
 
+async function fetchProductShelfMap() {
+  const shelfMap = new Map<string, string | null>()
+  let offset = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('product_code, shelf_no')
+      .order('product_code', { ascending: true })
+      .range(offset, offset + BATCH_SIZE - 1)
+
+    if (error) throw error
+    if (!data || data.length === 0) break
+
+    for (const row of data) {
+      const shelfNo = row.shelf_no ? String(row.shelf_no).trim() : ''
+      shelfMap.set(row.product_code, shelfNo || null)
+    }
+    if (data.length < BATCH_SIZE) break
+    offset += BATCH_SIZE
+  }
+
+  return shelfMap
+}
+
 async function fetchAllMovements() {
   const rows: Array<{
     product_code: string
@@ -77,8 +102,11 @@ export async function GET(request: NextRequest) {
     const movementEndDate = searchParams.get('movementEndDate')
     const hasMovementFilter = Boolean(movementType || movementStartDate || movementEndDate)
 
-    const stocks = await fetchAllStocks()
-    const movements = await fetchAllMovements()
+    const [stocks, movements, shelfMap] = await Promise.all([
+      fetchAllStocks(),
+      fetchAllMovements(),
+      fetchProductShelfMap(),
+    ])
 
     const movementMap = new Map<string, string>()
     const matchingProductCodes = new Set<string>()
@@ -121,6 +149,7 @@ export async function GET(request: NextRequest) {
       return {
         product_code: stock.product_code,
         name: (stock as { name?: string | null }).name || '(未登録)',
+        shelf_no: shelfMap.get(stock.product_code) ?? null,
         stock_qty: stock.stock_qty || 0,
         unit_price: (stock as { unit_price?: number | null }).unit_price ?? null,
         total_amount: (stock as { total_amount?: number | null }).total_amount ?? null,
