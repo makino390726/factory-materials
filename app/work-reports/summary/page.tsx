@@ -8,6 +8,12 @@ import {
 } from '@/lib/work-report-aggregation'
 import Link from 'next/link'
 import { buildProcessManagementPath } from '@/lib/process-management'
+import { downloadCsv } from '@/lib/csv-utils'
+import {
+  buildWorkReportSummaryCsv,
+  workReportSummaryCsvFilename,
+  type WorkReportSummaryTab,
+} from '@/lib/work-report-summary-csv'
 
 type SummaryRow = {
   report_id: string
@@ -354,6 +360,40 @@ export default function WorkReportSummaryPage() {
     }, 300)
   }
 
+  const handleCsvExport = () => {
+    const tab = activeTab as WorkReportSummaryTab
+    const content = buildWorkReportSummaryCsv(tab, {
+      rows,
+      dailyData,
+      instructionData,
+      machineData,
+      workGroupData,
+      staffDetails,
+      getItemValue,
+      formatMinutes,
+    })
+
+    const hasData =
+      tab === 'summary'
+        ? rows.length > 0
+        : tab === 'daily'
+          ? dailyData.length > 0
+          : tab === 'instruction'
+            ? instructionData.length > 0
+            : tab === 'machine'
+              ? machineData.length > 0
+              : tab === 'work-group'
+                ? workGroupData.length > 0
+                : staffDetails.length > 0
+
+    if (!hasData) {
+      alert('出力する集計データがありません')
+      return
+    }
+
+    downloadCsv(workReportSummaryCsvFilename(tab, fromDate, toDate), content)
+  }
+
   // 時間差分を分単位で計算
   const calculateDuration = (startTime: string, endTime: string): number => {
     if (!startTime || !endTime) return 0
@@ -561,8 +601,19 @@ export default function WorkReportSummaryPage() {
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold text-slate-900">集計一覧</h2>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               <div className="text-sm text-slate-500">{isLoading ? '読み込み中...' : `${rows.length} 件`}</div>
+              <button
+                type="button"
+                onClick={handleCsvExport}
+                disabled={isLoading}
+                className="px-4 py-2 border-2 border-teal-500 text-teal-700 bg-white hover:bg-teal-50 font-medium rounded-lg transition-all duration-300 shadow-sm flex items-center gap-2 print:hidden"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                CSV出力
+              </button>
               <button
                 type="button"
                 onClick={handlePrint}
