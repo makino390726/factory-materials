@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
   computeItemDurationMinutes,
@@ -10,7 +10,11 @@ import {
 import {
   validateWorkReportItem,
 } from '@/lib/work-report-item-validation'
-import { parseYearMonthFromDate, syncMonthFromWorkReports } from '@/lib/work-report-monthly-sync'
+import {
+  fetchLineCodeById,
+  parseYearMonthFromDate,
+  syncMonthForTouchedCodes,
+} from '@/lib/work-report-monthly-sync'
 
 export const runtime = 'nodejs'
 
@@ -261,6 +265,47 @@ export async function POST(request: NextRequest) {
     }
 
     let reportId = existingReport?.id
+
+    const touchedLineCodes = new Set<string>()
+    const touchedInstructions = new Set<string>()
+    if (!isDraft && workDate) {
+      let previousItems: Array<{ line_id: string | null; instruction_text: string | null }> = []
+      if (reportId) {
+        const { data: prevItems, error: prevItemsError } = await supabase
+          .from('work_report_items')
+          .select('line_id, instruction_text')
+          .eq('report_id', reportId)
+
+        if (prevItemsError) {
+          console.error('Supabaseエラー:', prevItemsError)
+          return NextResponse.json({ error: prevItemsError.message }, { status: 500 })
+        }
+        previousItems = prevItems || []
+      }
+
+      const lineIds = new Set<string>()
+      for (const item of [...previousItems, ...normalizedItems]) {
+        if (item.line_id) lineIds.add(String(item.line_id))
+      }
+
+      const lineCodeById = await fetchLineCodeById(supabase, lineIds)
+      const addTouchedCodes = (
+        items: Array<{ line_id?: unknown; instruction_text?: unknown }>
+      ) => {
+        for (const item of items) {
+          if (item.line_id) {
+            const lineCode = lineCodeById.get(String(item.line_id))
+            if (lineCode) touchedLineCodes.add(lineCode)
+          }
+          const instruction = String(item.instruction_text || '').trim()
+          if (instruction) touchedInstructions.add(instruction)
+        }
+      }
+
+      addTouchedCodes(previousItems)
+      addTouchedCodes(normalizedItems)
+    }
+
     if (reportId) {
       const { error: updateError } = await supabase
         .from('work_reports')
@@ -407,12 +452,26 @@ export async function POST(request: NextRequest) {
 
     if (!isDraft && workDate) {
       const yearMonth = parseYearMonthFromDate(workDate)
-      if (yearMonth) {
-        try {
-          await syncMonthFromWorkReports(supabase, yearMonth.year, yearMonth.month)
-        } catch (syncErr) {
-          console.error('月別実績の同期エラー:', syncErr)
-        }
+      if (
+        yearMonth &&
+        (touchedLineCodes.size > 0 || touchedInstructions.size > 0)
+      ) {
+        const { year, month } = yearMonth
+        const lineCodes = touchedLineCodes
+        const instructionCodes = touchedInstructions
+        after(async () => {
+          try {
+            await syncMonthForTouchedCodes(
+              supabase,
+              year,
+              month,
+              lineCodes,
+              instructionCodes
+            )
+          } catch (syncErr) {
+            console.error('月別実績の同期エラー:', syncErr)
+          }
+        })
       }
     }
 

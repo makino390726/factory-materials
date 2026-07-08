@@ -12,7 +12,9 @@ import {
 
 export type MonthlyCategory = 'line' | 'instruction'
 
-const PAGE_SIZE = 500
+const PAGE_SIZE = 1000
+const REPORT_ID_CHUNK = 250
+const PARALLEL_CHUNK = 25
 
 export function parseYearMonthFromDate(workDate: string) {
   const match = workDate.match(/^(\d{4})-(\d{2})-/)
@@ -40,14 +42,38 @@ type MonthTotals = {
   instructions: Map<string, number>
 }
 
-/** 指定暦月の作業日報明細から集計 */
-export async function computeMonthTotalsFromSource(
+type MonthItemRow = {
+  duration_minutes: number | null
+  line_id: string | null
+  instruction_text: string | null
+}
+
+export async function fetchLineCodeById(
+  supabase: SupabaseClient,
+  lineIds: Iterable<string>
+): Promise<Map<string, string>> {
+  const ids = [...new Set(lineIds)].filter(Boolean)
+  const map = new Map<string, string>()
+  if (ids.length === 0) return map
+
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200)
+    const { data, error } = await supabase.from('lines').select('id, line_code').in('id', chunk)
+    if (error) throw error
+    for (const line of data || []) {
+      map.set(line.id, line.line_code)
+    }
+  }
+
+  return map
+}
+
+async function fetchMonthWorkReportIds(
   supabase: SupabaseClient,
   year: number,
   month: number
-): Promise<MonthTotals> {
+): Promise<string[]> {
   const { monthStart, monthEnd } = getMonthDateRange(year, month)
-
   const { data: reports, error: reportError } = await supabase
     .from('work_reports')
     .select('id')
@@ -56,31 +82,23 @@ export async function computeMonthTotalsFromSource(
     .eq('is_draft', false)
 
   if (reportError) throw reportError
+  return (reports || []).map((report) => report.id)
+}
 
-  const reportIds = (reports || []).map((report) => report.id)
-  const lines = new Map<string, number>()
-  const instructions = new Map<string, number>()
+async function fetchItemsForReports(
+  supabase: SupabaseClient,
+  reportIds: string[]
+): Promise<MonthItemRow[]> {
+  const allItems: MonthItemRow[] = []
 
-  if (reportIds.length === 0) {
-    return { lines, instructions }
-  }
-
-  const { data: allLines, error: lineError } = await supabase
-    .from('lines')
-    .select('id, line_code')
-
-  if (lineError) throw lineError
-
-  const lineCodeById = new Map((allLines || []).map((line) => [line.id, line.line_code]))
-
-  for (let i = 0; i < reportIds.length; i += 100) {
-    const chunkIds = reportIds.slice(i, i + 100)
-
+  for (let i = 0; i < reportIds.length; i += REPORT_ID_CHUNK) {
+    const chunkIds = reportIds.slice(i, i + REPORT_ID_CHUNK)
     let from = 0
+
     while (true) {
       const { data: items, error: itemError } = await supabase
         .from('work_report_items')
-        .select('duration_minutes, line_id, instruction_text, report_id')
+        .select('duration_minutes, line_id, instruction_text')
         .in('report_id', chunkIds)
         .range(from, from + PAGE_SIZE - 1)
 
@@ -88,26 +106,130 @@ export async function computeMonthTotalsFromSource(
       const rows = items || []
       if (rows.length === 0) break
 
-      for (const item of rows) {
-        const minutes = item.duration_minutes || 0
-        if (item.line_id) {
-          const lineCode = lineCodeById.get(item.line_id)
-          if (lineCode) {
-            lines.set(lineCode, (lines.get(lineCode) || 0) + minutes)
-          }
-        }
-        const instruction = (item.instruction_text || '').trim()
-        if (instruction) {
-          instructions.set(instruction, (instructions.get(instruction) || 0) + minutes)
-        }
-      }
-
+      allItems.push(...rows)
       if (rows.length < PAGE_SIZE) break
       from += PAGE_SIZE
     }
   }
 
+  return allItems
+}
+
+function aggregateMonthTotals(
+  items: MonthItemRow[],
+  lineCodeById: Map<string, string>
+): MonthTotals {
+  const lines = new Map<string, number>()
+  const instructions = new Map<string, number>()
+
+  for (const item of items) {
+    const minutes = item.duration_minutes || 0
+    if (item.line_id) {
+      const lineCode = lineCodeById.get(item.line_id)
+      if (lineCode) {
+        lines.set(lineCode, (lines.get(lineCode) || 0) + minutes)
+      }
+    }
+    const instruction = (item.instruction_text || '').trim()
+    if (instruction) {
+      instructions.set(instruction, (instructions.get(instruction) || 0) + minutes)
+    }
+  }
+
   return { lines, instructions }
+}
+
+/** 指定暦月の作業日報明細から集計 */
+export async function computeMonthTotalsFromSource(
+  supabase: SupabaseClient,
+  year: number,
+  month: number
+): Promise<MonthTotals> {
+  const reportIds = await fetchMonthWorkReportIds(supabase, year, month)
+  if (reportIds.length === 0) {
+    return { lines: new Map(), instructions: new Map() }
+  }
+
+  const items = await fetchItemsForReports(supabase, reportIds)
+  const lineIds = items.map((item) => item.line_id).filter((id): id is string => Boolean(id))
+  const lineCodeById = await fetchLineCodeById(supabase, lineIds)
+
+  return aggregateMonthTotals(items, lineCodeById)
+}
+
+type MonthlyDurationEntry = {
+  category: MonthlyCategory
+  code: string
+  durationMinutes: number
+}
+
+async function registerMonthlyDurationsBatch(
+  supabase: SupabaseClient,
+  year: number,
+  month: number,
+  entries: MonthlyDurationEntry[]
+) {
+  if (entries.length === 0) return
+
+  const now = new Date().toISOString()
+  const fiscalYear = getFiscalYear(year, month)
+  const previous = getPreviousFiscalYearSameMonth(year, month)
+
+  for (let i = 0; i < entries.length; i += PARALLEL_CHUNK) {
+    const chunk = entries.slice(i, i + PARALLEL_CHUNK)
+    await Promise.all(
+      chunk.map((entry) =>
+        supabase
+          .from('work_report_monthly_durations')
+          .delete()
+          .eq('category', entry.category)
+          .eq('code', entry.code)
+          .eq('year', previous.year)
+          .eq('month', previous.month)
+      )
+    )
+  }
+
+  const upserts: Array<Record<string, unknown>> = []
+  const zeroEntries: MonthlyDurationEntry[] = []
+
+  for (const entry of entries) {
+    if (entry.durationMinutes <= 0) {
+      zeroEntries.push(entry)
+      continue
+    }
+    upserts.push({
+      category: entry.category,
+      code: entry.code,
+      year,
+      month,
+      duration_minutes: entry.durationMinutes,
+      updated_at: now,
+      fiscal_year: fiscalYear,
+    })
+  }
+
+  if (upserts.length > 0) {
+    const { error } = await supabase
+      .from('work_report_monthly_durations')
+      .upsert(upserts, { onConflict: 'category,code,year,month' })
+    if (error) throw error
+  }
+
+  for (let i = 0; i < zeroEntries.length; i += PARALLEL_CHUNK) {
+    const chunk = zeroEntries.slice(i, i + PARALLEL_CHUNK)
+    await Promise.all(
+      chunk.map((entry) =>
+        supabase
+          .from('work_report_monthly_durations')
+          .delete()
+          .eq('category', entry.category)
+          .eq('code', entry.code)
+          .eq('year', year)
+          .eq('month', month)
+      )
+    )
+  }
 }
 
 /**
@@ -123,44 +245,42 @@ export async function registerMonthlyDuration(
   month: number,
   durationMinutes: number
 ) {
-  const now = new Date().toISOString()
-  const fiscalYear = getFiscalYear(year, month)
-  const previous = getPreviousFiscalYearSameMonth(year, month)
+  await registerMonthlyDurationsBatch(supabase, year, month, [
+    { category, code, durationMinutes },
+  ])
+}
 
-  await supabase
-    .from('work_report_monthly_durations')
-    .delete()
-    .eq('category', category)
-    .eq('code', code)
-    .eq('year', previous.year)
-    .eq('month', previous.month)
+/** 変更のあった L指令・D指令のみ月別実績を再集計して登録 */
+export async function syncMonthForTouchedCodes(
+  supabase: SupabaseClient,
+  year: number,
+  month: number,
+  lineCodes: Iterable<string>,
+  instructionCodes: Iterable<string>
+) {
+  const lines = new Set(lineCodes)
+  const instructions = new Set(instructionCodes)
+  if (lines.size === 0 && instructions.size === 0) return
 
-  if (durationMinutes <= 0) {
-    await supabase
-      .from('work_report_monthly_durations')
-      .delete()
-      .eq('category', category)
-      .eq('code', code)
-      .eq('year', year)
-      .eq('month', month)
-    return
+  const totals = await computeMonthTotalsFromSource(supabase, year, month)
+  const entries: MonthlyDurationEntry[] = []
+
+  for (const code of lines) {
+    entries.push({
+      category: 'line',
+      code,
+      durationMinutes: totals.lines.get(code) || 0,
+    })
+  }
+  for (const code of instructions) {
+    entries.push({
+      category: 'instruction',
+      code,
+      durationMinutes: totals.instructions.get(code) || 0,
+    })
   }
 
-  const payload: Record<string, unknown> = {
-    category,
-    code,
-    year,
-    month,
-    duration_minutes: durationMinutes,
-    updated_at: now,
-    fiscal_year: fiscalYear,
-  }
-
-  const { error } = await supabase
-    .from('work_report_monthly_durations')
-    .upsert(payload, { onConflict: 'category,code,year,month' })
-
-  if (error) throw error
+  await registerMonthlyDurationsBatch(supabase, year, month, entries)
 }
 
 /** 指定暦月の全ライン・D指令を作業日報から再集計して登録 */
@@ -187,27 +307,23 @@ export async function syncMonthFromWorkReports(
     if (row.category === 'instruction') touchedInstructions.add(row.code)
   }
 
+  const entries: MonthlyDurationEntry[] = []
   for (const code of touchedLineCodes) {
-    await registerMonthlyDuration(
-      supabase,
-      'line',
+    entries.push({
+      category: 'line',
       code,
-      year,
-      month,
-      totals.lines.get(code) || 0
-    )
+      durationMinutes: totals.lines.get(code) || 0,
+    })
+  }
+  for (const code of touchedInstructions) {
+    entries.push({
+      category: 'instruction',
+      code,
+      durationMinutes: totals.instructions.get(code) || 0,
+    })
   }
 
-  for (const code of touchedInstructions) {
-    await registerMonthlyDuration(
-      supabase,
-      'instruction',
-      code,
-      year,
-      month,
-      totals.instructions.get(code) || 0
-    )
-  }
+  await registerMonthlyDurationsBatch(supabase, year, month, entries)
 }
 
 /** 既存の作業日報から月別実績を一括再構築 */
@@ -245,7 +361,6 @@ export function rowsToMonthlyDurationList(
   return rows
     .map((row) => {
       const month = `${row.year}-${String(row.month).padStart(2, '0')}`
-      // 表示は常に暦月から年度を算出（DBの fiscal_year が旧定義のまま残っていても正しく表示）
       const fiscalYear = getFiscalYear(row.year, row.month)
       return {
         month,
@@ -286,9 +401,7 @@ export async function fetchMonthlyDurationsFromStore(
   const grouped: Record<string, MonthlyDurationRow[]> = {}
   for (const row of data || []) {
     if (!grouped[row.code]) grouped[row.code] = []
-    grouped[row.code].push(
-      rowsToMonthlyDurationList([row])[0]
-    )
+    grouped[row.code].push(rowsToMonthlyDurationList([row])[0])
   }
 
   for (const codeKey of Object.keys(grouped)) {
