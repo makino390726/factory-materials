@@ -35,6 +35,7 @@ type ProductionLotAnalysis = {
     period_end: string
     completed_qty: number
     receipt_slip_no: string | null
+    notes: string | null
   }
   is_cumulative?: boolean
   total_lead_time_st: number | null
@@ -193,11 +194,13 @@ function ProcessManagementContent() {
   const [periodEndInput, setPeriodEndInput] = useState(initialWorkDate)
   const [completedQtyInput, setCompletedQtyInput] = useState('')
   const [receiptSlipNoInput, setReceiptSlipNoInput] = useState('')
+  const [notesInput, setNotesInput] = useState('')
   const [lotsResult, setLotsResult] = useState<ProductionLotsResult | null>(null)
   const [selectedLotId, setSelectedLotId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null)
   const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear())
   const [fiscalSummary, setFiscalSummary] = useState<FiscalYearWorkGroupSummary | null>(null)
   const [fiscalLoading, setFiscalLoading] = useState(false)
@@ -279,10 +282,20 @@ function ProcessManagementContent() {
     }
   }, [selectedTarget, periodEndInput])
 
-  const fetchLots = async () => {
+  const fetchLots = async (options?: { preferLotId?: string; withProgress?: boolean }) => {
     if (!selectedTarget) return
     setIsLoading(true)
     setError(null)
+    let progressTimer: ReturnType<typeof setInterval> | null = null
+    if (options?.withProgress) {
+      setProgress({ pct: 45, label: '工程実績を集計しています…' })
+      progressTimer = setInterval(() => {
+        setProgress((prev) => {
+          if (!prev || prev.pct >= 90) return prev
+          return { ...prev, pct: Math.min(90, prev.pct + 3) }
+        })
+      }, 400)
+    }
     try {
       const params = new URLSearchParams({
         list: 'production-lots',
@@ -299,15 +312,25 @@ function ProcessManagementContent() {
         setFiscalYear(result.fiscal_year_summary.fiscal_year)
       }
       if (result.lots.length > 0) {
-        setSelectedLotId(result.lots[result.lots.length - 1].lot.id)
+        const preferred =
+          options?.preferLotId &&
+          result.lots.find((item) => item.lot.id === options.preferLotId)
+        setSelectedLotId(preferred?.lot.id || result.lots[result.lots.length - 1].lot.id)
       } else {
         setSelectedLotId(null)
+      }
+      if (options?.withProgress) {
+        setProgress({ pct: 100, label: '完了' })
       }
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Unknown error')
       setLotsResult(null)
     } finally {
+      if (progressTimer) clearInterval(progressTimer)
       setIsLoading(false)
+      if (options?.withProgress) {
+        window.setTimeout(() => setProgress(null), 500)
+      }
     }
   }
 
@@ -354,6 +377,7 @@ function ProcessManagementContent() {
 
     setIsSaving(true)
     setError(null)
+    setProgress({ pct: 15, label: '入庫ロットを保存しています…' })
     try {
       const res = await fetch('/api/process-management', {
         method: 'POST',
@@ -364,23 +388,20 @@ function ProcessManagementContent() {
           period_end: periodEndInput,
           completed_qty: qty,
           receipt_slip_no: receiptSlipNoInput.trim() || null,
+          notes: notesInput.trim() || null,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || '保存に失敗しました')
-      const result = data as ProductionLotsResult
-      setLotsResult(result)
+
       setCompletedQtyInput('')
       setReceiptSlipNoInput('')
-      if (result.fiscal_year_summary) {
-        setFiscalSummary(result.fiscal_year_summary)
-        setFiscalYear(result.fiscal_year_summary.fiscal_year)
-      }
-      if (result.lots.length > 0) {
-        setSelectedLotId(result.lots[result.lots.length - 1].lot.id)
-      }
+      setNotesInput('')
+      setProgress({ pct: 40, label: '保存完了。工程実績を集計しています…' })
+      await fetchLots({ preferLotId: data?.lot_id, withProgress: true })
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存に失敗しました')
+      setProgress(null)
     } finally {
       setIsSaving(false)
     }
@@ -510,29 +531,74 @@ function ProcessManagementContent() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black"
               />
             </div>
+            <div className="lg:col-span-2">
+              <label className="text-sm font-medium text-black">備考（規格）</label>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={notesInput}
+                  onChange={(e) => setNotesInput(e.target.value)}
+                  placeholder="例: UF / DF / SK600L-UF"
+                  className="min-w-[12rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-black"
+                />
+                {['UF', 'DF'].map((spec) => (
+                  <button
+                    key={spec}
+                    type="button"
+                    onClick={() => setNotesInput(spec)}
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                      notesInput.trim().toUpperCase() === spec
+                        ? 'border-violet-500 bg-violet-100 text-violet-800'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {spec}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                同一指令で UF/DF など規格違いがある場合は、ここに登録してロットを区別します。
+              </p>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={fetchLots}
-              disabled={isLoading || !selectedTarget}
+              onClick={() => fetchLots()}
+              disabled={isLoading || isSaving || !selectedTarget}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-white font-semibold hover:bg-indigo-500 disabled:opacity-60"
             >
-              {isLoading ? '読み込み中...' : '再集計'}
+              {isLoading && !isSaving ? '読み込み中...' : '再集計'}
             </button>
             <button
               type="button"
               onClick={handleSaveLot}
-              disabled={isSaving || !selectedTarget}
+              disabled={isSaving || isLoading || !selectedTarget}
               className="rounded-lg bg-violet-600 px-4 py-2 text-white font-semibold hover:bg-violet-500 disabled:opacity-60"
             >
               {isSaving ? '保存中...' : '入庫ロットを登録'}
             </button>
           </div>
 
+          {progress && (
+            <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                <span className="font-medium text-indigo-900">{progress.label}</span>
+                <span className="tabular-nums text-indigo-700">{progress.pct}%</span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-indigo-100">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-300"
+                  style={{ width: `${progress.pct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <p className="mt-3 text-xs text-slate-600">
-            初回ロットは累計（最初の作業日報〜完成日）、同じ機種の前回入庫がある場合は前回完成日の翌日から集計します。
+            完成日は前後どちらでも登録できます（さかのぼり可）。登録・削除のたびに、前後ロットの製作期間を完成日順につなぎ直します。
+            同日に UF/DF など規格違いがある場合は、備考を分けて同じ完成日で複数ロット登録できます。
           </p>
         </div>
 
@@ -557,10 +623,13 @@ function ProcessManagementContent() {
                 <p className="text-lg font-semibold text-slate-900">{lotsResult.lots.length}件</p>
               </div>
               <div className="rounded-2xl border border-indigo-100 bg-white/90 p-4 shadow">
-                <p className="text-xs text-slate-500">次ロットの開始日（自動）</p>
+                <p className="text-xs text-slate-500">次ロットの開始目安</p>
                 <p className="text-lg font-semibold text-indigo-700">
                   {lotsResult.suggested_period_start ||
                     (lotsResult.lots.length === 0 ? '累計（初回）' : '—')}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  同日の規格違い（UF/DF）や、過去伝票のさかのぼり登録も可
                 </p>
               </div>
             </div>
@@ -573,6 +642,7 @@ function ProcessManagementContent() {
                     <th className="py-2 pr-4">期間</th>
                     <th className="py-2 pr-4 text-right">完成台数</th>
                     <th className="py-2 pr-4">伝票</th>
+                    <th className="py-2 pr-4">備考（規格）</th>
                     <th className="py-2 pr-4 text-right">合計ST</th>
                     <th className="py-2">操作</th>
                   </tr>
@@ -580,7 +650,7 @@ function ProcessManagementContent() {
                 <tbody>
                   {lotsResult.lots.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-slate-400">
+                      <td colSpan={6} className="py-6 text-center text-slate-400">
                         製作ロットが未登録です。上のフォームから入庫を登録してください。
                       </td>
                     </tr>
@@ -602,6 +672,15 @@ function ProcessManagementContent() {
                         </td>
                         <td className="py-3 pr-4 text-right">{item.lot.completed_qty}台</td>
                         <td className="py-3 pr-4">{item.lot.receipt_slip_no || '—'}</td>
+                        <td className="py-3 pr-4">
+                          {item.lot.notes ? (
+                            <span className="inline-flex rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                              {item.lot.notes}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
                         <td className="py-3 pr-4 text-right font-medium">
                           {formatSt(item.total_lead_time_st)}
                         </td>
@@ -634,6 +713,7 @@ function ProcessManagementContent() {
                   {selectedLot.lot.period_start} 〜 {selectedLot.lot.period_end} /{' '}
                   {selectedLot.lot.completed_qty}台完成
                   {selectedLot.lot.receipt_slip_no ? ` / 伝票 ${selectedLot.lot.receipt_slip_no}` : ''}
+                  {selectedLot.lot.notes ? ` / 規格 ${selectedLot.lot.notes}` : ''}
                 </p>
                 <p className="text-xs text-slate-500 mb-4">
                   平均ST = 会計年度の作業グループ所要時間 ÷ 年間制作台数。ロットの1台STとの差（変動）で工程進捗を確認します。

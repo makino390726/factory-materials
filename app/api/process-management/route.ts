@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'completed_qty は1以上の数値です' }, { status: 400 })
     }
 
-    await createProductionLot(
+    const lotId = await createProductionLot(
       supabase,
       targetType,
       targetCode,
@@ -136,12 +136,13 @@ export async function POST(request: NextRequest) {
       notes
     )
 
-    const result = await analyzeProductionLots(
-      supabase,
-      targetType,
-      normalizeTargetCode(targetCode)
-    )
-    return NextResponse.json(result)
+    // 重い全ロット再集計はクライアント側の GET に分離し、保存レスポンスを速く返す
+    return NextResponse.json({
+      success: true,
+      lot_id: lotId,
+      target_type: targetType,
+      target_code: normalizeTargetCode(targetCode),
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : '製作ロットの保存に失敗しました'
     console.error('工程管理POSTエラー:', error)

@@ -1107,55 +1107,23 @@ async function resolveTargetContext(
   return { targetName, lineId: null as string | null }
 }
 
-async function analyzeSingleProductionLot(
-  supabase: SupabaseClient,
-  lot: ProductionLotRecord,
-  lineId: string | null,
-  workGroupNames: Map<string, string>,
-  fiscalAvgStCache: Map<number, Map<string, number>>
-): Promise<ProductionLotAnalysis> {
-  const minutesByGroup = await aggregateTargetWorkGroupMinutesInRange(
-    supabase,
-    lot.target_type,
-    lot.target_code,
-    lot.period_start,
-    lot.period_end,
-    lineId
-  )
-  const fiscalYear = getFiscalYearFromDate(lot.period_end)
-  let baselineSt = new Map<string, number>()
-  if (fiscalYear !== null) {
-    if (!fiscalAvgStCache.has(fiscalYear)) {
-      fiscalAvgStCache.set(
-        fiscalYear,
-        await getFiscalYearAverageStByWorkGroup(
-          supabase,
-          lot.target_type,
-          lot.target_code,
-          fiscalYear
-        )
-      )
-    }
-    baselineSt = fiscalAvgStCache.get(fiscalYear) || new Map()
-  }
-  const rows = buildWorkGroupRowsFromMinutes(
-    minutesByGroup,
-    lot.completed_qty,
-    workGroupNames,
-    baselineSt
-  )
-  const bottleneckBySt = rows.find((row) => row.is_bottleneck_by_st)?.work_group_code ?? null
-  const bottleneckByVariation =
-    rows.find((row) => row.is_bottleneck_by_variation)?.work_group_code ?? null
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
 
-  return {
-    lot,
-    is_cumulative: false,
-    total_lead_time_st: sumLeadTimeSt(minutesByGroup, lot.completed_qty),
-    rows,
-    bottleneck_by_st: bottleneckBySt,
-    bottleneck_by_variation: bottleneckByVariation,
-  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) || 1 }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++
+      results[index] = await mapper(items[index], index)
+    }
+  })
+
+  await Promise.all(workers)
+  return results
 }
 
 export async function listProductionLotRecords(
@@ -1204,39 +1172,108 @@ export async function analyzeProductionLots(
   const records = await listProductionLotRecords(supabase, targetType, targetCode)
   const workGroupNames = await fetchWorkGroupNames(supabase)
   const fiscalAvgStCache = new Map<number, Map<string, number>>()
+  const fiscalSummaryCache = new Map<number, FiscalYearWorkGroupSummary>()
+
+  const ensureFiscalBaseline = async (fiscalYear: number) => {
+    if (fiscalAvgStCache.has(fiscalYear)) {
+      return fiscalAvgStCache.get(fiscalYear) || new Map<string, number>()
+    }
+    const summary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+      supabase,
+      targetType,
+      targetCode,
+      fiscalYear
+    )
+    fiscalSummaryCache.set(fiscalYear, summary)
+    const map = new Map<string, number>()
+    for (const row of summary.rows) {
+      if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
+        map.set(row.work_group_code, row.avg_st_minutes)
+      }
+    }
+    fiscalAvgStCache.set(fiscalYear, map)
+    return map
+  }
 
   const lastLot = records.length > 0 ? records[records.length - 1] : null
   const suggestedPeriodStart = lastLot ? shiftCalendarDate(lastLot.period_end, 1) : null
   const displayFiscalYear =
     (lastLot ? getFiscalYearFromDate(lastLot.period_end) : null) ?? null
 
-  const lots: ProductionLotAnalysis[] = []
-  for (let index = 0; index < records.length; index++) {
-    const record = records[index]
-    const analysis = await analyzeSingleProductionLot(
-      supabase,
-      record,
-      lineId,
-      workGroupNames,
-      fiscalAvgStCache
-    )
-    lots.push({
-      ...analysis,
-      is_cumulative: index === 0,
-    })
+  if (displayFiscalYear !== null) {
+    try {
+      await ensureFiscalBaseline(displayFiscalYear)
+    } catch {
+      // 年度比較が取れなくてもロット集計自体は継続
+    }
   }
+
+  const periodQtyTotals = new Map<string, number>()
+  for (const record of records) {
+    const key = `${record.period_start}|${record.period_end}`
+    periodQtyTotals.set(key, (periodQtyTotals.get(key) || 0) + record.completed_qty)
+  }
+
+  const analyzed = await mapPool(records, 3, async (record, index) => {
+    const minutesByGroup = await aggregateTargetWorkGroupMinutesInRange(
+      supabase,
+      record.target_type,
+      record.target_code,
+      record.period_start,
+      record.period_end,
+      lineId
+    )
+
+    // 同期間の複数ロット（同日UF/DFなど）は実績時間を台数比で按分
+    const periodKey = `${record.period_start}|${record.period_end}`
+    const periodTotalQty = periodQtyTotals.get(periodKey) || record.completed_qty
+    const share =
+      periodTotalQty > 0 ? record.completed_qty / periodTotalQty : 1
+    const allocatedMinutes = new Map<string, number>()
+    for (const [group, minutes] of minutesByGroup) {
+      allocatedMinutes.set(group, minutes * share)
+    }
+
+    const fiscalYear = getFiscalYearFromDate(record.period_end)
+    let baselineSt = new Map<string, number>()
+    if (fiscalYear !== null) {
+      try {
+        baselineSt = await ensureFiscalBaseline(fiscalYear)
+      } catch {
+        baselineSt = new Map()
+      }
+    }
+    const rows = buildWorkGroupRowsFromMinutes(
+      allocatedMinutes,
+      record.completed_qty,
+      workGroupNames,
+      baselineSt
+    )
+    return {
+      lot: record,
+      is_cumulative: index === 0,
+      total_lead_time_st: sumLeadTimeSt(allocatedMinutes, record.completed_qty),
+      rows,
+      bottleneck_by_st: rows.find((row) => row.is_bottleneck_by_st)?.work_group_code ?? null,
+      bottleneck_by_variation:
+        rows.find((row) => row.is_bottleneck_by_variation)?.work_group_code ?? null,
+    } satisfies ProductionLotAnalysis
+  })
 
   let fiscalYearSummary: FiscalYearWorkGroupSummary | null = null
   if (displayFiscalYear !== null) {
-    try {
-      fiscalYearSummary = await aggregateTargetWorkGroupSummaryInFiscalYear(
-        supabase,
-        targetType,
-        targetCode,
-        displayFiscalYear
-      )
-    } catch {
-      fiscalYearSummary = null
+    fiscalYearSummary = fiscalSummaryCache.get(displayFiscalYear) ?? null
+    if (!fiscalYearSummary) {
+      try {
+        fiscalYearSummary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+          supabase,
+          targetType,
+          targetCode,
+          displayFiscalYear
+        )
+      } catch {
+        fiscalYearSummary = null
+      }
     }
   }
 
@@ -1245,7 +1282,7 @@ export async function analyzeProductionLots(
     target_code: normalizeTargetCode(targetCode),
     target_name: targetName,
     suggested_period_start: suggestedPeriodStart,
-    lots,
+    lots: analyzed,
     fiscal_year_summary: fiscalYearSummary,
   }
 }
@@ -1257,52 +1294,16 @@ function shiftCalendarDate(dateStr: string, days: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-async function reportHasTargetActivity(
-  supabase: SupabaseClient,
-  reportId: string,
-  targetType: ProcessTargetType,
-  targetCode: string,
-  lineId: string | null
-) {
-  let query = supabase
-    .from('work_report_items')
-    .select('line_id, instruction_text')
-    .eq('report_id', reportId)
-    .limit(20)
-
-  if (targetType === 'line' && lineId) {
-    query = query.eq('line_id', lineId)
-  }
-
-  const { data: items, error } = await query
-  if (error) throw error
-  if (!items?.length) return false
-
-  if (targetType === 'line') {
-    return items.some((item) => item.line_id === lineId)
-  }
-
-  return items.some((item) => instructionMatchesOrderNo(item.instruction_text, targetCode))
-}
-
-/** 製作開始日: 前ロットあり→前回完成日の翌日、なし→累計（最初の作業日） */
-export async function resolveProductionLotPeriodStart(
+/** 完成日以前で最初に該当する作業日を探す（最古ロットの製作開始日） */
+async function resolveFirstActivityDate(
   supabase: SupabaseClient,
   targetType: ProcessTargetType,
   targetCode: string,
   periodEnd: string,
-  lineId: string | null,
-  existingLots?: ProductionLotRecord[]
+  lineId: string | null
 ) {
   const end = normalizeWorkDate(periodEnd)
   const normalizedCode = normalizeTargetCode(targetCode)
-  const records = existingLots ?? (await listProductionLotRecords(supabase, targetType, normalizedCode))
-  const lastLot = records.length > 0 ? records[records.length - 1] : null
-
-  if (lastLot) {
-    return shiftCalendarDate(lastLot.period_end, 1)
-  }
-
   const pageSize = 500
   let offset = 0
 
@@ -1320,17 +1321,35 @@ export async function resolveProductionLotPeriodStart(
     const batch = reports || []
     if (batch.length === 0) break
 
-    for (const report of batch) {
-      const hasActivity = await reportHasTargetActivity(
-        supabase,
-        report.id,
-        targetType,
-        normalizedCode,
-        lineId
-      )
-      if (hasActivity) {
-        return String(report.work_date)
+    const reportDateById = new Map(batch.map((report) => [report.id, String(report.work_date)]))
+    const reportIds = batch.map((report) => report.id)
+
+    for (let i = 0; i < reportIds.length; i += 100) {
+      const chunkIds = reportIds.slice(i, i + 100)
+      let query = supabase
+        .from('work_report_items')
+        .select('report_id, line_id, instruction_text')
+        .in('report_id', chunkIds)
+
+      if (targetType === 'line' && lineId) {
+        query = query.eq('line_id', lineId)
       }
+
+      const { data: items, error: itemError } = await query
+      if (itemError) throw itemError
+
+      let earliestDate: string | null = null
+      for (const item of items || []) {
+        const matched =
+          targetType === 'line'
+            ? item.line_id === lineId
+            : instructionMatchesOrderNo(item.instruction_text, normalizedCode)
+        if (!matched) continue
+        const workDate = reportDateById.get(item.report_id)
+        if (!workDate) continue
+        if (!earliestDate || workDate < earliestDate) earliestDate = workDate
+      }
+      if (earliestDate) return earliestDate
     }
 
     if (batch.length < pageSize) break
@@ -1338,6 +1357,103 @@ export async function resolveProductionLotPeriodStart(
   }
 
   throw new Error('完成日以前に該当する作業日報がありません。作業日報のL指令／D指令を確認してください。')
+}
+
+/**
+ * 完成日順に製作期間を算出する。
+ * 同日ロットは期間を共有し、前後ロットは完成日+1でつなぐ（さかのぼり登録可）。
+ */
+async function computePeriodStartsByEnd(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  lineId: string | null,
+  periodEnds: string[]
+): Promise<Map<string, string>> {
+  const uniqueEnds = Array.from(
+    new Set(periodEnds.map((value) => normalizeWorkDate(value)))
+  ).sort((a, b) => a.localeCompare(b))
+
+  const startsByEnd = new Map<string, string>()
+  if (uniqueEnds.length === 0) return startsByEnd
+
+  for (let i = 0; i < uniqueEnds.length; i++) {
+    const end = uniqueEnds[i]
+    const start =
+      i === 0
+        ? await resolveFirstActivityDate(supabase, targetType, targetCode, end, lineId)
+        : shiftCalendarDate(uniqueEnds[i - 1], 1)
+
+    if (end < start) {
+      throw new Error(
+        i === 0
+          ? '完成日は製作開始日（自動算出）以降を指定してください'
+          : `完成日 ${end} は直前ロット完成日の翌日以降になるよう期間を組めません`
+      )
+    }
+    startsByEnd.set(end, start)
+  }
+
+  return startsByEnd
+}
+
+/** 対象の全ロットの period_start を完成日順に再接続する */
+async function syncProductionLotPeriodStarts(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  lineId: string | null,
+  lots: ProductionLotRecord[]
+) {
+  const startsByEnd = await computePeriodStartsByEnd(
+    supabase,
+    targetType,
+    targetCode,
+    lineId,
+    lots.map((lot) => lot.period_end)
+  )
+
+  const updates = lots.filter((lot) => lot.period_start !== startsByEnd.get(lot.period_end))
+  await Promise.all(
+    updates.map(async (lot) => {
+      const periodStart = startsByEnd.get(lot.period_end)
+      if (!periodStart) return
+      const { error } = await supabase
+        .from('process_production_lots')
+        .update({
+          period_start: periodStart,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', lot.id)
+      if (error) throw error
+    })
+  )
+}
+
+/** 製作開始日: さかのぼり可。前後ロットの完成日順で期間を決める */
+export async function resolveProductionLotPeriodStart(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  periodEnd: string,
+  lineId: string | null,
+  existingLots?: ProductionLotRecord[]
+) {
+  const end = normalizeWorkDate(periodEnd)
+  const normalizedCode = normalizeTargetCode(targetCode)
+  const records = existingLots ?? (await listProductionLotRecords(supabase, targetType, normalizedCode))
+  const startsByEnd = await computePeriodStartsByEnd(
+    supabase,
+    targetType,
+    normalizedCode,
+    lineId,
+    [...records.map((lot) => lot.period_end), end]
+  )
+  const start = startsByEnd.get(end)
+  if (!start) {
+    throw new Error('製作開始日の算出に失敗しました')
+  }
+  return start
 }
 
 export async function createProductionLot(
@@ -1358,21 +1474,16 @@ export async function createProductionLot(
 
   const { lineId } = await resolveTargetContext(supabase, targetType, normalizedCode)
   const existingLots = await listProductionLotRecords(supabase, targetType, normalizedCode)
-  const start = await resolveProductionLotPeriodStart(
+  const startsByEnd = await computePeriodStartsByEnd(
     supabase,
     targetType,
     normalizedCode,
-    end,
     lineId,
-    existingLots
+    [...existingLots.map((lot) => lot.period_end), end]
   )
-
-  if (end < start) {
-    throw new Error(
-      existingLots.length > 0
-        ? '完成日は前回完成日の翌日以降を指定してください'
-        : '完成日は製作開始日（自動算出）以降を指定してください'
-    )
+  const start = startsByEnd.get(end)
+  if (!start) {
+    throw new Error('製作開始日の算出に失敗しました')
   }
 
   const { data, error } = await supabase
@@ -1399,12 +1510,48 @@ export async function createProductionLot(
     throw error
   }
 
+  // さかのぼり登録時、前後ロットの製作開始日をつなぎ直す
+  const outdatedLots = existingLots.filter(
+    (lot) => lot.period_start !== startsByEnd.get(lot.period_end)
+  )
+  await Promise.all(
+    outdatedLots.map(async (lot) => {
+      const periodStart = startsByEnd.get(lot.period_end)
+      if (!periodStart) return
+      const { error: updateError } = await supabase
+        .from('process_production_lots')
+        .update({
+          period_start: periodStart,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', lot.id)
+      if (updateError) throw updateError
+    })
+  )
+
   return data.id as string
 }
 
 export async function deleteProductionLot(supabase: SupabaseClient, lotId: string) {
+  const { data: lot, error: fetchError } = await supabase
+    .from('process_production_lots')
+    .select('id, target_type, target_code')
+    .eq('id', lotId)
+    .maybeSingle()
+
+  if (fetchError) throw fetchError
+  if (!lot) throw new Error('削除対象のロットが見つかりません')
+
   const { error } = await supabase.from('process_production_lots').delete().eq('id', lotId)
   if (error) throw error
+
+  const targetType = lot.target_type as ProcessTargetType
+  const targetCode = normalizeTargetCode(lot.target_code)
+  const { lineId } = await resolveTargetContext(supabase, targetType, targetCode)
+  const remaining = await listProductionLotRecords(supabase, targetType, targetCode)
+  if (remaining.length > 0) {
+    await syncProductionLotPeriodStarts(supabase, targetType, targetCode, lineId, remaining)
+  }
 }
 
 /** ラインマスタ全件 + D指令マスタ全件 */
@@ -1436,13 +1583,31 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
     })
   }
 
-  const seenOrders = new Set<string>()
+  const seenOrders = new Map<
+    string,
+    { product_name: string | null; models: Set<string> }
+  >()
   for (const order of ordersResult.data || []) {
     const orderNo = normalizeTargetCode(order.order_no || '')
-    if (!orderNo || seenOrders.has(orderNo)) continue
-    seenOrders.add(orderNo)
+    if (!orderNo) continue
+    const current = seenOrders.get(orderNo) || {
+      product_name: null,
+      models: new Set<string>(),
+    }
+    if (!current.product_name && order.product_name) {
+      current.product_name = order.product_name
+    }
+    const model = String(order.model || '').trim()
+    if (model) current.models.add(model)
+    seenOrders.set(orderNo, current)
+  }
 
-    const subtitleParts = [order.product_name, order.model].filter(Boolean)
+  for (const [orderNo, info] of seenOrders) {
+    const modelList = Array.from(info.models).sort((a, b) => a.localeCompare(b, 'ja'))
+    const subtitleParts = [
+      info.product_name,
+      modelList.length > 0 ? `規格: ${modelList.join(' / ')}` : null,
+    ].filter(Boolean)
     targets.push({
       target_type: 'instruction',
       target_code: orderNo,
