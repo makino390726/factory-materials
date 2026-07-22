@@ -449,6 +449,10 @@ export async function suggestTargetsForModel(supabase: SupabaseClient, model: st
   return suggestions
 }
 
+function maxWorkDate(a: string, b: string) {
+  return a >= b ? a : b
+}
+
 export async function buildProductionSchedule(
   supabase: SupabaseClient,
   input: {
@@ -478,7 +482,8 @@ export async function buildProductionSchedule(
   }
 
   const results: ScheduleLotResult[] = []
-  let cursor = startDate
+  /** 各作業班が次に着手可能な稼働日（パイプライン） */
+  const groupAvailable = new Map<string, string>()
   const occupancy: ScheduleOccupancyCell[] = []
   const usedGroups = new Map<string, string>()
 
@@ -519,12 +524,16 @@ export async function buildProductionSchedule(
     }
 
     const workGroups: ScheduleWorkGroupPlan[] = []
-    let groupCursor = cursor
+    // 同一機種内は工程順。前工程完了後に次工程へ
+    let lotReady = startDate
 
     for (const group of groupEntries) {
       const totalMinutes = group.st_minutes * lot.quantity
       const days = ceilDays(totalMinutes, minutesPerDay)
-      const dates = collectWorkingDates(groupCursor, days)
+      const groupFree = groupAvailable.get(group.work_group_code) || startDate
+      // 班が空き、かつ前工程が終わってから着手（他機種とパイプライン）
+      const begin = maxWorkDate(lotReady, groupFree)
+      const dates = collectWorkingDates(begin, days)
       if (dates.length === 0) continue
       const start = dates[0]
       const end = dates[dates.length - 1]
@@ -556,7 +565,9 @@ export async function buildProductionSchedule(
           has_actual: false,
         })
       }
-      groupCursor = shiftWorkingDate(end, 1)
+      const nextDay = shiftWorkingDate(end, 1)
+      groupAvailable.set(group.work_group_code, nextDay)
+      lotReady = nextDay
     }
 
     if (workGroups.length === 0) continue
@@ -587,8 +598,6 @@ export async function buildProductionSchedule(
         minutes_progress_pct: null,
       },
     })
-
-    cursor = shiftWorkingDate(lotEnd, 1)
   }
 
   const allDates = Array.from(new Set(occupancy.map((c) => c.date))).sort()

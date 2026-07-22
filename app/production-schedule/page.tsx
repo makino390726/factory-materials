@@ -307,7 +307,7 @@ export default function ProductionSchedulePage() {
             <p className="text-sm text-sky-300">生産計画 → 班別占有カレンダー</p>
             <h1 className="text-2xl font-bold text-white">生産スケジュール</h1>
             <p className="mt-1 text-sm text-slate-200">
-              製造計画の台数×工程ST（なければ指令標準時間）で所要日数を積み上げ、作業班×日付に塗りつぶします。
+              製造計画の台数×工程STで所要日数を積み上げ、作業班が空き次第次機種を流し込むパイプラインでカレンダーに塗りつぶします。
             </p>
           </div>
           <Link
@@ -367,7 +367,8 @@ export default function ProductionSchedulePage() {
           </div>
 
           <p className="text-xs text-slate-300">
-            ST優先順: 直近製作ロット平均（規格一致） → 年度平均（UF/DF別） → D/L指令標準時間。平日のみ・ロット直列・班は工程順に積み上げ。
+            ST優先順: 直近製作ロット平均（規格一致） → 年度平均（UF/DF別） → D/L指令標準時間。
+            平日のみ・同一機種内は工程順。作業班が空き次第、次の順序の機種を流し込む（パイプライン）。
           </p>
 
           <div className="overflow-x-auto">
