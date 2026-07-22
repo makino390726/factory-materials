@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Ec30BomImportSection from './Ec30BomImportSection'
+import Ec2PdfBomImportSection from './Ec2PdfBomImportSection'
+import ShinseiWorkReportImportSection from './ShinseiWorkReportImportSection'
 
 type ImportType = 'work-orders' | 'machines' | 'work-contents' | 'lines'
 
@@ -183,12 +185,16 @@ export default function MastersImportPage() {
             CSVインポート
           </h2>
           <p className="text-sm text-purple-200/90 max-w-xl mx-auto">
-            マスタCSVは下の紫枠から。環境負荷低減型乾燥機の <strong className="text-white">図番管理表（BOM）</strong> は
-            すぐ下の緑枠から取り込みます。
+            指令書・図番を基に <strong className="text-white">原価要素（D指令・BOM・購入品）</strong> を取り込む画面です。
+            上の枠が PDF／図番表、下の紫枠がマスタ CSV です。
           </p>
         </div>
 
+        <Ec2PdfBomImportSection />
         <Ec30BomImportSection />
+        <div className="w-full max-w-4xl mt-6">
+          <ShinseiWorkReportImportSection />
+        </div>
 
         {/* メインカード */}
         <div className="w-full max-w-4xl mt-10">

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   analyzeProcessManagement,
   analyzeProductionLots,
-  aggregateTargetWorkGroupSummaryInFiscalYear,
+  aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
   createProductionLot,
   deleteProductionLot,
   listProcessTargets,
@@ -51,13 +51,13 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'fiscal_year が不正です' }, { status: 400 })
       }
 
-      const result = await aggregateTargetWorkGroupSummaryInFiscalYear(
+      const { overall, by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
         supabase,
         targetType,
         normalizeTargetCode(targetCode),
         fiscalYear
       )
-      return NextResponse.json(result)
+      return NextResponse.json({ ...overall, by_spec })
     }
 
     if (list === 'production-lots') {

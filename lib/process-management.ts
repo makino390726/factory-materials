@@ -61,6 +61,8 @@ export type ProductionLotsResult = {
   suggested_period_start: string | null
   lots: ProductionLotAnalysis[]
   fiscal_year_summary: FiscalYearWorkGroupSummary | null
+  /** 備考（UF/DF）単位の年度平均ST */
+  fiscal_year_summaries_by_spec: FiscalYearSpecSummary[]
 }
 
 export type ProcessAnalysisResult = {
@@ -320,6 +322,94 @@ export async function aggregateWorkGroupMinutesOnDate(
 
       totals.set(workGroupCode, (totals.get(workGroupCode) || 0) + (item.duration_minutes || 0))
     }
+  }
+
+  return totals
+}
+
+/** 指定期間・対象の「日付×作業グループ」実績時間（分） */
+export async function aggregateTargetWorkGroupMinutesByDateInRange(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fromDate: string,
+  toDate: string,
+  lineId?: string | null
+): Promise<Map<string, number>> {
+  const start = normalizeWorkDate(fromDate)
+  const end = normalizeWorkDate(toDate)
+  if (end < start) return new Map()
+
+  const normalizedCode = normalizeTargetCode(targetCode)
+  /** key = `${work_date}|${work_group_code}` */
+  const totals = new Map<string, number>()
+  const pageSize = 500
+  let offset = 0
+
+  while (true) {
+    const { data: reports, error: reportError } = await supabase
+      .from('work_reports')
+      .select('id, work_date, staffs(work_group_code)')
+      .gte('work_date', start)
+      .lte('work_date', end)
+      .eq('is_draft', false)
+      .order('work_date', { ascending: true })
+      .range(offset, offset + pageSize - 1)
+
+    if (reportError) throw reportError
+
+    const batch = reports || []
+    if (batch.length === 0) break
+
+    const reportMeta = new Map<
+      string,
+      { work_date: string; staff: ReportStaff }
+    >()
+    for (const report of batch) {
+      reportMeta.set(report.id, {
+        work_date: String(report.work_date),
+        staff: report as unknown as ReportStaff,
+      })
+    }
+    const reportIds = Array.from(reportMeta.keys())
+
+    for (let i = 0; i < reportIds.length; i += 100) {
+      const chunkIds = reportIds.slice(i, i + 100)
+      let query = supabase
+        .from('work_report_items')
+        .select(
+          'report_id, line_id, instruction_text, is_support, support_work_group_code, duration_minutes'
+        )
+        .in('report_id', chunkIds)
+
+      if (targetType === 'line' && lineId) {
+        query = query.eq('line_id', lineId)
+      }
+
+      const { data: items, error: itemError } = await query
+      if (itemError) throw itemError
+
+      for (const item of (items || []) as WorkItemRow[]) {
+        if (targetType === 'instruction') {
+          if (!instructionMatchesOrderNo(item.instruction_text, normalizedCode)) continue
+        } else if (lineId && item.line_id !== lineId) {
+          continue
+        }
+
+        const meta = reportMeta.get(item.report_id)
+        if (!meta) continue
+        const workGroupCode = item.is_support
+          ? item.support_work_group_code
+          : getStaffWorkGroupCode(meta.staff)
+        if (!workGroupCode) continue
+
+        const key = `${meta.work_date}|${workGroupCode}`
+        totals.set(key, (totals.get(key) || 0) + (item.duration_minutes || 0))
+      }
+    }
+
+    if (batch.length < pageSize) break
+    offset += pageSize
   }
 
   return totals
@@ -902,6 +992,44 @@ export type FiscalYearWorkGroupSummary = {
   total_minutes: number
   duration_hours: string
   rows: FiscalYearWorkGroupRow[]
+  /** 規格キー（UF/DF など）。全体集計は空文字 */
+  spec_key?: string
+}
+
+export type FiscalYearSpecSummary = {
+  spec_key: string
+  spec_label: string
+  summary: FiscalYearWorkGroupSummary
+}
+
+/** 備考・機種名から規格キー（UF/DF）を正規化 */
+export function normalizeSpecKey(notes: string | null | undefined): string {
+  const raw = String(notes || '').trim()
+  if (!raw) return ''
+  const compact = raw.toUpperCase().replace(/\s+/g, '')
+  const hasUf = /(^|[^A-Z0-9])UF([^A-Z0-9]|$)/.test(` ${compact} `) || compact.includes('UF')
+  const hasDf = /(^|[^A-Z0-9])DF([^A-Z0-9]|$)/.test(` ${compact} `) || compact.includes('DF')
+  if (hasUf && hasDf) {
+    // 両方含む場合は先に出現した方
+    const ufPos = compact.indexOf('UF')
+    const dfPos = compact.indexOf('DF')
+    return ufPos >= 0 && (dfPos < 0 || ufPos <= dfPos) ? 'UF' : 'DF'
+  }
+  if (hasUf) return 'UF'
+  if (hasDf) return 'DF'
+  return raw
+}
+
+export function formatSpecLabel(specKey: string) {
+  if (!specKey) return '規格なし'
+  if (specKey === 'UF' || specKey === 'DF') return specKey
+  return specKey
+}
+
+export function lotMatchesSpec(notes: string | null | undefined, specKey: string | null | undefined) {
+  const wanted = String(specKey || '').trim()
+  if (!wanted) return true
+  return normalizeSpecKey(notes) === normalizeSpecKey(wanted)
 }
 
 /** @deprecated use FiscalYearWorkGroupSummary */
@@ -990,7 +1118,148 @@ export async function aggregateTargetWorkGroupSummaryInFiscalYear(
     total_minutes: totalMinutes,
     duration_hours: formatDurationHours(totalMinutes),
     rows,
+    spec_key: '',
   }
+}
+
+/**
+ * 会計年度の作業グループ別平均STを備考（UF/DF）単位で算出。
+ * 同一製作期間の複数規格ロットは台数比で実績を按分する。
+ */
+export async function aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number
+): Promise<{ overall: FiscalYearWorkGroupSummary; by_spec: FiscalYearSpecSummary[] }> {
+  if (!Number.isFinite(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
+    throw new Error('fiscal_year が不正です')
+  }
+
+  const normalizedCode = normalizeTargetCode(targetCode)
+  const { targetName, lineId } = await resolveTargetContext(supabase, targetType, normalizedCode)
+  const { start, end } = getFiscalYearDateRange(fiscalYear)
+  const records = await listProductionLotRecords(supabase, targetType, normalizedCode)
+  const fyLots = records.filter((lot) => lot.period_end >= start && lot.period_end <= end)
+  const workGroupNames = await fetchWorkGroupNames(supabase)
+
+  const periodQtyTotals = new Map<string, number>()
+  for (const lot of fyLots) {
+    const key = `${lot.period_start}|${lot.period_end}`
+    periodQtyTotals.set(key, (periodQtyTotals.get(key) || 0) + lot.completed_qty)
+  }
+
+  const uniquePeriods = Array.from(periodQtyTotals.keys())
+  const periodMinutes = new Map<string, Map<string, number>>()
+  for (const periodKey of uniquePeriods) {
+    const [periodStart, periodEnd] = periodKey.split('|')
+    const minutes = await aggregateTargetWorkGroupMinutesInRange(
+      supabase,
+      targetType,
+      normalizedCode,
+      periodStart,
+      periodEnd,
+      lineId
+    )
+    periodMinutes.set(periodKey, minutes)
+  }
+
+  type Acc = { qty: number; minutes: Map<string, number> }
+  const bySpec = new Map<string, Acc>()
+  const overallAcc: Acc = { qty: 0, minutes: new Map() }
+
+  const addMinutes = (acc: Acc, group: string, value: number) => {
+    acc.minutes.set(group, (acc.minutes.get(group) || 0) + value)
+  }
+
+  for (const lot of fyLots) {
+    const periodKey = `${lot.period_start}|${lot.period_end}`
+    const periodTotalQty = periodQtyTotals.get(periodKey) || lot.completed_qty
+    const share = periodTotalQty > 0 ? lot.completed_qty / periodTotalQty : 1
+    const minutesMap = periodMinutes.get(periodKey) || new Map<string, number>()
+    const specKey = normalizeSpecKey(lot.notes)
+    const specAcc = bySpec.get(specKey) || { qty: 0, minutes: new Map() }
+
+    for (const [group, minutes] of minutesMap) {
+      const allocated = minutes * share
+      addMinutes(specAcc, group, allocated)
+      addMinutes(overallAcc, group, allocated)
+    }
+    specAcc.qty += lot.completed_qty
+    overallAcc.qty += lot.completed_qty
+    bySpec.set(specKey, specAcc)
+  }
+
+  const toSummary = (specKey: string, acc: Acc): FiscalYearWorkGroupSummary => {
+    const rows: FiscalYearWorkGroupRow[] = Array.from(acc.minutes.entries())
+      .filter(([, minutes]) => minutes > 0)
+      .sort(([a], [b]) => a.localeCompare(b, 'ja', { numeric: true }))
+      .map(([workGroupCode, totalMinutes]) => ({
+        work_group_code: workGroupCode,
+        work_group_name: workGroupNames.get(workGroupCode) || workGroupCode,
+        total_minutes: totalMinutes,
+        duration_hours: formatDurationHours(totalMinutes),
+        avg_st_minutes:
+          acc.qty > 0 && totalMinutes > 0 ? roundSt(totalMinutes / acc.qty) : null,
+      }))
+    const totalMinutes = rows.reduce((sum, row) => sum + row.total_minutes, 0)
+    return {
+      fiscal_year: fiscalYear,
+      fiscal_year_label: formatFiscalYearLabel(fiscalYear),
+      period_start: start,
+      period_end: end,
+      target_type: targetType,
+      target_code: normalizedCode,
+      target_name: targetName,
+      annual_completed_qty: acc.qty,
+      total_minutes: totalMinutes,
+      duration_hours: formatDurationHours(totalMinutes),
+      rows,
+      spec_key: specKey,
+    }
+  }
+
+  const overall = toSummary('', overallAcc)
+  const by_spec = Array.from(bySpec.entries())
+    .map(([specKey, acc]) => ({
+      spec_key: specKey,
+      spec_label: formatSpecLabel(specKey),
+      summary: toSummary(specKey, acc),
+    }))
+    .sort((a, b) => {
+      const order = (key: string) => (key === 'UF' ? 0 : key === 'DF' ? 1 : key === '' ? 9 : 5)
+      return order(a.spec_key) - order(b.spec_key) || a.spec_label.localeCompare(b.spec_label, 'ja')
+    })
+
+  return { overall, by_spec }
+}
+
+/** 規格指定の年度平均STマップ（スケジュール用） */
+export async function getFiscalYearAverageStByWorkGroupForSpec(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number,
+  specKey: string | null | undefined
+) {
+  const wanted = normalizeSpecKey(specKey)
+  const { by_spec, overall } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
+    supabase,
+    targetType,
+    targetCode,
+    fiscalYear
+  )
+  const matched = wanted
+    ? by_spec.find((item) => item.spec_key === wanted)?.summary
+    : overall
+  const summary = matched || overall
+  const map = new Map<string, number>()
+  for (const row of summary.rows) {
+    if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
+      map.set(row.work_group_code, row.avg_st_minutes)
+    }
+  }
+  return { map, summary, spec_key: summary.spec_key || wanted || '' }
 }
 
 /** 会計年度の作業グループ別平均ST（比較用） */
@@ -1087,7 +1356,7 @@ function buildWorkGroupRowsFromMinutes(
   return rows
 }
 
-async function resolveTargetContext(
+export async function resolveTargetContext(
   supabase: SupabaseClient,
   targetType: ProcessTargetType,
   targetCode: string
@@ -1171,28 +1440,41 @@ export async function analyzeProductionLots(
   const { targetName, lineId } = await resolveTargetContext(supabase, targetType, targetCode)
   const records = await listProductionLotRecords(supabase, targetType, targetCode)
   const workGroupNames = await fetchWorkGroupNames(supabase)
-  const fiscalAvgStCache = new Map<number, Map<string, number>>()
+  const fiscalAvgStCache = new Map<string, Map<string, number>>()
   const fiscalSummaryCache = new Map<number, FiscalYearWorkGroupSummary>()
+  const fiscalBySpecCache = new Map<number, FiscalYearSpecSummary[]>()
 
-  const ensureFiscalBaseline = async (fiscalYear: number) => {
-    if (fiscalAvgStCache.has(fiscalYear)) {
-      return fiscalAvgStCache.get(fiscalYear) || new Map<string, number>()
+  const ensureFiscalBaseline = async (fiscalYear: number, specKey = '') => {
+    const cacheKey = `${fiscalYear}::${specKey}`
+    if (fiscalAvgStCache.has(cacheKey)) {
+      return fiscalAvgStCache.get(cacheKey) || new Map<string, number>()
     }
-    const summary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+    const { overall, by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
       supabase,
       targetType,
       targetCode,
       fiscalYear
     )
-    fiscalSummaryCache.set(fiscalYear, summary)
-    const map = new Map<string, number>()
-    for (const row of summary.rows) {
-      if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
-        map.set(row.work_group_code, row.avg_st_minutes)
+    fiscalSummaryCache.set(fiscalYear, overall)
+    fiscalBySpecCache.set(fiscalYear, by_spec)
+
+    const fillMap = (summary: FiscalYearWorkGroupSummary, key: string) => {
+      const map = new Map<string, number>()
+      for (const row of summary.rows) {
+        if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
+          map.set(row.work_group_code, row.avg_st_minutes)
+        }
       }
+      fiscalAvgStCache.set(key, map)
+      return map
     }
-    fiscalAvgStCache.set(fiscalYear, map)
-    return map
+
+    fillMap(overall, `${fiscalYear}::`)
+    for (const item of by_spec) {
+      fillMap(item.summary, `${fiscalYear}::${item.spec_key}`)
+    }
+
+    return fiscalAvgStCache.get(cacheKey) || new Map<string, number>()
   }
 
   const lastLot = records.length > 0 ? records[records.length - 1] : null
@@ -1235,10 +1517,11 @@ export async function analyzeProductionLots(
     }
 
     const fiscalYear = getFiscalYearFromDate(record.period_end)
+    const specKey = normalizeSpecKey(record.notes)
     let baselineSt = new Map<string, number>()
     if (fiscalYear !== null) {
       try {
-        baselineSt = await ensureFiscalBaseline(fiscalYear)
+        baselineSt = await ensureFiscalBaseline(fiscalYear, specKey)
       } catch {
         baselineSt = new Map()
       }
@@ -1261,18 +1544,23 @@ export async function analyzeProductionLots(
   })
 
   let fiscalYearSummary: FiscalYearWorkGroupSummary | null = null
+  let fiscalYearSummariesBySpec: FiscalYearSpecSummary[] = []
   if (displayFiscalYear !== null) {
     fiscalYearSummary = fiscalSummaryCache.get(displayFiscalYear) ?? null
+    fiscalYearSummariesBySpec = fiscalBySpecCache.get(displayFiscalYear) ?? []
     if (!fiscalYearSummary) {
       try {
-        fiscalYearSummary = await aggregateTargetWorkGroupSummaryInFiscalYear(
+        const { overall, by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
           supabase,
           targetType,
           targetCode,
           displayFiscalYear
         )
+        fiscalYearSummary = overall
+        fiscalYearSummariesBySpec = by_spec
       } catch {
         fiscalYearSummary = null
+        fiscalYearSummariesBySpec = []
       }
     }
   }
@@ -1284,6 +1572,7 @@ export async function analyzeProductionLots(
     suggested_period_start: suggestedPeriodStart,
     lots: analyzed,
     fiscal_year_summary: fiscalYearSummary,
+    fiscal_year_summaries_by_spec: fiscalYearSummariesBySpec,
   }
 }
 

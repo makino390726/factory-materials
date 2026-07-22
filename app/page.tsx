@@ -256,6 +256,19 @@ export default function Home() {
               </div>
             </Link>
 
+            {/* 生産スケジュール */}
+            <Link href="/production-schedule">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-sky-600/20 to-indigo-900/20 rounded-2xl border-2 border-sky-400 group-hover:border-sky-300 group-hover:shadow-[0_0_20px_rgba(56,189,248,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
+                  <div className="text-4xl">📅</div>
+                  <h3 className="text-lg font-bold text-sky-300 group-hover:text-sky-200 transition">
+                    生産スケジュール
+                  </h3>
+                </div>
+              </div>
+            </Link>
+
             {/* 原価計算 */}
             <Link href="/work-orders/cost">
               <div className="group relative h-32 cursor-pointer">

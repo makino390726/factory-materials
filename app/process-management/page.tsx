@@ -71,6 +71,11 @@ type FiscalYearWorkGroupSummary = {
     duration_hours: string
     avg_st_minutes: number | null
   }>
+  by_spec?: Array<{
+    spec_key: string
+    spec_label: string
+    summary: FiscalYearWorkGroupSummary
+  }>
 }
 
 const formatMinutes = (value: number) => {
@@ -203,6 +208,7 @@ function ProcessManagementContent() {
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null)
   const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear())
   const [fiscalSummary, setFiscalSummary] = useState<FiscalYearWorkGroupSummary | null>(null)
+  const [fiscalSpecKey, setFiscalSpecKey] = useState<string>('__ALL__')
   const [fiscalLoading, setFiscalLoading] = useState(false)
 
   const fiscalYearOptions = useMemo(() => {
@@ -238,6 +244,15 @@ function ProcessManagementContent() {
     }
     return lotsResult.lots[lotsResult.lots.length - 1]
   }, [lotsResult, selectedLotId])
+
+  const displayedFiscalSummary = useMemo(() => {
+    if (!fiscalSummary) return null
+    if (fiscalSpecKey === '__ALL__') return fiscalSummary
+    return (
+      fiscalSummary.by_spec?.find((item) => item.spec_key === fiscalSpecKey)?.summary ||
+      fiscalSummary
+    )
+  }, [fiscalSummary, fiscalSpecKey])
 
   const targetTypeLabel = selectedTarget?.target_type === 'instruction' ? 'D指令' : 'L指令'
 
@@ -352,6 +367,7 @@ function ProcessManagementContent() {
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || '年度集計の取得に失敗しました')
       setFiscalSummary(data as FiscalYearWorkGroupSummary)
+      setFiscalSpecKey('__ALL__')
     } catch {
       setFiscalSummary(null)
     } finally {
@@ -716,7 +732,7 @@ function ProcessManagementContent() {
                   {selectedLot.lot.notes ? ` / 規格 ${selectedLot.lot.notes}` : ''}
                 </p>
                 <p className="text-xs text-slate-500 mb-4">
-                  平均ST = 会計年度の作業グループ所要時間 ÷ 年間制作台数。ロットの1台STとの差（変動）で工程進捗を確認します。
+                  平均ST = 会計年度の同規格（UF/DF）平均との差（変動）で工程進捗を確認します。
                 </p>
                 <WorkGroupTable
                   rows={selectedLot.rows}
@@ -732,7 +748,7 @@ function ProcessManagementContent() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  会計年度 作業グループ別 平均ST
+                  会計年度 作業グループ別 平均ST（規格別）
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">
                   {selectedTarget.target_type === 'instruction' ? 'D指令' : 'L指令'}{' '}
@@ -759,14 +775,43 @@ function ProcessManagementContent() {
             </div>
             {fiscalLoading ? (
               <p className="text-sm text-slate-500 py-6 text-center">読み込み中...</p>
-            ) : !fiscalSummary || fiscalSummary.rows.length === 0 ? (
+            ) : !displayedFiscalSummary || displayedFiscalSummary.rows.length === 0 ? (
               <p className="text-sm text-slate-400 py-6 text-center">データがありません</p>
             ) : (
               <>
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFiscalSpecKey('__ALL__')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                      fiscalSpecKey === '__ALL__'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    全体
+                  </button>
+                  {(fiscalSummary?.by_spec || []).map((item) => (
+                    <button
+                      key={item.spec_key || 'none'}
+                      type="button"
+                      onClick={() => setFiscalSpecKey(item.spec_key)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                        fiscalSpecKey === item.spec_key
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-violet-50 text-violet-800 hover:bg-violet-100'
+                      }`}
+                    >
+                      {item.spec_label}
+                      <span className="ml-1 opacity-80">({item.summary.annual_completed_qty}台)</span>
+                    </button>
+                  ))}
+                </div>
                 <p className="text-sm text-slate-700 mb-4">
-                  年間制作台数:{' '}
-                  <span className="font-semibold">{fiscalSummary.annual_completed_qty}台</span>
-                  {fiscalSummary.annual_completed_qty <= 0 && (
+                  {fiscalSpecKey === '__ALL__' ? '年間' : `${fiscalSpecKey || '規格なし'} `}
+                  制作台数:{' '}
+                  <span className="font-semibold">{displayedFiscalSummary.annual_completed_qty}台</span>
+                  {displayedFiscalSummary.annual_completed_qty <= 0 && (
                     <span className="text-amber-700 ml-2">
                       ※入庫ロットを登録すると平均STが算出されます
                     </span>
@@ -783,7 +828,7 @@ function ProcessManagementContent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {fiscalSummary.rows.map((row) => (
+                    {displayedFiscalSummary.rows.map((row) => (
                       <tr key={row.work_group_code} className="border-t border-slate-100">
                         <td className="py-3 pr-4 font-mono">{row.work_group_code}</td>
                         <td className="py-3 pr-4">{row.work_group_name}</td>
@@ -797,8 +842,8 @@ function ProcessManagementContent() {
                   </tbody>
                 </table>
                 <p className="mt-3 text-xs text-slate-600">
-                  平均ST = 所要時間 ÷ 年間制作台数（{fiscalSummary.period_start} 〜{' '}
-                  {fiscalSummary.period_end}）。入庫ロット追加のたびに再計算されます。
+                  平均ST = 所要時間 ÷ 制作台数（{displayedFiscalSummary.period_start} 〜{' '}
+                  {displayedFiscalSummary.period_end}）。UF/DF は備考単位で集計します。
                 </p>
               </>
             )}

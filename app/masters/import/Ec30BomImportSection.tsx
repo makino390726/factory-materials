@@ -148,37 +148,41 @@ export default function Ec30BomImportSection() {
       <div className="bg-gradient-to-br from-emerald-950/50 via-slate-950/40 to-slate-950/40 rounded-3xl border-2 border-emerald-500/40 backdrop-blur-sm p-8 space-y-5">
         <div>
           <h2 className="text-2xl font-bold text-emerald-300 flex items-center gap-2">
-            <span>📐</span> EC30 図番管理表（BOM）取込
+            <span>📐</span> 図番管理表（BOM）取込
           </h2>
           <p className="text-sm text-emerald-100/80 mt-2 leading-relaxed">
-            Excel の部品名を、製品マスタ・L指令マスタ・D指令マスタ・パーツリスト（heater_parts_master）から候補検索します。
+            指令書ベースで Excel 図番表から原価要素（機種別 BOM）を取り込みます。部品名は製品マスタ・L指令・D指令・パーツリストから候補検索します。
             <strong className="text-white">解析</strong>のあと、各行のドロップダウンで紐付けを確認・修正し、
             <strong className="text-white">取り込み実行</strong>で DB に反映します（マッピングなしも可）。
+            <span className="block mt-1 text-emerald-200/60">機種名の初期値はサンプルです。取込対象に合わせて変更してください。</span>
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs text-emerald-200/90 mb-1">機種名（2坪）</label>
+            <label className="block text-xs text-emerald-200/90 mb-1">機種名①（数量列1）</label>
             <input
               value={model2}
               onChange={(e) => setModel2(e.target.value)}
+              placeholder="例: 機種A"
               className="w-full px-3 py-2 bg-slate-900 border border-emerald-700/50 rounded-lg text-sm text-white"
             />
           </div>
           <div>
-            <label className="block text-xs text-emerald-200/90 mb-1">機種名（2.5坪）</label>
+            <label className="block text-xs text-emerald-200/90 mb-1">機種名②（数量列2）</label>
             <input
               value={model25}
               onChange={(e) => setModel25(e.target.value)}
+              placeholder="例: 機種B"
               className="w-full px-3 py-2 bg-slate-900 border border-emerald-700/50 rounded-lg text-sm text-white"
             />
           </div>
           <div>
-            <label className="block text-xs text-emerald-200/90 mb-1">機種名（3坪）</label>
+            <label className="block text-xs text-emerald-200/90 mb-1">機種名③（数量列3）</label>
             <input
               value={model3}
               onChange={(e) => setModel3(e.target.value)}
+              placeholder="例: 機種C"
               className="w-full px-3 py-2 bg-slate-900 border border-emerald-700/50 rounded-lg text-sm text-white"
             />
           </div>
