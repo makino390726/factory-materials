@@ -157,6 +157,7 @@ export default function ProductionSchedulePage() {
   const [result, setResult] = useState<ScheduleResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -242,6 +243,18 @@ export default function ProductionSchedulePage() {
   const calculate = async () => {
     setIsLoading(true)
     setError(null)
+    setProgress({ pct: 12, label: 'スケジュールを算出しています…' })
+    const progressTimer = setInterval(() => {
+      setProgress((prev) => {
+        if (!prev || prev.pct >= 88) return prev
+        const next = Math.min(88, prev.pct + (prev.pct < 40 ? 6 : 3))
+        const label =
+          next < 45
+            ? 'STを解決しリードタイムを積み上げています…'
+            : '作業日報・工程管理の実績進捗を集計しています…'
+        return { pct: next, label }
+      })
+    }, 350)
     try {
       const res = await fetch('/api/production-schedule', {
         method: 'POST',
@@ -264,12 +277,16 @@ export default function ProductionSchedulePage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '算出に失敗しました')
+      setProgress({ pct: 100, label: '完了' })
       setResult(data as ScheduleResult)
     } catch (e) {
       setError(e instanceof Error ? e.message : '算出に失敗しました')
       setResult(null)
+      setProgress(null)
     } finally {
+      clearInterval(progressTimer)
       setIsLoading(false)
+      window.setTimeout(() => setProgress(null), 500)
     }
   }
 
@@ -462,6 +479,21 @@ export default function ProductionSchedulePage() {
               {isLoading ? '算出中…' : 'スケジュール算出'}
             </button>
           </div>
+
+          {progress && (
+            <div className="rounded-xl border border-sky-500/40 bg-sky-950/50 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                <span className="font-medium text-sky-100">{progress.label}</span>
+                <span className="tabular-nums text-sky-300">{progress.pct}%</span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-300"
+                  style={{ width: `${progress.pct}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {error && (
