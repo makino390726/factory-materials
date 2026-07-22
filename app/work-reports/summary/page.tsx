@@ -14,6 +14,7 @@ import {
   workReportSummaryCsvFilename,
   type WorkReportSummaryTab,
 } from '@/lib/work-report-summary-csv'
+import { computeWorkMinutes } from '@/lib/work-report-time'
 
 type SummaryRow = {
   report_id: string
@@ -89,6 +90,13 @@ type StaffDetail = {
   }>
 }
 
+type ReportHeaderEdits = {
+  work_date?: string
+  start_time?: string
+  end_time?: string
+  break_minutes?: number
+}
+
 type TabType = 'summary' | 'daily' | 'instruction' | 'machine' | 'work-group' | 'person-detail'
 
 const formatMinutes = (value: number) => {
@@ -116,6 +124,7 @@ export default function WorkReportSummaryPage() {
   const [staffDetails, setStaffDetails] = useState<StaffDetail[]>([])
   const [currentStaffIndex, setCurrentStaffIndex] = useState(0)
   const [editedItems, setEditedItems] = useState<Record<string, any>>({})
+  const [editedReports, setEditedReports] = useState<Record<string, ReportHeaderEdits>>({})
   const [activeTab, setActiveTab] = useState<TabType>('summary')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -281,8 +290,8 @@ export default function WorkReportSummaryPage() {
         return `
           <section class="report-block">
             <div class="report-head">
-              <h3>${escapeHtml(report.work_date)}</h3>
-              <div>${escapeHtml(`${report.start_time} ～ ${report.end_time}`)} / 休憩: ${escapeHtml(String(report.break_minutes))}分 / 勤務: ${escapeHtml(formatMinutes(report.work_minutes))}</div>
+              <h3>${escapeHtml(getReportValue(report, 'work_date'))}</h3>
+              <div>${escapeHtml(`${getReportValue(report, 'start_time')} ～ ${getReportValue(report, 'end_time')}`)} / 休憩: ${escapeHtml(String(getReportValue(report, 'break_minutes')))}分 / 勤務: ${escapeHtml(formatMinutes(getReportWorkMinutes(report)))}</div>
             </div>
             <table>
               <thead>
@@ -404,7 +413,6 @@ export default function WorkReportSummaryPage() {
     return endMinutes >= startMinutes ? endMinutes - startMinutes : 0
   }
 
-  // 明細の編集ハンドラー
   const handleItemChange = (itemId: string, field: string, value: string) => {
     setEditedItems((prev) => {
       const current = prev[itemId] || {}
@@ -421,9 +429,43 @@ export default function WorkReportSummaryPage() {
     })
   }
 
-  // 編集内容を取得（編集されていればeditedから、なければoriginalから）
   const getItemValue = (item: any, field: string): any => {
     return editedItems[item.id]?.[field] ?? item[field]
+  }
+
+  const handleReportChange = (
+    reportId: string,
+    field: keyof ReportHeaderEdits,
+    value: string
+  ) => {
+    setEditedReports((prev) => ({
+      ...prev,
+      [reportId]: {
+        ...prev[reportId],
+        [field]: field === 'break_minutes' ? Number(value) || 0 : value,
+      },
+    }))
+  }
+
+  const getReportValue = <K extends keyof ReportHeaderEdits>(
+    report: StaffDetail['reports'][number],
+    field: K
+  ): StaffDetail['reports'][number][K] => {
+    const edited = editedReports[report.id]
+    if (edited && edited[field] !== undefined) {
+      return edited[field] as StaffDetail['reports'][number][K]
+    }
+    return report[field]
+  }
+
+  const getReportWorkMinutes = (report: StaffDetail['reports'][number]) => {
+    const start = getReportValue(report, 'start_time')
+    const end = getReportValue(report, 'end_time')
+    if (start && end) {
+      const computed = computeWorkMinutes(start, end)
+      if (computed > 0) return computed
+    }
+    return report.work_minutes
   }
 
   // 保存処理
@@ -455,16 +497,23 @@ export default function WorkReportSummaryPage() {
       // 日報全体を再計算
       const totalMinutes = updatedItems.reduce((sum, item) => sum + item.duration_minutes, 0)
 
+      const workDate = getReportValue(report, 'work_date')
+      const startTime = getReportValue(report, 'start_time')
+      const endTime = getReportValue(report, 'end_time')
+      const breakMinutes = getReportValue(report, 'break_minutes')
+      const headerWorkMinutes = computeWorkMinutes(startTime, endTime)
+
       const response = await fetch('/api/work-reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          report_id: reportId,
           staff_id: staffId,
-          work_date: report.work_date,
-          start_time: report.start_time,
-          end_time: report.end_time,
-          break_minutes: report.break_minutes,
-          work_minutes: totalMinutes,
+          work_date: workDate,
+          start_time: startTime,
+          end_time: endTime,
+          break_minutes: breakMinutes,
+          work_minutes: headerWorkMinutes > 0 ? headerWorkMinutes : totalMinutes,
           is_draft: report.is_draft,
           items: updatedItems,
         }),
@@ -477,8 +526,12 @@ export default function WorkReportSummaryPage() {
       }
 
       alert('保存しました')
-      // 編集状態をクリア
       setEditedItems({})
+      setEditedReports((prev) => {
+        const next = { ...prev }
+        delete next[reportId]
+        return next
+      })
       // データを再読み込み
       await fetchSummary()
     } catch (saveError) {
@@ -911,13 +964,65 @@ export default function WorkReportSummaryPage() {
                 {/* 日報明細 */}
                 {staffDetails[currentStaffIndex]?.reports.map((report) => (
                   <div key={report.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-bold text-slate-900">{report.work_date}</h3>
-                      <div className="flex items-center gap-4">
-                        <div className="text-sm text-black">
-                          {report.start_time} ～ {report.end_time} 
-                          <span className="ml-2">休憩: {report.break_minutes}分</span>
-                          <span className="ml-2 font-semibold">勤務: {formatMinutes(report.work_minutes)}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-slate-700">作業日</span>
+                          <input
+                            type="date"
+                            value={getReportValue(report, 'work_date')}
+                            onChange={(e) =>
+                              handleReportChange(report.id, 'work_date', e.target.value)
+                            }
+                            className="rounded border border-slate-300 bg-white px-2 py-1 text-lg font-bold text-slate-900 focus:border-teal-500 focus:outline-none print:hidden"
+                          />
+                          <span className="hidden print:inline text-lg font-bold text-slate-900">
+                            {getReportValue(report, 'work_date')}
+                          </span>
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-black print:hidden">
+                          <input
+                            type="time"
+                            value={getReportValue(report, 'start_time')}
+                            onChange={(e) =>
+                              handleReportChange(report.id, 'start_time', e.target.value)
+                            }
+                            className="rounded border border-slate-300 px-2 py-1 focus:border-teal-500 focus:outline-none"
+                          />
+                          <span>～</span>
+                          <input
+                            type="time"
+                            value={getReportValue(report, 'end_time')}
+                            onChange={(e) =>
+                              handleReportChange(report.id, 'end_time', e.target.value)
+                            }
+                            className="rounded border border-slate-300 px-2 py-1 focus:border-teal-500 focus:outline-none"
+                          />
+                          <label className="flex items-center gap-1">
+                            <span>休憩</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={getReportValue(report, 'break_minutes')}
+                              onChange={(e) =>
+                                handleReportChange(report.id, 'break_minutes', e.target.value)
+                              }
+                              className="w-16 rounded border border-slate-300 px-2 py-1 text-center focus:border-teal-500 focus:outline-none"
+                            />
+                            <span>分</span>
+                          </label>
+                          <span className="font-semibold">
+                            勤務: {formatMinutes(getReportWorkMinutes(report))}
+                          </span>
+                        </div>
+                        <div className="hidden print:block text-sm text-black">
+                          {getReportValue(report, 'start_time')} ～ {getReportValue(report, 'end_time')}
+                          <span className="ml-2">休憩: {getReportValue(report, 'break_minutes')}分</span>
+                          <span className="ml-2 font-semibold">
+                            勤務: {formatMinutes(getReportWorkMinutes(report))}
+                          </span>
                         </div>
                         <button
                           type="button"

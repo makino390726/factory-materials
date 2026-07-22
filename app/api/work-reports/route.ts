@@ -45,6 +45,8 @@ type MachineTimeConfirmationInput = {
 
 type WorkReportInput = {
   staff_id?: string
+  /** 集計画面など既存日報の更新時に指定 */
+  report_id?: string
   work_date?: string
   start_time?: string
   end_time?: string
@@ -138,6 +140,8 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as WorkReportInput
     const staffId = body.staff_id
     const workDate = body.work_date
+    const inputReportId =
+      typeof body.report_id === 'string' && body.report_id.trim() ? body.report_id.trim() : null
     const startTime = typeof body.start_time === 'string' && body.start_time.trim() ? body.start_time : null
     const endTime = typeof body.end_time === 'string' && body.end_time.trim() ? body.end_time : null
     const breakMinutesOverride =
@@ -252,19 +256,63 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: existingReport, error: findError } = await supabase
-      .from('work_reports')
-      .select('id')
-      .eq('staff_id', staffId)
-      .eq('work_date', workDate)
-      .maybeSingle()
+    let reportId: string | undefined = inputReportId ?? undefined
+    let previousWorkDate: string | null = null
 
-    if (findError) {
-      console.error('Supabaseエラー:', findError)
-      return NextResponse.json({ error: findError.message }, { status: 500 })
+    if (reportId) {
+      const { data: existingById, error: byIdError } = await supabase
+        .from('work_reports')
+        .select('id, staff_id, work_date')
+        .eq('id', reportId)
+        .maybeSingle()
+
+      if (byIdError) {
+        console.error('Supabaseエラー:', byIdError)
+        return NextResponse.json({ error: byIdError.message }, { status: 500 })
+      }
+      if (!existingById || existingById.staff_id !== staffId) {
+        return NextResponse.json({ error: '日報が見つかりません' }, { status: 404 })
+      }
+
+      previousWorkDate = String(existingById.work_date)
+      if (previousWorkDate !== workDate) {
+        const { data: conflict, error: conflictError } = await supabase
+          .from('work_reports')
+          .select('id')
+          .eq('staff_id', staffId)
+          .eq('work_date', workDate)
+          .neq('id', reportId)
+          .maybeSingle()
+
+        if (conflictError) {
+          console.error('Supabaseエラー:', conflictError)
+          return NextResponse.json({ error: conflictError.message }, { status: 500 })
+        }
+        if (conflict) {
+          return NextResponse.json(
+            { error: '変更先の日付には、同じ担当者の日報が既にあります' },
+            { status: 409 }
+          )
+        }
+      }
+    } else {
+      const { data: existingReport, error: findError } = await supabase
+        .from('work_reports')
+        .select('id, work_date')
+        .eq('staff_id', staffId)
+        .eq('work_date', workDate)
+        .maybeSingle()
+
+      if (findError) {
+        console.error('Supabaseエラー:', findError)
+        return NextResponse.json({ error: findError.message }, { status: 500 })
+      }
+
+      reportId = existingReport?.id
+      if (existingReport?.work_date) {
+        previousWorkDate = String(existingReport.work_date)
+      }
     }
-
-    let reportId = existingReport?.id
 
     const touchedLineCodes = new Set<string>()
     const touchedInstructions = new Set<string>()
@@ -310,6 +358,7 @@ export async function POST(request: NextRequest) {
       const { error: updateError } = await supabase
         .from('work_reports')
         .update({
+          work_date: workDate,
           start_time: startTime,
           end_time: endTime,
           break_minutes: storedBreakMinutes,
@@ -450,26 +499,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!isDraft && workDate) {
-      const yearMonth = parseYearMonthFromDate(workDate)
-      if (
-        yearMonth &&
-        (touchedLineCodes.size > 0 || touchedInstructions.size > 0)
-      ) {
-        const { year, month } = yearMonth
+    if (!isDraft && (touchedLineCodes.size > 0 || touchedInstructions.size > 0)) {
+      const monthKeys = new Set<string>()
+      if (workDate) {
+        const ym = parseYearMonthFromDate(workDate)
+        if (ym) monthKeys.add(`${ym.year}-${ym.month}`)
+      }
+      if (previousWorkDate && previousWorkDate !== workDate) {
+        const prevYm = parseYearMonthFromDate(previousWorkDate)
+        if (prevYm) monthKeys.add(`${prevYm.year}-${prevYm.month}`)
+      }
+
+      if (monthKeys.size > 0) {
         const lineCodes = touchedLineCodes
         const instructionCodes = touchedInstructions
         after(async () => {
-          try {
-            await syncMonthForTouchedCodes(
-              supabase,
-              year,
-              month,
-              lineCodes,
-              instructionCodes
-            )
-          } catch (syncErr) {
-            console.error('月別実績の同期エラー:', syncErr)
+          for (const key of monthKeys) {
+            const [yearStr, monthStr] = key.split('-')
+            const year = Number(yearStr)
+            const month = Number(monthStr)
+            if (!Number.isFinite(year) || !Number.isFinite(month)) continue
+            try {
+              await syncMonthForTouchedCodes(
+                supabase,
+                year,
+                month,
+                lineCodes,
+                instructionCodes
+              )
+            } catch (syncErr) {
+              console.error('月別実績の同期エラー:', syncErr)
+            }
           }
         })
       }
