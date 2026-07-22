@@ -312,9 +312,9 @@ function ProcessManagementContent() {
         setFiscalYear(result.fiscal_year_summary.fiscal_year)
       }
       if (result.lots.length > 0) {
-        const preferred =
-          options?.preferLotId &&
-          result.lots.find((item) => item.lot.id === options.preferLotId)
+        const preferred = options?.preferLotId
+          ? result.lots.find((item) => item.lot.id === options.preferLotId)
+          : undefined
         setSelectedLotId(preferred?.lot.id || result.lots[result.lots.length - 1].lot.id)
       } else {
         setSelectedLotId(null)
