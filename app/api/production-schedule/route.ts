@@ -3,8 +3,12 @@ import { createClient } from '@supabase/supabase-js'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 import {
   buildProductionSchedule,
+  listSavedProductionSchedules,
+  loadSavedProductionSchedule,
+  saveProductionSchedule,
   suggestTargetsForModel,
   type ScheduleLotInput,
+  type SavedScheduleLotInput,
 } from '@/lib/production-schedule'
 import { listProcessTargets, normalizeSpecKey, type ProcessTargetType } from '@/lib/process-management'
 
@@ -25,6 +29,20 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const list = searchParams.get('list')
+
+    if (list === 'schedules') {
+      const schedules = await listSavedProductionSchedules(supabase)
+      return NextResponse.json({ schedules })
+    }
+
+    if (list === 'schedule') {
+      const id = searchParams.get('id')?.trim()
+      if (!id) {
+        return NextResponse.json({ error: 'id が必要です' }, { status: 400 })
+      }
+      const schedule = await loadSavedProductionSchedule(supabase, id)
+      return NextResponse.json({ schedule })
+    }
 
     if (list === 'plans') {
       const { data, error } = await supabase
@@ -75,7 +93,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       fiscal_year: getCurrentFiscalYear(),
-      hint: 'list=plans | plan-details | targets | suggest',
+      hint: 'list=schedules | schedule | plans | plan-details | targets | suggest',
     })
   } catch (error) {
     console.error('production-schedule GET error:', error)
@@ -89,6 +107,44 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    const action = String(body.action || 'calculate').trim()
+
+    if (action === 'save') {
+      if (!body.result || typeof body.result !== 'object') {
+        return NextResponse.json({ error: 'result が必要です' }, { status: 400 })
+      }
+      const rawLots = Array.isArray(body.lots) ? body.lots : []
+      const lots: SavedScheduleLotInput[] = []
+      for (const raw of rawLots) {
+        const targetType = parseTargetType(raw?.target_type)
+        const targetCode = String(raw?.target_code || '').trim()
+        const quantity = Number(raw?.quantity)
+        if (!targetType || !targetCode || !Number.isFinite(quantity) || quantity <= 0) continue
+        lots.push({
+          key: String(raw?.key || `${targetType}:${targetCode}:${raw?.model || ''}`),
+          model: String(raw?.model || targetCode),
+          quantity,
+          sequence: Number(raw?.sequence) || lots.length + 1,
+          target_type: targetType,
+          target_code: targetCode,
+          label: raw?.label ? String(raw.label) : null,
+          notes: raw?.notes != null && String(raw.notes).trim() ? String(raw.notes).trim() : null,
+          suggestions: Array.isArray(raw?.suggestions) ? raw.suggestions : undefined,
+        })
+      }
+
+      const saved = await saveProductionSchedule(supabase, {
+        start_date: String(body.start_date || body.result.start_date || ''),
+        minutes_per_day: Number(body.minutes_per_day || body.result.minutes_per_day) || 480,
+        fiscal_year: Number(body.fiscal_year || body.result.fiscal_year) || getCurrentFiscalYear(),
+        source_plan_id: body.source_plan_id ? String(body.source_plan_id) : null,
+        source_plan_name: body.source_plan_name ? String(body.source_plan_name) : null,
+        lots,
+        result: body.result,
+      })
+      return NextResponse.json({ schedule: saved })
+    }
+
     const startDate = String(body.start_date || '').trim()
     if (!startDate) {
       return NextResponse.json({ error: 'start_date が必要です' }, { status: 400 })

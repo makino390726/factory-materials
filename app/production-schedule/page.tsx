@@ -11,6 +11,18 @@ type Plan = {
   plan_period: string | null
 }
 
+type SavedSchedule = {
+  id: string
+  schedule_name: string
+  start_date: string
+  minutes_per_day: number
+  fiscal_year: number
+  source_plan_id: string | null
+  source_plan_name: string | null
+  lot_count: number
+  created_at: string
+}
+
 type TargetOption = {
   target_type: 'line' | 'instruction'
   target_code: string
@@ -148,30 +160,49 @@ function ProgressBar({
 
 export default function ProductionSchedulePage() {
   const [plans, setPlans] = useState<Plan[]>([])
+  const [savedSchedules, setSavedSchedules] = useState<SavedSchedule[]>([])
   const [targets, setTargets] = useState<TargetOption[]>([])
   const [planId, setPlanId] = useState('')
+  const [savedScheduleId, setSavedScheduleId] = useState('')
   const [startDate, setStartDate] = useState(todayIso())
   const [minutesPerDay, setMinutesPerDay] = useState(480)
   const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear())
   const [lots, setLots] = useState<LotRow[]>([])
   const [result, setResult] = useState<ScheduleResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null)
+
+  const refreshSavedSchedules = async () => {
+    const res = await fetch('/api/production-schedule?list=schedules')
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '保存スケジュール一覧の取得に失敗')
+    setSavedSchedules(data.schedules || [])
+    return data.schedules as SavedSchedule[]
+  }
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [plansRes, targetsRes] = await Promise.all([
+        const [plansRes, targetsRes, schedulesRes] = await Promise.all([
           fetch('/api/production-schedule?list=plans'),
           fetch('/api/production-schedule?list=targets'),
+          fetch('/api/production-schedule?list=schedules'),
         ])
         const plansData = await plansRes.json()
         const targetsData = await targetsRes.json()
+        const schedulesData = await schedulesRes.json()
         if (!plansRes.ok) throw new Error(plansData.error || '計画一覧の取得に失敗')
         if (!targetsRes.ok) throw new Error(targetsData.error || '対象一覧の取得に失敗')
         setPlans(plansData.plans || [])
         setTargets(targetsData.targets || [])
+        if (schedulesRes.ok) {
+          setSavedSchedules(schedulesData.schedules || [])
+        } else if (schedulesData.error) {
+          setInfo(schedulesData.error)
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : '初期読込に失敗しました')
       }
@@ -192,7 +223,9 @@ export default function ProductionSchedulePage() {
 
   const loadPlan = async (id: string) => {
     setPlanId(id)
+    setSavedScheduleId('')
     setResult(null)
+    setInfo(null)
     if (!id) {
       setLots([])
       return
@@ -236,6 +269,100 @@ export default function ProductionSchedulePage() {
     }
   }
 
+  const loadSavedSchedule = async (id: string) => {
+    setSavedScheduleId(id)
+    if (!id) return
+    setIsLoading(true)
+    setError(null)
+    setInfo(null)
+    setProgress({ pct: 20, label: '保存スケジュールを読み込んでいます…' })
+    try {
+      const res = await fetch(
+        `/api/production-schedule?list=schedule&id=${encodeURIComponent(id)}`
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '保存スケジュールの取得に失敗')
+      const schedule = data.schedule
+      setPlanId(schedule.source_plan_id || '')
+      setStartDate(schedule.start_date || todayIso())
+      setMinutesPerDay(schedule.minutes_per_day || 480)
+      setFiscalYear(schedule.fiscal_year || getCurrentFiscalYear())
+      const rows: LotRow[] = (schedule.lots || []).map(
+        (
+          lot: {
+            key?: string
+            model: string
+            quantity: number
+            sequence: number
+            target_type: 'line' | 'instruction'
+            target_code: string
+            label?: string | null
+            notes?: string | null
+            suggestions?: LotRow['suggestions']
+          },
+          index: number
+        ) => ({
+          key: lot.key || `${lot.model}-${index}`,
+          model: lot.model,
+          quantity: lot.quantity,
+          sequence: lot.sequence || index + 1,
+          target_type: lot.target_type || 'instruction',
+          target_code: lot.target_code || '',
+          label: lot.label || '',
+          notes: lot.notes || '',
+          suggestions: lot.suggestions || [],
+        })
+      )
+      setLots(rows)
+      setResult(schedule.result as ScheduleResult)
+      setProgress({ pct: 100, label: '読込完了' })
+      setInfo(`「${schedule.schedule_name}」を呼び出しました（進捗は最新実績で再集計）`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存スケジュールの読込に失敗しました')
+      setProgress(null)
+    } finally {
+      setIsLoading(false)
+      window.setTimeout(() => setProgress(null), 500)
+    }
+  }
+
+  const saveCurrentSchedule = async () => {
+    if (!result) return
+    setIsSaving(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const plan = plans.find((p) => p.id === planId)
+      const res = await fetch('/api/production-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save',
+          start_date: startDate,
+          minutes_per_day: minutesPerDay,
+          fiscal_year: fiscalYear,
+          source_plan_id: planId || null,
+          source_plan_name: plan?.plan_name || null,
+          lots,
+          result,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '保存に失敗しました')
+      const schedules = await refreshSavedSchedules()
+      const saved = data.schedule as SavedSchedule
+      setSavedScheduleId(saved.id)
+      if (!schedules.some((s) => s.id === saved.id)) {
+        setSavedSchedules([saved, ...schedules])
+      }
+      setInfo(`「${saved.schedule_name}」として保存しました`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存に失敗しました')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const updateLot = (key: string, patch: Partial<LotRow>) => {
     setLots((prev) => prev.map((lot) => (lot.key === key ? { ...lot, ...patch } : lot)))
   }
@@ -243,6 +370,8 @@ export default function ProductionSchedulePage() {
   const calculate = async () => {
     setIsLoading(true)
     setError(null)
+    setInfo(null)
+    setSavedScheduleId('')
     setProgress({ pct: 12, label: 'スケジュールを算出しています…' })
     const progressTimer = setInterval(() => {
       setProgress((prev) => {
@@ -319,7 +448,7 @@ export default function ProductionSchedulePage() {
         </div>
 
         <div className="mb-6 grid gap-4 rounded-2xl border border-slate-700 bg-slate-900/80 p-5 shadow-xl">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <label className="text-sm text-white">
               <span className="mb-1 block font-medium text-white">製造計画</span>
               <select
@@ -332,6 +461,22 @@ export default function ProductionSchedulePage() {
                   <option key={plan.id} value={plan.id}>
                     {plan.plan_name || plan.id}
                     {plan.fiscal_year ? `（${plan.fiscal_year}年度）` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-white">
+              <span className="mb-1 block font-medium text-white">保存済みスケジュール</span>
+              <select
+                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-white"
+                value={savedScheduleId}
+                onChange={(e) => void loadSavedSchedule(e.target.value)}
+              >
+                <option value="">選択して呼び出し</option>
+                {savedSchedules.map((schedule) => (
+                  <option key={schedule.id} value={schedule.id}>
+                    {schedule.schedule_name}
+                    {schedule.lot_count ? `（${schedule.lot_count}ロット）` : ''}
                   </option>
                 ))}
               </select>
@@ -368,7 +513,8 @@ export default function ProductionSchedulePage() {
 
           <p className="text-xs text-slate-300">
             ST優先順: 直近製作ロット平均（規格一致） → 年度平均（UF/DF別） → D/L指令標準時間。
-            平日のみ・同一機種内は工程順。作業班が空き次第、次の順序の機種を流し込む（パイプライン）。
+            工程順: 機械加工1班（板切り）→ 機械加工2班 → 組み立て1班 → 2班 → 3班。
+            板切り完了後に後工程へ。班が空き次第、次順序の機種を流し込む（パイプライン）。
           </p>
 
           <div className="overflow-x-auto">
@@ -470,10 +616,18 @@ export default function ProductionSchedulePage() {
             </table>
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              disabled={isLoading || lots.length === 0}
+              disabled={isLoading || isSaving || !result}
+              onClick={() => void saveCurrentSchedule()}
+              className="rounded-lg border border-emerald-500/60 bg-emerald-900/50 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-800/60 disabled:opacity-50"
+            >
+              {isSaving ? '保存中…' : 'スケジュールを保存（日付自動）'}
+            </button>
+            <button
+              type="button"
+              disabled={isLoading || isSaving || lots.length === 0}
               onClick={() => void calculate()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
             >
@@ -496,6 +650,12 @@ export default function ProductionSchedulePage() {
             </div>
           )}
         </div>
+
+        {info && (
+          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/50 px-4 py-3 text-sm text-emerald-100">
+            {info}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-xl border border-rose-500/50 bg-rose-950/60 px-4 py-3 text-sm text-rose-100">

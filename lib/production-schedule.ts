@@ -305,6 +305,76 @@ function ceilDays(totalMinutes: number, minutesPerDay: number) {
   return Math.max(1, Math.ceil(totalMinutes / minutesPerDay))
 }
 
+/**
+ * 生産スケジュールの工程順（固定）
+ * 1 機械加工1班（板切り）→ 2 機械加工2 → 3〜5 組立1〜3
+ * 板切りが終わらないと後工程はスタートできない。
+ */
+export const SCHEDULE_PROCESS_ORDER_LABELS = [
+  '1. 機械加工1班（板切り）',
+  '2. 機械加工2班',
+  '3. 組み立て1班',
+  '4. 組み立て2班',
+  '5. 組み立て3班',
+] as const
+
+function normalizeGroupText(code: string, name: string) {
+  return `${code} ${name}`
+    .toUpperCase()
+    .replace(/[‐−－—]/g, '-')
+    .replace(/\s+/g, '')
+}
+
+/** 小さいほど先工程。未知の班は後ろ（マスタ group_no で微調整） */
+export function getScheduleProcessOrder(
+  workGroupCode: string,
+  workGroupName: string,
+  groupNo = 0
+): number {
+  if (workGroupCode === '_STANDARD') return 9000
+  const t = normalizeGroupText(workGroupCode, workGroupName)
+  const name = workGroupName.toUpperCase().replace(/\s+/g, '')
+
+  // 1. 板切り / 機械加工1
+  if (/板切/.test(name) || /板切/.test(t)) return 1
+  if (
+    (/機械加工|[Kk]機|機械/.test(name) || /K-?1\b|K1/.test(t)) &&
+    (/[1１]班|[1１]（|第[1１]|K-?1(?:[^0-9]|$)/.test(t) || /機械加工第?[1１]/.test(name)) &&
+    !(/[2２]班|第[2２]|K-?2(?:[^0-9]|$)|機械加工第?[2２]/.test(t) || /板切/.test(name))
+  ) {
+    return 1
+  }
+  if (/^K-?1$|^K1$/.test(workGroupCode.toUpperCase().replace(/\s/g, ''))) return 1
+
+  // 2. 機械加工2
+  if (
+    (/機械加工|機械/.test(name) || /K-?2/.test(t)) &&
+    (/[2２]班|第[2２]|K-?2(?:[^0-9]|$)|機械加工第?[2２]/.test(t) || /機械2/.test(name))
+  ) {
+    return 2
+  }
+  if (/^K-?2$|^K2$/.test(workGroupCode.toUpperCase().replace(/\s/g, ''))) return 2
+
+  // 3-5. 組立1〜3
+  const isAssembly = /組立|組み立て|ASSY|ASSEMBLY/.test(name) || /A-?[123１２３]/.test(t)
+  if (isAssembly) {
+    if (/[1１]班|第[1１]|A-?1(?:[^0-9]|$)|組立第?[1１]/.test(t) || /組立1|組み立て1/.test(name)) {
+      return 3
+    }
+    if (/[2２]班|第[2２]|A-?2(?:[^0-9]|$)|組立第?[2２]/.test(t) || /組立2|組み立て2/.test(name)) {
+      return 4
+    }
+    if (/[3３]班|第[3３]|A-?3(?:[^0-9]|$)|組立第?[3３]/.test(t) || /組立3|組み立て3/.test(name)) {
+      return 5
+    }
+  }
+  if (/^A-?1$|^A1$/.test(workGroupCode.toUpperCase().replace(/\s/g, ''))) return 3
+  if (/^A-?2$|^A2$/.test(workGroupCode.toUpperCase().replace(/\s/g, ''))) return 4
+  if (/^A-?3$|^A3$/.test(workGroupCode.toUpperCase().replace(/\s/g, ''))) return 5
+
+  return 100 + groupNo
+}
+
 async function fetchWorkGroupOrder(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from('work_group_master')
@@ -312,11 +382,17 @@ async function fetchWorkGroupOrder(supabase: SupabaseClient) {
     .order('group_no', { ascending: true })
     .order('work_group_code', { ascending: true })
   if (error) throw error
-  return (data || []).map((row) => ({
-    work_group_code: String(row.work_group_code),
-    work_group_name: String(row.work_name || row.work_group_code),
-    group_no: Number(row.group_no) || 0,
-  }))
+  return (data || []).map((row) => {
+    const work_group_code = String(row.work_group_code)
+    const work_group_name = String(row.work_name || row.work_group_code)
+    const group_no = Number(row.group_no) || 0
+    return {
+      work_group_code,
+      work_group_name,
+      group_no,
+      process_order: getScheduleProcessOrder(work_group_code, work_group_name, group_no),
+    }
+  })
 }
 
 async function resolveWorkGroupStMinutes(
@@ -507,24 +583,42 @@ export async function buildProductionSchedule(
 
     const groupEntries = Array.from(resolved.stByGroup.entries())
       .filter(([, st]) => st > 0)
-      .map(([code, st]) => ({
-        work_group_code: code,
-        work_group_name: nameByCode.get(code) || code,
-        st_minutes: st,
-        group_no:
-          code === '_STANDARD'
-            ? 9999
-            : workGroupMaster.find((g) => g.work_group_code === code)?.group_no ?? 5000,
-      }))
-      .sort((a, b) => a.group_no - b.group_no || a.work_group_code.localeCompare(b.work_group_code))
+      .map(([code, st]) => {
+        const master = workGroupMaster.find((g) => g.work_group_code === code)
+        const work_group_name = nameByCode.get(code) || code
+        const group_no = code === '_STANDARD' ? 9999 : master?.group_no ?? 5000
+        return {
+          work_group_code: code,
+          work_group_name,
+          st_minutes: st,
+          group_no,
+          process_order:
+            code === '_STANDARD'
+              ? 9000
+              : master?.process_order ??
+                getScheduleProcessOrder(code, work_group_name, group_no),
+        }
+      })
+      .sort(
+        (a, b) =>
+          a.process_order - b.process_order ||
+          a.work_group_code.localeCompare(b.work_group_code)
+      )
 
     if (groupEntries.length === 0) {
       warnings.push(`${lot.model}（${targetCode}）: 有効な班STがありません`)
       continue
     }
 
+    // 機械加工1（板切り）がSTに無い場合は警告（後工程だけの計画になる）
+    if (!groupEntries.some((g) => g.process_order === 1)) {
+      warnings.push(
+        `${lot.model}: 機械加工1班（板切り）のSTが無いため、後工程のみで計画しています`
+      )
+    }
+
     const workGroups: ScheduleWorkGroupPlan[] = []
-    // 同一機種内は工程順。前工程完了後に次工程へ
+    // 同一機種内は工程順。前工程（板切り等）完了後に次工程へ
     let lotReady = startDate
 
     for (const group of groupEntries) {
@@ -602,12 +696,21 @@ export async function buildProductionSchedule(
 
   const allDates = Array.from(new Set(occupancy.map((c) => c.date))).sort()
   const workGroups = Array.from(usedGroups.entries())
-    .map(([work_group_code, work_group_name]) => ({ work_group_code, work_group_name }))
-    .sort((a, b) => {
-      const ao = workGroupMaster.find((g) => g.work_group_code === a.work_group_code)?.group_no ?? 9999
-      const bo = workGroupMaster.find((g) => g.work_group_code === b.work_group_code)?.group_no ?? 9999
-      return ao - bo || a.work_group_code.localeCompare(b.work_group_code)
-    })
+    .map(([work_group_code, work_group_name]) => ({
+      work_group_code,
+      work_group_name,
+      process_order: getScheduleProcessOrder(
+        work_group_code,
+        work_group_name,
+        workGroupMaster.find((g) => g.work_group_code === work_group_code)?.group_no ?? 0
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        a.process_order - b.process_order ||
+        a.work_group_code.localeCompare(b.work_group_code)
+    )
+    .map(({ work_group_code, work_group_name }) => ({ work_group_code, work_group_name }))
 
   const base: ProductionScheduleResult = {
     start_date: startDate,
@@ -638,5 +741,199 @@ export async function buildProductionSchedule(
       `実績進捗の取得に失敗: ${error instanceof Error ? error.message : 'unknown'}`
     )
     return { ...base, warnings }
+  }
+}
+
+export type SavedScheduleLotInput = ScheduleLotInput & {
+  suggestions?: Array<{ target_type: ProcessTargetType; target_code: string; label: string }>
+}
+
+export type SavedProductionScheduleSummary = {
+  id: string
+  schedule_name: string
+  start_date: string
+  minutes_per_day: number
+  fiscal_year: number
+  source_plan_id: string | null
+  source_plan_name: string | null
+  lot_count: number
+  created_at: string
+}
+
+export type SavedProductionSchedule = SavedProductionScheduleSummary & {
+  lots: SavedScheduleLotInput[]
+  result: ProductionScheduleResult
+}
+
+function isMissingProductionSchedulesTable(error: { code?: string; message?: string }) {
+  return (
+    error.code === '42P01' ||
+    error.code === 'PGRST205' ||
+    (error.message || '').includes('production_schedules') ||
+    (error.message || '').includes('does not exist')
+  )
+}
+
+function formatProductionSchedulesTableError(error: unknown): Error {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const record = error as { code?: string; message: string }
+    if (isMissingProductionSchedulesTable(record)) {
+      return new Error(
+        'production_schedules テーブルがありません。Supabaseで create-production-schedules.sql を実行してください。'
+      )
+    }
+    return new Error(record.message)
+  }
+  return error instanceof Error ? error : new Error('スケジュール保存の処理に失敗しました')
+}
+
+/** 保存名: スケジュール YYYY-MM-DD HH:mm（同一分は秒を付与） */
+export function buildAutoScheduleName(now = new Date()) {
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  return {
+    base: `スケジュール ${y}-${m}-${d} ${hh}:${mm}`,
+    withSeconds: `スケジュール ${y}-${m}-${d} ${hh}:${mm}:${ss}`,
+  }
+}
+
+export async function listSavedProductionSchedules(
+  supabase: SupabaseClient
+): Promise<SavedProductionScheduleSummary[]> {
+  const { data, error } = await supabase
+    .from('production_schedules')
+    .select(
+      'id, schedule_name, start_date, minutes_per_day, fiscal_year, source_plan_id, source_plan_name, lots_json, created_at'
+    )
+    .order('created_at', { ascending: false })
+  if (error) throw formatProductionSchedulesTableError(error)
+
+  return (data || []).map((row) => {
+    const lots = Array.isArray(row.lots_json) ? row.lots_json : []
+    return {
+      id: String(row.id),
+      schedule_name: String(row.schedule_name),
+      start_date: String(row.start_date),
+      minutes_per_day: Number(row.minutes_per_day) || DEFAULT_MINUTES_PER_DAY,
+      fiscal_year: Number(row.fiscal_year) || getCurrentFiscalYear(),
+      source_plan_id: row.source_plan_id ? String(row.source_plan_id) : null,
+      source_plan_name: row.source_plan_name ? String(row.source_plan_name) : null,
+      lot_count: lots.length,
+      created_at: String(row.created_at),
+    }
+  })
+}
+
+export async function saveProductionSchedule(
+  supabase: SupabaseClient,
+  input: {
+    start_date: string
+    minutes_per_day: number
+    fiscal_year: number
+    source_plan_id?: string | null
+    source_plan_name?: string | null
+    lots: SavedScheduleLotInput[]
+    result: ProductionScheduleResult
+  }
+): Promise<SavedProductionScheduleSummary> {
+  const names = buildAutoScheduleName()
+  let scheduleName = names.base
+
+  const { data: existing } = await supabase
+    .from('production_schedules')
+    .select('id')
+    .eq('schedule_name', scheduleName)
+    .limit(1)
+  if (existing && existing.length > 0) {
+    scheduleName = names.withSeconds
+  }
+
+  const { data, error } = await supabase
+    .from('production_schedules')
+    .insert({
+      schedule_name: scheduleName,
+      start_date: normalizeWorkDate(input.start_date),
+      minutes_per_day: input.minutes_per_day,
+      fiscal_year: input.fiscal_year,
+      source_plan_id: input.source_plan_id || null,
+      source_plan_name: input.source_plan_name || null,
+      lots_json: input.lots,
+      result_json: input.result,
+    })
+    .select(
+      'id, schedule_name, start_date, minutes_per_day, fiscal_year, source_plan_id, source_plan_name, lots_json, created_at'
+    )
+    .single()
+
+  if (error) throw formatProductionSchedulesTableError(error)
+
+  const lots = Array.isArray(data.lots_json) ? data.lots_json : []
+  return {
+    id: String(data.id),
+    schedule_name: String(data.schedule_name),
+    start_date: String(data.start_date),
+    minutes_per_day: Number(data.minutes_per_day) || DEFAULT_MINUTES_PER_DAY,
+    fiscal_year: Number(data.fiscal_year) || getCurrentFiscalYear(),
+    source_plan_id: data.source_plan_id ? String(data.source_plan_id) : null,
+    source_plan_name: data.source_plan_name ? String(data.source_plan_name) : null,
+    lot_count: lots.length,
+    created_at: String(data.created_at),
+  }
+}
+
+export async function loadSavedProductionSchedule(
+  supabase: SupabaseClient,
+  id: string,
+  options?: { refreshProgress?: boolean }
+): Promise<SavedProductionSchedule> {
+  const { data, error } = await supabase
+    .from('production_schedules')
+    .select(
+      'id, schedule_name, start_date, minutes_per_day, fiscal_year, source_plan_id, source_plan_name, lots_json, result_json, created_at'
+    )
+    .eq('id', id)
+    .single()
+
+  if (error) throw formatProductionSchedulesTableError(error)
+  if (!data) throw new Error('保存スケジュールが見つかりません')
+
+  const lots = (Array.isArray(data.lots_json) ? data.lots_json : []) as SavedScheduleLotInput[]
+  let result = data.result_json as ProductionScheduleResult
+  if (!result || typeof result !== 'object') {
+    throw new Error('保存スケジュールの結果データが不正です')
+  }
+
+  if (options?.refreshProgress !== false) {
+    try {
+      result = await attachScheduleProgress(supabase, {
+        ...result,
+        as_of_date: todayIsoLocal(),
+      })
+    } catch (progressError) {
+      const warning =
+        progressError instanceof Error ? progressError.message : '実績進捗の再集計に失敗'
+      result = {
+        ...result,
+        warnings: [...(result.warnings || []), `実績進捗の再集計に失敗: ${warning}`],
+      }
+    }
+  }
+
+  return {
+    id: String(data.id),
+    schedule_name: String(data.schedule_name),
+    start_date: String(data.start_date),
+    minutes_per_day: Number(data.minutes_per_day) || DEFAULT_MINUTES_PER_DAY,
+    fiscal_year: Number(data.fiscal_year) || getCurrentFiscalYear(),
+    source_plan_id: data.source_plan_id ? String(data.source_plan_id) : null,
+    source_plan_name: data.source_plan_name ? String(data.source_plan_name) : null,
+    lot_count: lots.length,
+    created_at: String(data.created_at),
+    lots,
+    result,
   }
 }
