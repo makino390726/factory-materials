@@ -1685,7 +1685,7 @@ export async function analyzeProductionLots(
     return {
       lot: record,
       is_cumulative: index === 0,
-      total_lead_time_st: totalLead > 0 ? roundSt(totalLead) : null,
+      total_lead_time_st: totalLead != null && totalLead > 0 ? roundSt(totalLead) : null,
       rows,
       bottleneck_by_st: rows.find((row) => row.is_bottleneck_by_st)?.work_group_code ?? null,
       bottleneck_by_variation:
