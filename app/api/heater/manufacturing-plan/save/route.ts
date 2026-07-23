@@ -46,13 +46,27 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({ ...plan, details: details || [] });
     } else {
-      // 全計画一覧を取得
       const { data, error } = await supabase
         .from('heater_manufacturing_plans')
-        .select('id, plan_name, fiscal_year, plan_period, notes, created_at, updated_at')
+        .select('id, plan_name, fiscal_year, plan_period, product_category, notes, created_at, updated_at')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        if (
+          error.code === 'PGRST204' ||
+          (error.message || '').includes('product_category')
+        ) {
+          const fallback = await supabase
+            .from('heater_manufacturing_plans')
+            .select('id, plan_name, fiscal_year, plan_period, notes, created_at, updated_at')
+            .order('created_at', { ascending: false });
+          if (fallback.error) throw fallback.error;
+          return NextResponse.json(
+            (fallback.data || []).map((row) => ({ ...row, product_category: '暖房機' }))
+          );
+        }
+        throw error;
+      }
       return NextResponse.json(data || []);
     }
   } catch (err: any) {
@@ -64,7 +78,8 @@ export async function GET(req: NextRequest) {
 // 製造計画保存（新規作成）
 export async function POST(req: NextRequest) {
   try {
-    const { plan_name, fiscal_year, plan_period, notes, details } = await req.json();
+    const { plan_name, fiscal_year, plan_period, notes, details, product_category } =
+      await req.json();
 
     if (!plan_name || !fiscal_year || !details || details.length === 0) {
       return NextResponse.json(
@@ -73,12 +88,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const category =
+      typeof product_category === 'string' && product_category.trim()
+        ? product_category.trim()
+        : '暖房機';
+
     // トランザクション的に処理（計画マスター→明細の順で保存）
-    const { data: planData, error: planError } = await supabase
-      .from('heater_manufacturing_plans')
-      .insert([{ plan_name, fiscal_year, plan_period, notes }])
-      .select()
-      .single();
+    let planData: any = null;
+    let planError: any = null;
+    {
+      const inserted = await supabase
+        .from('heater_manufacturing_plans')
+        .insert([{ plan_name, fiscal_year, plan_period, notes, product_category: category }])
+        .select()
+        .single();
+      planData = inserted.data;
+      planError = inserted.error;
+      if (
+        planError &&
+        (planError.code === 'PGRST204' ||
+          (planError.message || '').includes('product_category'))
+      ) {
+        const legacy = await supabase
+          .from('heater_manufacturing_plans')
+          .insert([{ plan_name, fiscal_year, plan_period, notes }])
+          .select()
+          .single();
+        planData = legacy.data;
+        planError = legacy.error;
+      }
+    }
 
     if (planError) throw planError;
 
@@ -114,17 +153,51 @@ export async function POST(req: NextRequest) {
 // 製造計画更新
 export async function PUT(req: NextRequest) {
   try {
-    const { id, plan_name, fiscal_year, plan_period, notes, details } = await req.json();
+    const { id, plan_name, fiscal_year, plan_period, notes, details, product_category } =
+      await req.json();
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
 
+    const category =
+      typeof product_category === 'string' && product_category.trim()
+        ? product_category.trim()
+        : '暖房機';
+
     // 計画マスターを更新
-    const { error: planError } = await supabase
-      .from('heater_manufacturing_plans')
-      .update({ plan_name, fiscal_year, plan_period, notes, updated_at: new Date().toISOString() })
-      .eq('id', id);
+    let planError: any = null;
+    {
+      const updated = await supabase
+        .from('heater_manufacturing_plans')
+        .update({
+          plan_name,
+          fiscal_year,
+          plan_period,
+          notes,
+          product_category: category,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+      planError = updated.error;
+      if (
+        planError &&
+        (planError.code === 'PGRST204' ||
+          (planError.message || '').includes('product_category'))
+      ) {
+        const legacy = await supabase
+          .from('heater_manufacturing_plans')
+          .update({
+            plan_name,
+            fiscal_year,
+            plan_period,
+            notes,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id);
+        planError = legacy.error;
+      }
+    }
 
     if (planError) throw planError;
 

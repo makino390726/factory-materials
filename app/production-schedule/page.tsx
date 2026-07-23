@@ -9,6 +9,7 @@ type Plan = {
   plan_name: string | null
   fiscal_year: number | null
   plan_period: string | null
+  product_category?: string | null
 }
 
 type SavedSchedule = {
@@ -460,6 +461,7 @@ export default function ProductionSchedulePage() {
                 {plans.map((plan) => (
                   <option key={plan.id} value={plan.id}>
                     {plan.plan_name || plan.id}
+                    {plan.product_category ? ` / ${plan.product_category}` : ''}
                     {plan.fiscal_year ? `（${plan.fiscal_year}年度）` : ''}
                   </option>
                 ))}
@@ -513,7 +515,7 @@ export default function ProductionSchedulePage() {
 
           <p className="text-xs text-slate-300">
             ST優先順: 直近製作ロット平均（規格一致） → 年度平均（UF/DF別） → D/L指令標準時間。
-            工程順: 機械加工1班（板切り）→ 機械加工2班 → 組み立て1班 → 2班 → 3班。
+            UFのSTは DF＋UF差分（UF=DF+UF）。工程順: 機械加工1班（板切り）→ 機械加工2班 → 組み立て1班 → 2班 → 3班。
             板切り完了後に後工程へ。班が空き次第、次順序の機種を流し込む（パイプライン）。
           </p>
 

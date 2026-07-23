@@ -548,16 +548,16 @@ export default function PartsListPage() {
                               className="w-full px-2 py-1 border border-slate-300 rounded text-sm text-right"
                             />
                           </td>
-                          <td className="px-6 py-3 text-right space-x-2 print:hidden">
+                          <td className="space-x-2 px-6 py-3 text-right print:hidden">
                             <button
                               onClick={handleSaveRowEdit}
-                              className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded text-xs font-medium transition-colors"
+                              className="rounded border border-emerald-400/50 bg-emerald-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-600"
                             >
                               保存
                             </button>
                             <button
                               onClick={handleCancelRowEdit}
-                              className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-medium transition-colors"
+                              className="rounded border border-slate-500 bg-slate-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-slate-600"
                             >
                               キャンセル
                             </button>
@@ -566,21 +566,21 @@ export default function PartsListPage() {
                       ) : (
                         // 通常表示モード
                         <>
-                          <td className="px-6 py-3 text-slate-900 font-medium text-xs print:px-2 print:py-2">{part.part_key}</td>
+                          <td className="px-6 py-3 text-xs font-medium text-slate-900 print:px-2 print:py-2">{part.part_key}</td>
                           <td className="px-6 py-3 text-slate-900 print:px-2 print:py-2">{part.part_name}</td>
                           <td className="px-6 py-3 text-right text-slate-900 print:px-2 print:py-2">¥{(part.material_cost_total || 0).toLocaleString()}</td>
                           <td className="px-6 py-3 text-right text-slate-900 print:px-2 print:py-2">¥{(part.indirect_cost_total || 0).toLocaleString()}</td>
-                          <td className="px-6 py-3 text-right text-slate-900 font-medium print:px-2 print:py-2">¥{part.cost_price?.toLocaleString() || 0}</td>
-                          <td className="px-6 py-3 text-right space-x-2 print:hidden">
+                          <td className="px-6 py-3 text-right font-medium text-slate-900 print:px-2 print:py-2">¥{part.cost_price?.toLocaleString() || 0}</td>
+                          <td className="space-x-2 px-6 py-3 text-right print:hidden">
                             <button
                               onClick={() => handleStartRowEdit(part)}
-                              className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-xs font-medium transition-colors"
+                              className="rounded border border-cyan-400/50 bg-cyan-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-600"
                             >
                               編集
                             </button>
                             <button
                               onClick={() => handleDelete(part.part_key)}
-                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors"
+                              className="rounded border border-rose-400/50 bg-rose-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-rose-600"
                             >
                               削除
                             </button>

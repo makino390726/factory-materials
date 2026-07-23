@@ -255,14 +255,14 @@ export default function MachinesPage() {
                             <button
                               type="button"
                               onClick={() => handleEdit(machine)}
-                              className="px-3 py-1 rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 transition"
+                              className="rounded-md border border-amber-400/50 bg-amber-700 px-3 py-1 text-sm font-medium text-white transition hover:bg-amber-600"
                             >
                               編集
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDelete(machine)}
-                              className="px-3 py-1 rounded-md bg-rose-100 text-rose-700 hover:bg-rose-200 transition"
+                              className="rounded-md border border-rose-400/50 bg-rose-700 px-3 py-1 text-sm font-medium text-white transition hover:bg-rose-600"
                             >
                               削除
                             </button>

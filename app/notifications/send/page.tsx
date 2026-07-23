@@ -256,14 +256,14 @@ export default function SendNotificationPage() {
                     <button
                       type="button"
                       onClick={() => setMessage('本日の作業日報をまだ入力していません。入力をお願いします。')}
-                      className="w-full text-left px-3 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                      className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm text-white transition hover:bg-slate-700"
                     >
                       日報未入力の催促
                     </button>
                     <button
                       type="button"
                       onClick={() => setMessage('明日は定期メンテナンスのため、システムが一時停止します。')}
-                      className="w-full text-left px-3 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                      className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm text-white transition hover:bg-slate-700"
                     >
                       メンテナンスのお知らせ
                     </button>
@@ -287,7 +287,7 @@ export default function SendNotificationPage() {
             <button
               onClick={handleSendNotifications}
               disabled={isSending || selectedStaffIds.length === 0 || !message.trim()}
-              className="w-full rounded-xl bg-blue-600 px-4 py-4 text-lg font-bold text-white shadow-lg shadow-blue-600/40 transition hover:-translate-y-0.5 hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-300"
+              className="w-full rounded-xl bg-cyan-600 px-4 py-4 text-lg font-bold text-white shadow-lg shadow-cyan-600/40 transition hover:-translate-y-0.5 hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
             >
               {isSending ? '送信中...' : `${selectedStaffIds.length}名に通知を送信`}
             </button>

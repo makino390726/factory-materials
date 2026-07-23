@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { buildProcessManagementPath, toProcessTargetKey } from '@/lib/process-management'
+import { buildProcessManagementPath, normalizeSpecKey, toProcessTargetKey } from '@/lib/process-management'
 import {
   formatFiscalYearLabel,
   getCurrentFiscalYear,
@@ -19,6 +19,8 @@ type ProcessRow = {
   variation_pct: number | null
   is_bottleneck_by_st: boolean
   is_bottleneck_by_variation: boolean
+  avg_st_df_base_minutes?: number | null
+  avg_st_uf_delta_minutes?: number | null
 }
 
 type ProcessTarget = {
@@ -51,6 +53,11 @@ type ProductionLotsResult = {
   suggested_period_start: string | null
   lots: ProductionLotAnalysis[]
   fiscal_year_summary: FiscalYearWorkGroupSummary | null
+  fiscal_year_summaries_by_spec?: Array<{
+    spec_key: string
+    spec_label: string
+    summary: FiscalYearWorkGroupSummary
+  }>
 }
 
 type FiscalYearWorkGroupSummary = {
@@ -64,12 +71,15 @@ type FiscalYearWorkGroupSummary = {
   annual_completed_qty: number
   total_minutes: number
   duration_hours: string
+  uf_composed?: boolean
   rows: Array<{
     work_group_code: string
     work_group_name: string
     total_minutes: number
     duration_hours: string
     avg_st_minutes: number | null
+    avg_st_df_base_minutes?: number | null
+    avg_st_uf_delta_minutes?: number | null
   }>
   by_spec?: Array<{
     spec_key: string
@@ -96,7 +106,23 @@ const formatVariation = (value: number | null) => {
   return `${sign}${value.toFixed(1)}%`
 }
 
-function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessage: string }) {
+function WorkGroupTable({
+  rows,
+  emptyMessage,
+  showUfBreakdown = false,
+}: {
+  rows: ProcessRow[]
+  emptyMessage: string
+  showUfBreakdown?: boolean
+}) {
+  const hasBreakdown =
+    showUfBreakdown ||
+    rows.some(
+      (row) =>
+        (row.avg_st_df_base_minutes != null && row.avg_st_df_base_minutes > 0) ||
+        (row.avg_st_uf_delta_minutes != null && row.avg_st_uf_delta_minutes > 0)
+    )
+
   return (
     <table className="min-w-full text-sm text-black">
       <thead className="text-left border-b border-slate-200">
@@ -104,7 +130,13 @@ function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessa
           <th className="py-2 pr-4">作業グループ</th>
           <th className="py-2 pr-4">名称</th>
           <th className="py-2 pr-4 text-right">期間実績</th>
-          <th className="py-2 pr-4 text-right">1台ST</th>
+          <th className="py-2 pr-4 text-right">{hasBreakdown ? '1台ST（UF=DF+UF）' : '1台ST'}</th>
+          {hasBreakdown && (
+            <>
+              <th className="py-2 pr-4 text-right">DF基準</th>
+              <th className="py-2 pr-4 text-right">UF差分</th>
+            </>
+          )}
           <th className="py-2 pr-4 text-right">平均ST</th>
           <th className="py-2 pr-4 text-right">変動</th>
           <th className="py-2">判定</th>
@@ -113,7 +145,7 @@ function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessa
       <tbody>
         {rows.length === 0 ? (
           <tr>
-            <td colSpan={7} className="py-6 text-center text-slate-400">
+            <td colSpan={hasBreakdown ? 9 : 7} className="py-6 text-center text-slate-400">
               {emptyMessage}
             </td>
           </tr>
@@ -129,6 +161,16 @@ function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessa
               <td className="py-3 pr-4">{row.work_group_name}</td>
               <td className="py-3 pr-4 text-right">{formatMinutes(row.total_minutes)}</td>
               <td className="py-3 pr-4 text-right font-semibold">{formatSt(row.avg_st_minutes)}</td>
+              {hasBreakdown && (
+                <>
+                  <td className="py-3 pr-4 text-right text-slate-300">
+                    {formatSt(row.avg_st_df_base_minutes ?? null)}
+                  </td>
+                  <td className="py-3 pr-4 text-right text-violet-200">
+                    {formatSt(row.avg_st_uf_delta_minutes ?? null)}
+                  </td>
+                </>
+              )}
               <td className="py-3 pr-4 text-right text-slate-600">
                 {formatSt(row.baseline_st_minutes)}
               </td>
@@ -146,17 +188,19 @@ function WorkGroupTable({ rows, emptyMessage }: { rows: ProcessRow[]; emptyMessa
               <td className="py-3">
                 <div className="flex flex-wrap gap-1">
                   {row.is_bottleneck_by_st && (
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-700">
+                    <span className="rounded-full border border-rose-400/50 bg-rose-950 px-2 py-0.5 text-xs font-semibold text-rose-100">
                       工程BN
                     </span>
                   )}
                   {row.is_bottleneck_by_variation && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                    <span className="rounded-full border border-amber-400/50 bg-amber-950 px-2 py-0.5 text-xs font-semibold text-amber-100">
                       変動BN
                     </span>
                   )}
                   {!row.is_bottleneck_by_st && !row.is_bottleneck_by_variation && (
-                    <span className="text-xs text-slate-400">OK</span>
+                    <span className="rounded-full border border-emerald-400/40 bg-emerald-950 px-2 py-0.5 text-xs font-semibold text-emerald-100">
+                      OK
+                    </span>
                   )}
                 </div>
               </td>
@@ -323,7 +367,10 @@ function ProcessManagementContent() {
       const result = data as ProductionLotsResult
       setLotsResult(result)
       if (result.fiscal_year_summary) {
-        setFiscalSummary(result.fiscal_year_summary)
+        setFiscalSummary({
+          ...result.fiscal_year_summary,
+          by_spec: result.fiscal_year_summaries_by_spec || result.fiscal_year_summary.by_spec,
+        })
         setFiscalYear(result.fiscal_year_summary.fiscal_year)
       }
       if (result.lots.length > 0) {
@@ -573,7 +620,7 @@ function ProcessManagementContent() {
                 ))}
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                同一指令で UF/DF など規格違いがある場合は、ここに登録してロットを区別します。
+                DFが工程ベース。UFは「DF→UF変更に要した時間」で、UFのSTは DF＋UF差分 です。
               </p>
             </div>
           </div>
@@ -690,7 +737,7 @@ function ProcessManagementContent() {
                         <td className="py-3 pr-4">{item.lot.receipt_slip_no || '—'}</td>
                         <td className="py-3 pr-4">
                           {item.lot.notes ? (
-                            <span className="inline-flex rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                            <span className="inline-flex rounded-md border border-violet-400/50 bg-violet-950 px-2 py-0.5 text-xs font-semibold text-violet-100">
                               {item.lot.notes}
                             </span>
                           ) : (
@@ -732,11 +779,19 @@ function ProcessManagementContent() {
                   {selectedLot.lot.notes ? ` / 規格 ${selectedLot.lot.notes}` : ''}
                 </p>
                 <p className="text-xs text-slate-500 mb-4">
-                  平均ST = 会計年度の同規格（UF/DF）平均との差（変動）で工程進捗を確認します。
+                  UFロットの1台STは DF基準＋UF差分。平均STは会計年度の同規格平均（UFはDF+UF合計）との差（変動）です。
                 </p>
                 <WorkGroupTable
                   rows={selectedLot.rows}
                   emptyMessage="この期間の該当作業日報がありません"
+                  showUfBreakdown={
+                    normalizeSpecKey(selectedLot.lot.notes) === 'UF' ||
+                    selectedLot.rows.some(
+                      (row) =>
+                        (row.avg_st_df_base_minutes ?? 0) > 0 ||
+                        (row.avg_st_uf_delta_minutes ?? 0) > 0
+                    )
+                  }
                 />
               </div>
             )}
@@ -823,7 +878,17 @@ function ProcessManagementContent() {
                       <th className="py-2 pr-4">作業グループ</th>
                       <th className="py-2 pr-4">名称</th>
                       <th className="py-2 pr-4 text-right">所要時間</th>
-                      <th className="py-2 pr-4 text-right">平均ST</th>
+                      <th className="py-2 pr-4 text-right">
+                        {displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF'
+                          ? '平均ST（UF=DF+UF）'
+                          : '平均ST'}
+                      </th>
+                      {(displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF') && (
+                        <>
+                          <th className="py-2 pr-4 text-right">DF基準</th>
+                          <th className="py-2 pr-4 text-right">UF差分</th>
+                        </>
+                      )}
                       <th className="py-2 text-right">時間</th>
                     </tr>
                   </thead>
@@ -836,6 +901,16 @@ function ProcessManagementContent() {
                         <td className="py-3 pr-4 text-right font-semibold text-indigo-700">
                           {formatSt(row.avg_st_minutes)}
                         </td>
+                        {(displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF') && (
+                          <>
+                            <td className="py-3 pr-4 text-right text-slate-300">
+                              {formatSt(row.avg_st_df_base_minutes ?? null)}
+                            </td>
+                            <td className="py-3 pr-4 text-right text-violet-200">
+                              {formatSt(row.avg_st_uf_delta_minutes ?? null)}
+                            </td>
+                          </>
+                        )}
                         <td className="py-3 text-right text-slate-600">{row.duration_hours}</td>
                       </tr>
                     ))}
@@ -843,7 +918,8 @@ function ProcessManagementContent() {
                 </table>
                 <p className="mt-3 text-xs text-slate-600">
                   平均ST = 所要時間 ÷ 制作台数（{displayedFiscalSummary.period_start} 〜{' '}
-                  {displayedFiscalSummary.period_end}）。UF/DF は備考単位で集計します。
+                  {displayedFiscalSummary.period_end}）。
+                  DFが工程ベース、UFは DF＋UF差分（UF変更に要した時間）です。
                 </p>
               </>
             )}

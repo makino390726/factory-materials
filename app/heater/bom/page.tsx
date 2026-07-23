@@ -352,7 +352,7 @@ export default function BomPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Link href="/masters/import#ec30-bom">
               <button className="px-5 py-2 rounded-full border border-emerald-500/50 text-emerald-200 hover:text-white hover:border-emerald-400 transition text-sm">
-                EC30 図番取込（マスタCSV）
+                図番管理表（BOM）取込
               </button>
             </Link>
             <Link href="/heater/models/dr8008">

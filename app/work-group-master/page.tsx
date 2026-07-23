@@ -123,15 +123,15 @@ export default function WorkGroupMasterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 p-6 text-white">
       <div className="mx-auto max-w-6xl">
         {/* ヘッダー */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-3xl font-bold text-transparent">
+            <h1 className="bg-gradient-to-r from-cyan-300 via-blue-300 to-indigo-300 bg-clip-text text-3xl font-bold text-transparent">
               作業グループマスター
             </h1>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-slate-300">
               作業グループの登録・編集・削除
             </p>
           </div>

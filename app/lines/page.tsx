@@ -1294,7 +1294,7 @@ export default function LinesPage() {
                                 {rows.map((row) => (
                                   <span
                                     key={row.month}
-                                    className="inline-block rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-900 whitespace-nowrap"
+                                    className="inline-block rounded border border-sky-400/40 bg-sky-950 px-1.5 py-0.5 text-[11px] font-medium text-sky-100 whitespace-nowrap"
                                   >
                                     {row.month_label}-{row.duration_hours}
                                   </span>
@@ -1309,7 +1309,7 @@ export default function LinesPage() {
                               {(line.part_assignments || []).map((a: any) => (
                                 <span
                                   key={a.part_key}
-                                  className="inline-block bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs whitespace-nowrap"
+                                  className="inline-block rounded border border-cyan-400/40 bg-cyan-950 px-2 py-1 text-xs font-medium text-cyan-100 whitespace-nowrap"
                                 >
                                   {a.part_key} ({a.ratio}%)
                                   {a.common_group_label ? ` / ${a.common_group_label}` : ''}

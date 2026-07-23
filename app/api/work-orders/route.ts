@@ -177,8 +177,9 @@ export async function POST(req: Request) {
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
+    // BOM時: 明示の bom_model（品名など）を優先。未指定時のみ D指令番号を用いる。
     const normalizedBomModel = normalizedCostMode === 'bom'
-      ? normalizedOrderNo
+      ? (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : normalizedOrderNo)
       : (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : null)
 
     if (!normalizedOrderNo) {
@@ -275,8 +276,9 @@ export async function PUT(req: Request) {
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
+    // BOM時: 明示の bom_model（品名など）を優先。未指定時のみ D指令番号を用いる。
     const normalizedBomModel = normalizedCostMode === 'bom'
-      ? normalizedOrderNo
+      ? (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : normalizedOrderNo)
       : (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : null)
 
     if (!id) {

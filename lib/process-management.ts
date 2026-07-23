@@ -25,6 +25,10 @@ export type ProcessWorkGroupRow = {
   variation_pct: number | null
   is_bottleneck_by_st: boolean
   is_bottleneck_by_variation: boolean
+  /** UF時: DF基準ST */
+  avg_st_df_base_minutes?: number | null
+  /** UF時: UF差分ST（実測） */
+  avg_st_uf_delta_minutes?: number | null
 }
 
 export type ProcessDayHistory = {
@@ -978,6 +982,10 @@ export type FiscalYearWorkGroupRow = {
   total_minutes: number
   duration_hours: string
   avg_st_minutes: number | null
+  /** UF時: DF基準ST（合計STの内訳） */
+  avg_st_df_base_minutes?: number | null
+  /** UF時: UF差分ST（合計STの内訳） */
+  avg_st_uf_delta_minutes?: number | null
 }
 
 export type FiscalYearWorkGroupSummary = {
@@ -994,12 +1002,98 @@ export type FiscalYearWorkGroupSummary = {
   rows: FiscalYearWorkGroupRow[]
   /** 規格キー（UF/DF など）。全体集計は空文字 */
   spec_key?: string
+  /** UF合計=DF+UF差分 を適用済みか */
+  uf_composed?: boolean
 }
 
 export type FiscalYearSpecSummary = {
   spec_key: string
   spec_label: string
   summary: FiscalYearWorkGroupSummary
+}
+
+/**
+ * UF ST = DF ST + UF差分ST
+ * DFが工程ベース、UFはDFからの変更に要した時間。
+ */
+export function composeUfTotalStMap(
+  dfSt: Map<string, number>,
+  ufDeltaSt: Map<string, number>
+): Map<string, number> {
+  const result = new Map<string, number>()
+  const codes = new Set<string>([...dfSt.keys(), ...ufDeltaSt.keys()])
+  for (const code of codes) {
+    const total = (dfSt.get(code) || 0) + (ufDeltaSt.get(code) || 0)
+    if (total > 0) result.set(code, roundSt(total))
+  }
+  return result
+}
+
+export function stMapFromFiscalRows(rows: FiscalYearWorkGroupRow[]) {
+  const map = new Map<string, number>()
+  for (const row of rows) {
+    if (row.avg_st_minutes !== null && row.avg_st_minutes > 0) {
+      map.set(row.work_group_code, row.avg_st_minutes)
+    }
+  }
+  return map
+}
+
+/** UFの年度集計に DF+UF差分 の合計STを反映 */
+export function applyUfDfCompositionToFiscalBySpec(
+  bySpec: FiscalYearSpecSummary[]
+): FiscalYearSpecSummary[] {
+  const dfSummary = bySpec.find((item) => item.spec_key === 'DF')?.summary
+  if (!dfSummary) return bySpec
+
+  const dfMap = stMapFromFiscalRows(dfSummary.rows)
+
+  return bySpec.map((item) => {
+    if (item.spec_key !== 'UF') return item
+    const ufDeltaMap = stMapFromFiscalRows(item.summary.rows)
+    if (dfMap.size === 0) return item
+
+    const nameByCode = new Map(
+      item.summary.rows.map((row) => [row.work_group_code, row.work_group_name])
+    )
+    for (const row of dfSummary.rows) {
+      if (!nameByCode.has(row.work_group_code)) {
+        nameByCode.set(row.work_group_code, row.work_group_name)
+      }
+    }
+
+    const composed = composeUfTotalStMap(dfMap, ufDeltaMap)
+    const rows: FiscalYearWorkGroupRow[] = Array.from(composed.keys())
+      .sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }))
+      .map((code) => {
+        const dfBase = dfMap.get(code) || 0
+        const ufDelta = ufDeltaMap.get(code) || 0
+        const total = composed.get(code) || 0
+        const existing = item.summary.rows.find((row) => row.work_group_code === code)
+        return {
+          work_group_code: code,
+          work_group_name: nameByCode.get(code) || code,
+          total_minutes: existing?.total_minutes ?? 0,
+          duration_hours: existing?.duration_hours ?? formatDurationHours(0),
+          avg_st_minutes: total > 0 ? total : null,
+          avg_st_df_base_minutes: dfBase > 0 ? dfBase : null,
+          avg_st_uf_delta_minutes: ufDelta > 0 ? ufDelta : null,
+        }
+      })
+
+    const totalMinutes = rows.reduce((sum, row) => sum + row.total_minutes, 0)
+    return {
+      ...item,
+      spec_label: 'UF（DF+UF差分）',
+      summary: {
+        ...item.summary,
+        rows,
+        total_minutes: totalMinutes,
+        duration_hours: formatDurationHours(totalMinutes),
+        uf_composed: true,
+      },
+    }
+  })
 }
 
 /** 備考・機種名から規格キー（UF/DF）を正規化 */
@@ -1220,16 +1314,18 @@ export async function aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
   }
 
   const overall = toSummary('', overallAcc)
-  const by_spec = Array.from(bySpec.entries())
-    .map(([specKey, acc]) => ({
-      spec_key: specKey,
-      spec_label: formatSpecLabel(specKey),
-      summary: toSummary(specKey, acc),
-    }))
-    .sort((a, b) => {
-      const order = (key: string) => (key === 'UF' ? 0 : key === 'DF' ? 1 : key === '' ? 9 : 5)
-      return order(a.spec_key) - order(b.spec_key) || a.spec_label.localeCompare(b.spec_label, 'ja')
-    })
+  const by_spec = applyUfDfCompositionToFiscalBySpec(
+    Array.from(bySpec.entries())
+      .map(([specKey, acc]) => ({
+        spec_key: specKey,
+        spec_label: formatSpecLabel(specKey),
+        summary: toSummary(specKey, acc),
+      }))
+      .sort((a, b) => {
+        const order = (key: string) => (key === 'UF' ? 0 : key === 'DF' ? 1 : key === '' ? 9 : 5)
+        return order(a.spec_key) - order(b.spec_key) || a.spec_label.localeCompare(b.spec_label, 'ja')
+      })
+  )
 
   return { overall, by_spec }
 }
@@ -1306,15 +1402,36 @@ function buildWorkGroupRowsFromMinutes(
   minutesByGroup: Map<string, number>,
   completedQty: number,
   workGroupNames: Map<string, string>,
-  baselineSt: Map<string, number>
+  baselineSt: Map<string, number>,
+  options?: {
+    dfBaseSt?: Map<string, number>
+  }
 ): ProcessWorkGroupRow[] {
   const rows: ProcessWorkGroupRow[] = []
-  const allCodes = new Set<string>([...minutesByGroup.keys(), ...baselineSt.keys()])
+  const dfBaseSt = options?.dfBaseSt
+  const measuredSt = new Map<string, number>()
+  for (const [code, minutes] of minutesByGroup) {
+    if (completedQty > 0 && minutes > 0) {
+      measuredSt.set(code, roundSt(minutes / completedQty))
+    }
+  }
+
+  const displaySt =
+    dfBaseSt && dfBaseSt.size > 0
+      ? composeUfTotalStMap(dfBaseSt, measuredSt)
+      : measuredSt
+
+  const allCodes = new Set<string>([
+    ...displaySt.keys(),
+    ...baselineSt.keys(),
+    ...(dfBaseSt ? dfBaseSt.keys() : []),
+  ])
 
   for (const workGroupCode of Array.from(allCodes).sort()) {
     const totalMinutes = minutesByGroup.get(workGroupCode) || 0
-    const avgSt =
-      completedQty > 0 && totalMinutes > 0 ? roundSt(totalMinutes / completedQty) : null
+    const ufDelta = measuredSt.get(workGroupCode) ?? null
+    const dfBase = dfBaseSt?.get(workGroupCode) ?? null
+    const avgSt = displaySt.get(workGroupCode) ?? null
     const baseline = baselineSt.get(workGroupCode) ?? null
     let variationPct: number | null = null
     if (avgSt !== null && baseline !== null && baseline > 0) {
@@ -1330,6 +1447,8 @@ function buildWorkGroupRowsFromMinutes(
       variation_pct: variationPct,
       is_bottleneck_by_st: false,
       is_bottleneck_by_variation: false,
+      avg_st_df_base_minutes: dfBase != null && dfBase > 0 ? dfBase : null,
+      avg_st_uf_delta_minutes: ufDelta != null && ufDelta > 0 ? ufDelta : null,
     })
   }
 
@@ -1348,7 +1467,11 @@ function buildWorkGroupRowsFromMinutes(
     if (maxAvgSt !== null && row.avg_st_minutes === maxAvgSt) {
       row.is_bottleneck_by_st = true
     }
-    if (maxVariation !== null && row.variation_pct === maxVariation && (row.variation_pct ?? 0) > 0) {
+    if (
+      maxVariation !== null &&
+      row.variation_pct === maxVariation &&
+      (row.variation_pct ?? 0) > 0
+    ) {
       row.is_bottleneck_by_variation = true
     }
   }
@@ -1519,23 +1642,50 @@ export async function analyzeProductionLots(
     const fiscalYear = getFiscalYearFromDate(record.period_end)
     const specKey = normalizeSpecKey(record.notes)
     let baselineSt = new Map<string, number>()
+    let dfBaseSt: Map<string, number> | undefined
     if (fiscalYear !== null) {
       try {
+        // UFの比較基準は DF+UF差分 の合計ST
         baselineSt = await ensureFiscalBaseline(fiscalYear, specKey)
       } catch {
         baselineSt = new Map()
+      }
+      if (specKey === 'UF') {
+        try {
+          dfBaseSt = await ensureFiscalBaseline(fiscalYear, 'DF')
+        } catch {
+          dfBaseSt = new Map()
+        }
       }
     }
     const rows = buildWorkGroupRowsFromMinutes(
       allocatedMinutes,
       record.completed_qty,
       workGroupNames,
-      baselineSt
+      baselineSt,
+      specKey === 'UF' && dfBaseSt && dfBaseSt.size > 0 ? { dfBaseSt } : undefined
     )
+    const totalLead =
+      specKey === 'UF' && dfBaseSt && dfBaseSt.size > 0
+        ? Array.from(
+            composeUfTotalStMap(
+              dfBaseSt,
+              new Map(
+                Array.from(allocatedMinutes.entries())
+                  .filter(([, minutes]) => record.completed_qty > 0 && minutes > 0)
+                  .map(([code, minutes]) => [
+                    code,
+                    roundSt(minutes / record.completed_qty),
+                  ])
+              )
+            ).values()
+          ).reduce((sum, st) => sum + st, 0)
+        : sumLeadTimeSt(allocatedMinutes, record.completed_qty)
+
     return {
       lot: record,
       is_cumulative: index === 0,
-      total_lead_time_st: sumLeadTimeSt(allocatedMinutes, record.completed_qty),
+      total_lead_time_st: totalLead > 0 ? roundSt(totalLead) : null,
       rows,
       bottleneck_by_st: rows.find((row) => row.is_bottleneck_by_st)?.work_group_code ?? null,
       bottleneck_by_variation:

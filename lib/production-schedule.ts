@@ -3,6 +3,8 @@ import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 import {
   aggregateTargetWorkGroupMinutesByDateInRange,
   aggregateTargetWorkGroupMinutesInRange,
+  aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
+  composeUfTotalStMap,
   getFiscalYearAverageStByWorkGroupForSpec,
   listProductionLotRecords,
   lotMatchesSpec,
@@ -404,6 +406,72 @@ async function resolveWorkGroupStMinutes(
 ): Promise<{ source: ScheduleStSource; note: string | null; stByGroup: Map<string, number> }> {
   const normalized = normalizeTargetCode(targetCode)
   const specKey = normalizeSpecKey(notes)
+
+  // UF合計ST = DF基準ST + UF差分ST
+  if (specKey === 'UF') {
+    const dfResolved = await resolveWorkGroupStMinutesRaw(
+      supabase,
+      targetType,
+      normalized,
+      fiscalYear,
+      'DF'
+    )
+    const ufResolved = await resolveWorkGroupStMinutesRaw(
+      supabase,
+      targetType,
+      normalized,
+      fiscalYear,
+      'UF'
+    )
+    const composed = composeUfTotalStMap(dfResolved.stByGroup, ufResolved.stByGroup)
+    if (composed.size > 0) {
+      const source: ScheduleStSource =
+        dfResolved.source !== 'none' || ufResolved.source !== 'none'
+          ? dfResolved.source === 'lot' || ufResolved.source === 'lot'
+            ? 'lot'
+            : dfResolved.source === 'fiscal' || ufResolved.source === 'fiscal'
+              ? 'fiscal'
+              : dfResolved.source !== 'none'
+                ? dfResolved.source
+                : ufResolved.source
+          : 'none'
+      const parts = [
+        dfResolved.source !== 'none' ? `DF:${dfResolved.note}` : 'DF:なし',
+        ufResolved.source !== 'none' ? `UF差分:${ufResolved.note}` : 'UF差分:なし',
+      ]
+      return {
+        source,
+        note: `UF合計=DF+UF差分（${parts.join(' / ')}）`,
+        stByGroup: composed,
+      }
+    }
+    // DFが無い場合はUF差分のみ（従来互換）
+    if (ufResolved.stByGroup.size > 0) {
+      return {
+        ...ufResolved,
+        note: `${ufResolved.note || 'UF'}（DF基準なしのためUF差分のみ）`,
+      }
+    }
+    return dfResolved.source !== 'none'
+      ? {
+          ...dfResolved,
+          note: `${dfResolved.note || 'DF'}（UF差分なしのためDFのみ）`,
+        }
+      : { source: 'none', note: 'ST・標準時間なし', stByGroup: new Map() }
+  }
+
+  return resolveWorkGroupStMinutesRaw(supabase, targetType, normalized, fiscalYear, notes)
+}
+
+async function resolveWorkGroupStMinutesRaw(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number,
+  notes?: string | null
+): Promise<{ source: ScheduleStSource; note: string | null; stByGroup: Map<string, number> }> {
+  const normalized = normalizeTargetCode(targetCode)
+  const specKey = normalizeSpecKey(notes)
   const { lineId } = await resolveTargetContext(supabase, targetType, normalized)
 
   const lots = await listProductionLotRecords(supabase, targetType, normalized)
@@ -452,7 +520,44 @@ async function resolveWorkGroupStMinutes(
     fiscalYear,
     specKey || null
   )
-  if (fiscalMap.size > 0) {
+  // getFiscalYearAverageStByWorkGroupForSpec の UF は既に DF+UF 合成済み。
+  // Raw 呼び出しで UF 差分のみが欲しい場合は by_spec 生データが必要なので、
+  // ここでは fiscal の UF 合成を避けるため spec が UF のときは合成前行を使う。
+  if (specKey === 'UF') {
+    const { by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
+      supabase,
+      targetType,
+      normalized,
+      fiscalYear
+    )
+    // applyUfDfComposition 済みなので、差分のみが欲しい場合は再計算が必要。
+    // Raw UF = 合成後から DF を引くのではなく、composition 前の集計を取る。
+    // aggregate は composition 後を返すため、差分は UF.total から推定せず
+    // composition 内の avg_st_uf_delta を使う。
+    const ufItem = by_spec.find((item) => item.spec_key === 'UF')
+    if (ufItem) {
+      const deltaMap = new Map<string, number>()
+      for (const row of ufItem.summary.rows) {
+        const delta = row.avg_st_uf_delta_minutes
+        if (delta != null && delta > 0) {
+          deltaMap.set(row.work_group_code, delta)
+        } else if (
+          !ufItem.summary.uf_composed &&
+          row.avg_st_minutes != null &&
+          row.avg_st_minutes > 0
+        ) {
+          deltaMap.set(row.work_group_code, row.avg_st_minutes)
+        }
+      }
+      if (deltaMap.size > 0) {
+        return {
+          source: 'fiscal',
+          note: `${String(fiscalYear).slice(-2)}年度平均ST UF差分`,
+          stByGroup: deltaMap,
+        }
+      }
+    }
+  } else if (fiscalMap.size > 0) {
     const specLabel = summary.spec_key ? ` ${summary.spec_key}` : ''
     return {
       source: 'fiscal',

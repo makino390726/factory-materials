@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #020617; /* slate-950 */
+  --foreground: #ffffff;
+  --surface: #0f172a; /* slate-900 */
+  --surface-muted: #1e293b; /* slate-800 */
+  --border: #334155; /* slate-700 */
+  --muted: #cbd5e1; /* slate-300 */
 }
 
 @theme inline {
@@ -12,11 +16,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
@@ -50,6 +51,223 @@ input[type="number"]::-webkit-outer-spin-button {
 
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/*
+ * =========================================================
+ * システム全体ダークモード（画面表示のみ）
+ * - 薄いカード / 黒系文字を暗背景＋白文字へ寄せる
+ * - アクセント色は維持しつつ、薄色はコントラストを上げる
+ * - 印刷(@media print)には影響させない
+ * =========================================================
+ */
+@media screen {
+  /* --- 背景（ライト面→ダーク面） --- */
+  .bg-white,
+  .bg-white\/95,
+  .bg-white\/90,
+  .bg-white\/80,
+  .bg-white\/70 {
+    background-color: rgb(15 23 42 / 0.95) !important; /* slate-900 */
+  }
+
+  /* 半透明の薄い白は暗背景上のガラス表現として維持し、視認用に少し濃くする */
+  .bg-white\/60,
+  .bg-white\/50,
+  .bg-white\/40 {
+    background-color: rgb(15 23 42 / 0.7) !important;
+  }
+
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-gray-50,
+  .bg-gray-100,
+  .bg-zinc-50,
+  .bg-zinc-100,
+  .bg-neutral-50,
+  .bg-neutral-100 {
+    background-color: rgb(30 41 59) !important; /* slate-800 */
+  }
+
+  .bg-slate-200,
+  .bg-gray-200 {
+    background-color: rgb(51 65 85) !important; /* slate-700 */
+  }
+
+  .hover\:bg-slate-50:hover,
+  .hover\:bg-slate-100:hover,
+  .hover\:bg-slate-200:hover,
+  .hover\:bg-gray-50:hover,
+  .hover\:bg-gray-100:hover,
+  .hover\:bg-white:hover,
+  .hover\:bg-blue-50:hover {
+    background-color: rgb(51 65 85) !important;
+  }
+
+  /* 薄いパステル背景 → 暗めトーン */
+  .bg-red-50,
+  .bg-rose-50 {
+    background-color: rgb(69 10 10 / 0.55) !important;
+  }
+  .bg-orange-50,
+  .bg-amber-50,
+  .bg-yellow-50 {
+    background-color: rgb(69 26 3 / 0.55) !important;
+  }
+  .bg-green-50,
+  .bg-emerald-50,
+  .bg-teal-50,
+  .bg-lime-50 {
+    background-color: rgb(6 46 34 / 0.55) !important;
+  }
+  .bg-blue-50,
+  .bg-sky-50,
+  .bg-cyan-50,
+  .bg-indigo-50,
+  .bg-violet-50,
+  .bg-purple-50,
+  .bg-fuchsia-50,
+  .bg-pink-50,
+  .bg-blue-100,
+  .bg-sky-100,
+  .bg-cyan-100,
+  .bg-indigo-100 {
+    background-color: rgb(23 37 84 / 0.75) !important;
+  }
+
+  /* --- 文字色（暗色→白系） --- */
+  .text-black,
+  .text-slate-900,
+  .text-slate-800,
+  .text-gray-900,
+  .text-gray-800,
+  .text-zinc-900,
+  .text-zinc-800,
+  .text-neutral-900,
+  .text-neutral-800 {
+    color: #ffffff !important;
+  }
+
+  .text-slate-700,
+  .text-slate-600,
+  .text-gray-700,
+  .text-gray-600,
+  .text-zinc-700,
+  .text-zinc-600 {
+    color: #e2e8f0 !important; /* slate-200 */
+  }
+
+  .text-slate-500,
+  .text-gray-500,
+  .text-zinc-500 {
+    color: #cbd5e1 !important; /* slate-300 */
+  }
+
+  .text-slate-400 {
+    color: #94a3b8 !important; /* slate-400 維持寄り */
+  }
+
+  /* アクセント文字：薄背景向けの濃色 → 暗背景向けの明るい色 */
+  .text-red-700,
+  .text-red-800,
+  .text-red-900,
+  .text-rose-700,
+  .text-rose-800,
+  .text-red-600,
+  .text-rose-600 {
+    color: #fda4af !important; /* rose-300 */
+  }
+  .text-orange-700,
+  .text-orange-800,
+  .text-amber-700,
+  .text-amber-800,
+  .text-yellow-700,
+  .text-yellow-800,
+  .text-orange-600,
+  .text-amber-600 {
+    color: #fcd34d !important; /* amber-300 */
+  }
+  .text-green-700,
+  .text-green-800,
+  .text-emerald-700,
+  .text-emerald-800,
+  .text-teal-700,
+  .text-teal-800,
+  .text-green-600,
+  .text-emerald-600 {
+    color: #6ee7b7 !important; /* emerald-300 */
+  }
+  .text-blue-700,
+  .text-blue-800,
+  .text-sky-700,
+  .text-sky-800,
+  .text-cyan-700,
+  .text-cyan-800,
+  .text-indigo-700,
+  .text-indigo-800,
+  .text-blue-600,
+  .text-indigo-600,
+  .text-indigo-900,
+  .text-sky-900,
+  .text-blue-900,
+  .text-cyan-900 {
+    color: #93c5fd !important; /* blue-300 */
+  }
+  .text-violet-700,
+  .text-violet-800,
+  .text-purple-700,
+  .text-purple-800,
+  .text-fuchsia-700,
+  .text-pink-700,
+  .text-purple-600 {
+    color: #d8b4fe !important; /* purple-300 */
+  }
+
+  /* --- ボーダー --- */
+  .border-slate-100,
+  .border-slate-200,
+  .border-slate-300,
+  .border-gray-100,
+  .border-gray-200,
+  .border-gray-300,
+  .border-zinc-200,
+  .border-zinc-300 {
+    border-color: #475569 !important; /* slate-600 */
+  }
+
+  .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+  .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+  .divide-slate-300 > :not([hidden]) ~ :not([hidden]),
+  .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+  .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #334155 !important;
+  }
+
+  /* フォーム要素の視認性 --- */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    color-scheme: dark;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]).bg-white,
+  textarea.bg-white,
+  select.bg-white,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"])[class*="bg-white"],
+  textarea[class*="bg-white"],
+  select[class*="bg-white"],
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"])[class*="border-slate-300"],
+  textarea[class*="border-slate-300"],
+  select[class*="border-slate-300"] {
+    background-color: #020617 !important;
+    color: #ffffff !important;
+    border-color: #475569 !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #94a3b8 !important;
+  }
 }
 
 /* 印刷用スタイル */
@@ -239,4 +457,3 @@ input[type="number"] {
     font-size: 7.5pt !important;
   }
 }
-

@@ -1049,10 +1049,12 @@ export default function WorkOrdersPage() {
                           <div className="flex items-center gap-2">
                             <span>{order.order_no}</span>
                             {order.cost_mode === 'bom' && (
-                              <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-violet-100 text-violet-700 border border-violet-300">BOM</span>
+                              <span className="rounded border border-violet-400/50 bg-violet-950 px-1.5 py-0.5 text-xs font-bold text-violet-100">
+                                BOM
+                              </span>
                             )}
                             {costDoneIds.has(order.id) && (
-                              <span className="text-red-600 font-bold text-sm">原価計算済</span>
+                              <span className="text-sm font-bold text-rose-300">原価計算済</span>
                             )}
                           </div>
                         </td>
@@ -1064,11 +1066,13 @@ export default function WorkOrdersPage() {
                           {order.standard_duration_minutes?.toLocaleString() ?? '-'}
                         </td>
                         <td className="py-3 pr-4">
-                          <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
-                            order.completed
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-amber-100 text-amber-700'
-                          }`}>
+                          <span
+                            className={`inline-block rounded border px-2 py-1 text-xs font-semibold whitespace-nowrap ${
+                              order.completed
+                                ? 'border-emerald-400/50 bg-emerald-950 text-emerald-100'
+                                : 'border-amber-400/50 bg-amber-950 text-amber-100'
+                            }`}
+                          >
                             {order.status || '未指定'}
                           </span>
                         </td>

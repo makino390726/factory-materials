@@ -47,9 +47,27 @@ export async function GET(request: NextRequest) {
     if (list === 'plans') {
       const { data, error } = await supabase
         .from('heater_manufacturing_plans')
-        .select('id, plan_name, fiscal_year, plan_period, created_at')
+        .select('id, plan_name, fiscal_year, plan_period, product_category, created_at')
         .order('created_at', { ascending: false })
-      if (error) throw error
+      if (error) {
+        if (
+          error.code === 'PGRST204' ||
+          (error.message || '').includes('product_category')
+        ) {
+          const fallback = await supabase
+            .from('heater_manufacturing_plans')
+            .select('id, plan_name, fiscal_year, plan_period, created_at')
+            .order('created_at', { ascending: false })
+          if (fallback.error) throw fallback.error
+          return NextResponse.json({
+            plans: (fallback.data || []).map((row) => ({
+              ...row,
+              product_category: '暖房機',
+            })),
+          })
+        }
+        throw error
+      }
       return NextResponse.json({ plans: data || [] })
     }
 

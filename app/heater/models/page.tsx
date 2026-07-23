@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import {
+  DEFAULT_PRODUCT_CATEGORY,
+  PRODUCT_CATEGORIES,
+  inferProductCategory,
+  normalizeProductCategory,
+  type ProductCategory,
+} from '@/lib/product-category';
 
 interface HeaterModel {
   model: string;
   name: string | null;
   product_code: string | null;
+  product_category?: string | null;
 }
 
 interface Product {
@@ -21,10 +29,12 @@ export default function HeaterModelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingModel, setEditingModel] = useState<HeaterModel | null>(null);
+  const [filterCategory, setFilterCategory] = useState<'すべて' | ProductCategory>('すべて');
   const [formData, setFormData] = useState<HeaterModel>({
     model: '',
     name: null,
     product_code: null,
+    product_category: DEFAULT_PRODUCT_CATEGORY,
   });
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [showProductList, setShowProductList] = useState(false);
@@ -32,7 +42,6 @@ export default function HeaterModelsPage() {
   const [productPage, setProductPage] = useState(1);
   const productsPerPage = 10;
 
-  // 一覧取得
   useEffect(() => {
     fetchModels();
     fetchAllProducts();
@@ -56,7 +65,14 @@ export default function HeaterModelsPage() {
       const res = await fetch('/api/heater/models');
       if (!res.ok) throw new Error('Failed to fetch models');
       const data = await res.json();
-      setModels(data || []);
+      setModels(
+        (data || []).map((m: HeaterModel) => ({
+          ...m,
+          product_category: normalizeProductCategory(
+            m.product_category || inferProductCategory(m.model, m.name)
+          ),
+        }))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -64,19 +80,25 @@ export default function HeaterModelsPage() {
     }
   };
 
-  // 商品選択
+  const emptyForm = (): HeaterModel => ({
+    model: '',
+    name: null,
+    product_code: null,
+    product_category: DEFAULT_PRODUCT_CATEGORY,
+  });
+
   const handleSelectProduct = (product: Product) => {
     setFormData({
       ...formData,
       name: product.name,
       product_code: product.product_code,
+      product_category: inferProductCategory(formData.model, product.name),
     });
     setShowProductList(false);
     setProductSearchQuery('');
     setProductPage(1);
   };
 
-  // フィルタリング済みの商品一覧
   const filteredProducts = allProducts.filter(
     (product) =>
       product.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
@@ -85,12 +107,13 @@ export default function HeaterModelsPage() {
 
   const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
   const startIdx = (productPage - 1) * productsPerPage;
-  const displayedProducts = filteredProducts.slice(
-    startIdx,
-    startIdx + productsPerPage
-  );
+  const displayedProducts = filteredProducts.slice(startIdx, startIdx + productsPerPage);
 
-  // 新規作成
+  const displayedModels = useMemo(() => {
+    if (filterCategory === 'すべて') return models;
+    return models.filter((m) => m.product_category === filterCategory);
+  }, [models, filterCategory]);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.model.trim()) {
@@ -105,22 +128,25 @@ export default function HeaterModelsPage() {
       });
       if (!res.ok) throw new Error('Failed to create model');
       await fetchModels();
-      setFormData({ model: '', name: null, product_code: null });
+      setFormData(emptyForm());
       setIsEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
   };
 
-  // 編集開始
   const handleEdit = (model: HeaterModel) => {
     setEditingModel(model);
-    setFormData(model);
+    setFormData({
+      ...model,
+      product_category: normalizeProductCategory(
+        model.product_category || inferProductCategory(model.model, model.name)
+      ),
+    });
     setProductSearchQuery(model.name || '');
     setIsEditing(true);
   };
 
-  // 編集保存
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingModel) return;
@@ -132,7 +158,7 @@ export default function HeaterModelsPage() {
       });
       if (!res.ok) throw new Error('Failed to update model');
       await fetchModels();
-      setFormData({ model: '', name: null, product_code: null });
+      setFormData(emptyForm());
       setEditingModel(null);
       setIsEditing(false);
     } catch (err) {
@@ -140,7 +166,6 @@ export default function HeaterModelsPage() {
     }
   };
 
-  // 削除
   const handleDelete = async (model: string) => {
     if (!confirm(`機種 ${model} を削除しますか？`)) return;
     try {
@@ -155,8 +180,7 @@ export default function HeaterModelsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 relative overflow-hidden p-8">
-      {/* 背景の電子回路パターン */}
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 p-8 text-white">
       <div className="absolute inset-0 opacity-10">
         <svg className="w-full h-full" viewBox="0 0 1200 800">
           <pattern id="circuit" x="0" y="0" width="200" height="200" patternUnits="userSpaceOnUse">
@@ -171,7 +195,9 @@ export default function HeaterModelsPage() {
 
       <div className="relative z-10 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400">機種マスタ</h1>
+          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400">
+            機種マスタ
+          </h1>
           <Link href="/">
             <button className="px-6 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium rounded-lg transition-all duration-300 border border-slate-600 hover:border-slate-500">
               ← ホーム
@@ -180,34 +206,48 @@ export default function HeaterModelsPage() {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-red-700">
+          <div className="mb-6 rounded-lg border border-rose-500/50 bg-rose-950/60 p-4 text-rose-100">
             {error}
           </div>
         )}
 
-        {/* フォーム */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">
+        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/90 p-6 shadow-xl">
+          <h2 className="mb-4 text-lg font-semibold text-white">
             {isEditing ? '機種を編集' : '新しい機種を追加'}
           </h2>
           <form onSubmit={isEditing ? handleUpdate : handleCreate} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                機種コード *
-              </label>
+              <label className="mb-1 block text-sm font-medium text-slate-200">機種コード *</label>
               <input
                 type="text"
                 value={formData.model}
                 onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                 disabled={isEditing}
-                placeholder="例: 110L-UF"
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                placeholder="例: 110L-UF / EC30"
+                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-4 py-2 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:bg-slate-800 disabled:text-slate-400"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                商品（任意）
-              </label>
+              <label className="mb-1 block text-sm font-medium text-slate-200">製品カテゴリ *</label>
+              <select
+                value={formData.product_category || DEFAULT_PRODUCT_CATEGORY}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    product_category: normalizeProductCategory(e.target.value),
+                  })
+                }
+                className="w-full rounded-lg border border-slate-600 bg-slate-950 px-4 py-2 text-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 [color-scheme:dark]"
+              >
+                {PRODUCT_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-200">商品（任意）</label>
               <div className="relative">
                 <input
                   type="text"
@@ -216,24 +256,26 @@ export default function HeaterModelsPage() {
                   onChange={(e) => {
                     const value = e.target.value;
                     setProductSearchQuery(value);
-                    // 直接入力時は formData に反映
                     setFormData((prev) => ({
                       ...prev,
                       name: value || null,
                       product_code: null,
+                      product_category: inferProductCategory(prev.model, value),
                     }));
                     setProductPage(1);
                     setShowProductList(value.length > 0);
                   }}
-                  onFocus={() => setShowProductList(productSearchQuery.length > 0 || allProducts.length > 0)}
+                  onFocus={() =>
+                    setShowProductList(productSearchQuery.length > 0 || allProducts.length > 0)
+                  }
                   onBlur={() => setTimeout(() => setShowProductList(false), 200)}
                   autoComplete="off"
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-slate-600 bg-slate-950 px-4 py-2 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
                 />
                 {showProductList && (
-                  <div className="absolute top-full left-0 right-0 mt-1 border border-slate-300 rounded-lg bg-white shadow-lg z-50">
+                  <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-slate-600 bg-slate-900 shadow-xl">
                     {filteredProducts.length === 0 ? (
-                      <div className="px-4 py-3 text-sm text-slate-500">該当なし</div>
+                      <div className="px-4 py-3 text-sm text-slate-400">該当なし</div>
                     ) : (
                       <>
                         <div className="max-h-64 overflow-y-auto">
@@ -242,15 +284,15 @@ export default function HeaterModelsPage() {
                               key={product.id}
                               type="button"
                               onClick={() => handleSelectProduct(product)}
-                              className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-slate-200 last:border-b-0 transition-colors"
+                              className="w-full border-b border-slate-700 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-slate-800"
                             >
-                              <div className="font-medium text-slate-900">{product.name}</div>
-                              <div className="text-xs text-slate-500">{product.product_code}</div>
+                              <div className="font-medium text-white">{product.name}</div>
+                              <div className="text-xs text-slate-400">{product.product_code}</div>
                             </button>
                           ))}
                         </div>
                         {totalPages > 1 && (
-                          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-200 text-xs text-slate-600 bg-slate-50">
+                          <div className="flex items-center justify-between border-t border-slate-700 bg-slate-950/80 px-4 py-2 text-xs text-slate-300">
                             <span>
                               {filteredProducts.length} 件中 {startIdx + 1}-
                               {Math.min(startIdx + productsPerPage, filteredProducts.length)} 件
@@ -260,18 +302,18 @@ export default function HeaterModelsPage() {
                                 type="button"
                                 disabled={productPage <= 1}
                                 onClick={() => setProductPage(productPage - 1)}
-                                className="px-2 py-1 rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-200"
+                                className="rounded border border-slate-600 px-2 py-1 text-white hover:bg-slate-800 disabled:opacity-40"
                               >
                                 前へ
                               </button>
-                              <span className="px-2 py-1">
+                              <span className="px-2 py-1 text-white">
                                 {productPage}/{totalPages}
                               </span>
                               <button
                                 type="button"
                                 disabled={productPage >= totalPages}
                                 onClick={() => setProductPage(productPage + 1)}
-                                className="px-2 py-1 rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-200"
+                                className="rounded border border-slate-600 px-2 py-1 text-white hover:bg-slate-800 disabled:opacity-40"
                               >
                                 次へ
                               </button>
@@ -284,12 +326,12 @@ export default function HeaterModelsPage() {
                 )}
               </div>
               {formData.product_code && (
-                <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
-                  <div className="text-slate-700">
-                    選択: <span className="font-medium">{formData.name}</span>
+                <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-950/40 p-2 text-sm">
+                  <div className="text-slate-200">
+                    選択: <span className="font-medium text-white">{formData.name}</span>
                   </div>
-                  <div className="text-slate-600">
-                    コード: <span className="font-mono">{formData.product_code}</span>
+                  <div className="text-slate-300">
+                    コード: <span className="font-mono text-cyan-200">{formData.product_code}</span>
                   </div>
                 </div>
               )}
@@ -297,7 +339,7 @@ export default function HeaterModelsPage() {
             <div className="flex gap-2 pt-2">
               <button
                 type="submit"
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                className="rounded-lg bg-cyan-600 px-6 py-2 font-medium text-white transition-colors hover:bg-cyan-500"
               >
                 {isEditing ? '更新' : '追加'}
               </button>
@@ -307,9 +349,9 @@ export default function HeaterModelsPage() {
                   onClick={() => {
                     setIsEditing(false);
                     setEditingModel(null);
-                    setFormData({ model: '', name: null, product_code: null });
+                    setFormData(emptyForm());
                   }}
-                  className="px-6 py-2 bg-slate-300 hover:bg-slate-400 text-slate-900 font-medium rounded-lg transition-colors"
+                  className="rounded-lg border border-slate-600 bg-slate-800 px-6 py-2 font-medium text-white transition-colors hover:bg-slate-700"
                 >
                   キャンセル
                 </button>
@@ -318,55 +360,88 @@ export default function HeaterModelsPage() {
           </form>
         </div>
 
-        {/* テーブル */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setFilterCategory('すべて')}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              filterCategory === 'すべて'
+                ? 'bg-cyan-600 text-white'
+                : 'border border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            すべて ({models.length})
+          </button>
+          {PRODUCT_CATEGORIES.map((cat) => {
+            const count = models.filter((m) => m.product_category === cat).length;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setFilterCategory(cat)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  filterCategory === cat
+                    ? 'bg-cyan-600 text-white'
+                    : 'border border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                {cat} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-xl">
           {loading ? (
-            <div className="p-12 text-center text-slate-500">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900 mb-3"></div>
-              <p>読み込み中...</p>
+            <div className="p-12 text-center text-slate-300">
+              <div className="mb-3 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-cyan-400"></div>
+              <p className="text-white">読み込み中...</p>
             </div>
-          ) : models.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <p className="text-lg font-medium">機種がまだ登録されていません</p>
+          ) : displayedModels.length === 0 ? (
+            <div className="p-12 text-center text-slate-300">
+              <p className="text-lg font-medium text-white">機種がまだ登録されていません</p>
+              <p className="mt-2 text-sm text-slate-400">
+                たばこ乾燥機・食品乾燥機・光合成促進装置もここに登録すると生産計画で使えます
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
+              <table className="w-full text-sm text-white">
+                <thead className="border-b border-slate-700 bg-slate-950/80">
                   <tr>
-                    <th className="px-6 py-3 text-left font-semibold text-slate-900">機種コード</th>
-                    <th className="px-6 py-3 text-left font-semibold text-slate-900">機種名</th>
-                    <th className="px-6 py-3 text-left font-semibold text-slate-900">商品コード</th>
-                    <th className="px-6 py-3 text-right font-semibold text-slate-900">操作</th>
+                    <th className="px-6 py-3 text-left font-semibold text-slate-200">機種コード</th>
+                    <th className="px-6 py-3 text-left font-semibold text-slate-200">カテゴリ</th>
+                    <th className="px-6 py-3 text-left font-semibold text-slate-200">機種名</th>
+                    <th className="px-6 py-3 text-left font-semibold text-slate-200">商品コード</th>
+                    <th className="px-6 py-3 text-right font-semibold text-slate-200">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {models.map((model) => (
-                    <tr key={model.model} className="hover:bg-slate-50">
-                      <td className="px-6 py-3 text-slate-900 font-medium">{model.model}</td>
-                      <td className="px-6 py-3 text-slate-600">{model.name || '-'}</td>
-                      <td className="px-6 py-3 text-slate-600 font-mono text-sm">
+                <tbody className="divide-y divide-slate-800">
+                  {displayedModels.map((model) => (
+                    <tr key={model.model} className="hover:bg-slate-800/60">
+                      <td className="px-6 py-3 font-medium text-white">{model.model}</td>
+                      <td className="px-6 py-3 text-slate-200">{model.product_category || '-'}</td>
+                      <td className="px-6 py-3 text-slate-200">{model.name || '-'}</td>
+                      <td className="px-6 py-3 font-mono text-sm text-slate-300">
                         {model.product_code || '-'}
                       </td>
-                      <td className="px-6 py-3 text-right space-x-2">
+                      <td className="space-x-2 px-6 py-3 text-right">
                         {model.model === 'DR8-008' && (
                           <Link href="/heater/models/dr8008">
-                            <button
-                              className="px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-bold transition-colors border border-amber-300"
-                            >
+                            <button className="rounded border border-amber-400/50 bg-amber-900/50 px-3 py-1 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-800/60">
                               原価計算
                             </button>
                           </Link>
                         )}
                         <button
                           onClick={() => handleEdit(model)}
-                          className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-xs font-medium transition-colors"
+                          className="rounded border border-cyan-500/40 bg-cyan-950/50 px-3 py-1 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-900/60"
                         >
                           編集
                         </button>
                         <button
                           onClick={() => handleDelete(model.model)}
-                          className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors"
+                          className="rounded border border-rose-500/40 bg-rose-950/50 px-3 py-1 text-xs font-medium text-rose-100 transition-colors hover:bg-rose-900/60"
                         >
                           削除
                         </button>

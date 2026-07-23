@@ -78,12 +78,12 @@ export default function ShortagePage() {
   const totalShortage = shortageItems.reduce((sum, item) => sum + item.shortage_qty, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 text-white">
       <div className="max-w-7xl mx-auto">
         {/* ヘッダー */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">暖房機 部品不足一覧</h1>
-          <p className="text-slate-600">必要部品数と現在庫から不足数を自動計算</p>
+          <h1 className="mb-2 text-3xl font-bold text-white">暖房機 部品不足一覧</h1>
+          <p className="text-slate-300">必要部品数と現在庫から不足数を自動計算</p>
         </div>
 
         {/* 期間選択 */}

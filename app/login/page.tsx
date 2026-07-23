@@ -75,21 +75,21 @@ export default function LoginPage() {
       </div>
 
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-16">
-        <div className="w-full max-w-md rounded-3xl border border-white/30 bg-white/80 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.25)] backdrop-blur animate-card">
+        <div className="w-full max-w-md rounded-3xl border border-slate-600 bg-slate-900/90 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.55)] backdrop-blur animate-card">
           <div className="space-y-4 text-center animate-fade-up">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-2xl text-amber-200 shadow-lg">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800 text-2xl text-amber-200 shadow-lg border border-slate-600">
               🔐
             </div>
             <div className="space-y-2">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">Factory Materials</p>
-              <h1 className="text-3xl font-semibold text-slate-900">スタッフログイン</h1>
-              <p className="text-sm text-slate-500">ログインIDを入力して作業を開始します。</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">Factory Materials</p>
+              <h1 className="text-3xl font-semibold text-white">スタッフログイン</h1>
+              <p className="text-sm text-slate-300">ログインIDを入力して作業を開始します。</p>
             </div>
           </div>
 
           <form className="mt-8 space-y-5 animate-fade-up" onSubmit={handleSubmit} style={{ animationDelay: '120ms' }}>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700" htmlFor="loginId">
+              <label className="text-sm font-medium text-slate-200" htmlFor="loginId">
                 ログインID
               </label>
               <input
@@ -101,12 +101,12 @@ export default function LoginPage() {
                 value={loginId}
                 onChange={event => setLoginId(event.target.value)}
                 placeholder="例: staff-001"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 shadow-sm transition focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-100"
+                className="w-full rounded-2xl border border-slate-600 bg-slate-950 px-4 py-3 text-base text-white shadow-sm transition placeholder:text-slate-500 focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-500/30"
               />
             </div>
 
             {error ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+              <div className="rounded-2xl border border-rose-500/40 bg-rose-950/50 px-4 py-3 text-sm text-rose-200">
                 {error}
               </div>
             ) : null}

@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import {
+  DEFAULT_PRODUCT_CATEGORY,
+  PRODUCT_CATEGORIES,
+  inferProductCategory,
+  normalizeProductCategory,
+  type ProductCategory,
+} from '@/lib/product-category';
 
 interface ManufacturingPlanItem {
   model: string;
   modelName: string | null;
   quantity: number;
+  productCategory: ProductCategory;
 }
 
 interface AggregatedItem {
@@ -28,10 +36,13 @@ interface SavedPlan {
   plan_name: string;
   fiscal_year: string;
   plan_period: string | null;
+  product_category?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
 }
+
+type CategoryFilter = 'すべて' | ProductCategory;
 
 interface BomDetail {
   model: string;
@@ -57,18 +68,23 @@ interface ManufacturingResponse {
 }
 
 export default function ManufacturingPlanPage() {
-  const [models, setModels] = useState<{ model: string; name: string | null }[]>([]);
+  const [models, setModels] = useState<
+    { model: string; name: string | null; product_category: ProductCategory }[]
+  >([]);
   const [plans, setPlans] = useState<ManufacturingPlanItem[]>([]);
   const [response, setResponse] = useState<ManufacturingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(DEFAULT_PRODUCT_CATEGORY);
+  const [planListFilter, setPlanListFilter] = useState<CategoryFilter>('すべて');
+
   // 保存関連の状態
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const [planName, setPlanName] = useState('');
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear().toString());
   const [planPeriod, setPlanPeriod] = useState('');
+  const [planCategory, setPlanCategory] = useState<ProductCategory>(DEFAULT_PRODUCT_CATEGORY);
   const [notes, setNotes] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
 
@@ -77,18 +93,28 @@ export default function ManufacturingPlanPage() {
     fetchSavedPlans();
   }, []);
 
+  const normalizeModelList = (data: any[]) =>
+    (data || []).map((m: any) => ({
+      model: String(m.model),
+      name: m.name ?? null,
+      product_category: normalizeProductCategory(
+        m.product_category || inferProductCategory(String(m.model), m.name)
+      ),
+    }));
+
   const fetchModels = async () => {
     try {
       const res = await fetch('/api/heater/models');
       if (!res.ok) throw new Error('Failed to fetch models');
-      const data = await res.json();
-      setModels(data || []);
+      const data = normalizeModelList(await res.json());
+      setModels(data);
       // 初期化：すべての機種を計画に追加（台数0）
       setPlans(
-        (data || []).map((m: any) => ({
+        data.map((m) => ({
           model: m.model,
           modelName: m.name,
           quantity: 0,
+          productCategory: m.product_category,
         }))
       );
     } catch (err) {
@@ -139,14 +165,44 @@ export default function ManufacturingPlanPage() {
   };
 
   const buildPlanItemsFromModels = (
-    modelList: { model: string; name: string | null }[],
+    modelList: { model: string; name: string | null; product_category: ProductCategory }[],
     detailsMap?: Map<string, number>
   ): ManufacturingPlanItem[] =>
     modelList.map((m) => ({
       model: m.model,
       modelName: m.name,
       quantity: detailsMap?.get(m.model) ?? 0,
+      productCategory: m.product_category,
     }));
+
+  const resolvePrimaryCategory = (items: ManufacturingPlanItem[]): ProductCategory => {
+    const counts = new Map<ProductCategory, number>();
+    for (const item of items) {
+      if (item.quantity <= 0) continue;
+      counts.set(item.productCategory, (counts.get(item.productCategory) || 0) + item.quantity);
+    }
+    let best: ProductCategory = planCategory || DEFAULT_PRODUCT_CATEGORY;
+    let bestQty = -1;
+    for (const [cat, qty] of counts) {
+      if (qty > bestQty) {
+        best = cat;
+        bestQty = qty;
+      }
+    }
+    return best;
+  };
+
+  const visiblePlans = useMemo(() => {
+    if (categoryFilter === 'すべて') return plans;
+    return plans.filter((p) => p.productCategory === categoryFilter);
+  }, [plans, categoryFilter]);
+
+  const filteredSavedPlans = useMemo(() => {
+    if (planListFilter === 'すべて') return savedPlans;
+    return savedPlans.filter(
+      (p) => normalizeProductCategory(p.product_category || '暖房機') === planListFilter
+    );
+  }, [savedPlans, planListFilter]);
 
   const loadPlan = async (planId: string) => {
     try {
@@ -165,6 +221,9 @@ export default function ManufacturingPlanPage() {
       setFiscalYear(data.fiscal_year);
       setPlanPeriod(data.plan_period || '');
       setNotes(data.notes || '');
+      const loadedCategory = normalizeProductCategory(data.product_category || '暖房機');
+      setPlanCategory(loadedCategory);
+      setCategoryFilter(loadedCategory);
 
       const detailsMap = new Map<string, number>(
         data.details.map((d: { model: string; quantity: number }) => [
@@ -177,8 +236,23 @@ export default function ManufacturingPlanPage() {
       if (modelList.length === 0) {
         const modelRes = await fetch('/api/heater/models');
         if (!modelRes.ok) throw new Error('機種マスタの取得に失敗しました');
-        modelList = await modelRes.json();
+        modelList = normalizeModelList(await modelRes.json());
         setModels(modelList || []);
+      }
+
+      // 計画明細にあり機種マスタに無い機種も表示できるよう補完
+      const known = new Set(modelList.map((m) => m.model));
+      for (const [model] of detailsMap) {
+        if (!known.has(model)) {
+          modelList = [
+            ...modelList,
+            {
+              model,
+              name: null,
+              product_category: loadedCategory,
+            },
+          ];
+        }
       }
 
       const nextPlans = buildPlanItemsFromModels(modelList, detailsMap);
@@ -200,6 +274,7 @@ export default function ManufacturingPlanPage() {
         model: p.model,
         quantity: p.quantity
       }));
+      const product_category = planCategory || resolvePrimaryCategory(plans);
 
       const method = currentPlanId ? 'PUT' : 'POST';
       const body: any = {
@@ -207,6 +282,7 @@ export default function ManufacturingPlanPage() {
         fiscal_year: fiscalYear,
         plan_period: planPeriod,
         notes,
+        product_category,
         details
       };
 
@@ -271,6 +347,9 @@ export default function ManufacturingPlanPage() {
     setPlanName('');
     setFiscalYear(new Date().getFullYear().toString());
     setPlanPeriod('');
+    setPlanCategory(
+      categoryFilter === 'すべて' ? DEFAULT_PRODUCT_CATEGORY : categoryFilter
+    );
     setNotes('');
     setPlans(plans.map(p => ({ ...p, quantity: 0 })));
     setResponse(null);
@@ -338,7 +417,7 @@ export default function ManufacturingPlanPage() {
 
         {/* 保存済み計画一覧 */}
         <div className="no-print bg-white rounded-lg shadow-lg p-6 mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-xl font-semibold text-slate-900">
               📚 保存済み計画
             </h2>
@@ -349,11 +428,38 @@ export default function ManufacturingPlanPage() {
               ➕ 新規作成
             </button>
           </div>
-          {savedPlans.length === 0 ? (
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setPlanListFilter('すべて')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                planListFilter === 'すべて'
+                  ? 'bg-slate-800 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              すべて
+            </button>
+            {PRODUCT_CATEGORIES.map((cat) => (
+              <button
+                key={`plan-filter-${cat}`}
+                type="button"
+                onClick={() => setPlanListFilter(cat)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                  planListFilter === cat
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+          {filteredSavedPlans.length === 0 ? (
             <p className="text-slate-600 text-sm">保存された計画はありません</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {savedPlans.map((plan) => (
+              {filteredSavedPlans.map((plan) => (
                 <div
                   key={plan.id}
                   className={`border rounded-lg p-4 cursor-pointer transition-all ${
@@ -367,6 +473,9 @@ export default function ManufacturingPlanPage() {
                       <h3 className="font-semibold text-slate-900">{plan.plan_name}</h3>
                       <p className="text-sm text-slate-600">
                         {plan.fiscal_year}年度 {plan.plan_period && `/ ${plan.plan_period}`}
+                      </p>
+                      <p className="mt-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                        {normalizeProductCategory(plan.product_category || '暖房機')}
                       </p>
                     </button>
                     <button
@@ -387,36 +496,91 @@ export default function ManufacturingPlanPage() {
 
         {/* 台数入力エリア */}
         <div className="no-print bg-white rounded-lg shadow-lg p-6 mb-8">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold text-slate-900">
               📋 機種別製造台数入力
               {currentPlanId && <span className="text-sm text-blue-600 ml-2">（編集中: {planName}）</span>}
             </h2>
             <button
-              onClick={() => setShowSaveDialog(true)}
+              onClick={() => {
+                setPlanCategory(
+                  categoryFilter === 'すべて'
+                    ? resolvePrimaryCategory(plans)
+                    : categoryFilter
+                );
+                setShowSaveDialog(true);
+              }}
               disabled={plans.every((p) => p.quantity === 0)}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors"
             >
               💾 保存
             </button>
           </div>
+          <p className="mb-3 text-sm text-slate-600">
+            暖房機・たばこ乾燥機・食品乾燥機・光合成促進装置など、製品カテゴリを切り替えて台数を入力できます（同一計画に複数カテゴリを含められます）。
+            機種が無い場合は
+            <Link href="/heater/models" className="mx-1 text-blue-600 underline">
+              機種マスタ
+            </Link>
+            で登録してください。
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter('すべて')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                categoryFilter === 'すべて'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              すべて ({plans.length})
+            </button>
+            {PRODUCT_CATEGORIES.map((cat) => {
+              const count = plans.filter((p) => p.productCategory === cat).length;
+              return (
+                <button
+                  key={`input-filter-${cat}`}
+                  type="button"
+                  onClick={() => {
+                    setCategoryFilter(cat);
+                    setPlanCategory(cat);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    categoryFilter === cat
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {cat} ({count})
+                </button>
+              );
+            })}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {plans.map((plan) => (
-              <div key={plan.model} className="border border-slate-300 rounded-lg p-4 bg-slate-50">
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  {plan.model} {plan.modelName && `(${plan.modelName})`}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={plan.quantity}
-                  onChange={(e) => handleQuantityChange(plan.model, parseInt(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border-2 border-slate-400 rounded-lg bg-white text-black font-bold text-xl text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  placeholder="0"
-                />
-                <span className="text-sm font-semibold text-slate-800 mt-1 block">台</span>
+            {visiblePlans.length === 0 ? (
+              <div className="col-span-full rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500">
+                このカテゴリの機種がありません。機種マスタで製品カテゴリを指定して登録してください。
               </div>
-            ))}
+            ) : (
+              visiblePlans.map((plan) => (
+                <div key={plan.model} className="border border-slate-300 rounded-lg p-4 bg-slate-50">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {plan.model} {plan.modelName && `(${plan.modelName})`}
+                  </label>
+                  <p className="mb-2 text-xs text-slate-500">{plan.productCategory}</p>
+                  <input
+                    type="number"
+                    min="0"
+                    value={plan.quantity}
+                    onChange={(e) => handleQuantityChange(plan.model, parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border-2 border-slate-400 rounded-lg bg-white text-black font-bold text-xl text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    placeholder="0"
+                  />
+                  <span className="text-sm font-semibold text-slate-800 mt-1 block">台</span>
+                </div>
+              ))
+            )}
           </div>
           <button
             onClick={() => fetchManufacturingPlan()}
@@ -648,6 +812,25 @@ export default function ManufacturingPlanPage() {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="例: 2026"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    製品カテゴリ <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={planCategory}
+                    onChange={(e) => setPlanCategory(normalizeProductCategory(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {PRODUCT_CATEGORIES.map((cat) => (
+                      <option key={`save-cat-${cat}`} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    計画の主分類です。台数入力では複数カテゴリを同一計画に含められます。
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
