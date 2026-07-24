@@ -66,7 +66,12 @@ export type ScheduleLotResult = {
   st_note: string | null
   start_date: string
   end_date: string
+  /** 工程占有稼働日の合計（パイプライン上の所要稼働日） */
   total_days: number
+  /** 着手〜完了の稼働日数（土日除く・両端含む） */
+  lead_time_working_days: number
+  /** 着手〜完了の暦日数（両端含む） */
+  lead_time_calendar_days: number
   work_groups: ScheduleWorkGroupPlan[]
   progress: ScheduleLotProgress
 }
@@ -75,12 +80,13 @@ export type ScheduleOccupancyCell = {
   date: string
   work_group_code: string
   work_group_name: string
-  lot_key: string
-  model: string
-  sequence: number
+  lot_key: string | null
+  model: string | null
+  sequence: number | null
   color_index: number
   planned_minutes_per_day: number
   actual_minutes: number
+  has_plan: boolean
   has_actual: boolean
 }
 
@@ -116,6 +122,26 @@ function todayIsoLocal() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+function withLotLeadTimes(lot: ScheduleLotResult): ScheduleLotResult {
+  const working =
+    lot.lead_time_working_days ?? countWorkingDaysInclusive(lot.start_date, lot.end_date)
+  const calendar =
+    lot.lead_time_calendar_days ?? countCalendarDaysInclusive(lot.start_date, lot.end_date)
+  return {
+    ...lot,
+    lead_time_working_days: working,
+    lead_time_calendar_days: calendar,
+  }
+}
+
+function maxIsoDate(a: string, b: string) {
+  return a >= b ? a : b
+}
+
+function minIsoDate(a: string, b: string) {
+  return a <= b ? a : b
+}
+
 async function attachScheduleProgress(
   supabase: SupabaseClient,
   result: ProductionScheduleResult
@@ -125,8 +151,11 @@ async function attachScheduleProgress(
   }
 
   const asOf = result.as_of_date
-  const rangeStart = result.calendar.dates[0]
-  const rangeEnd = result.calendar.dates[result.calendar.dates.length - 1]
+  const planRangeStart = result.calendar.dates[0]
+  const planRangeEnd = result.calendar.dates[result.calendar.dates.length - 1]
+  // 計画期間＋開始日〜本日までの実績も拾う（計画のない日の実績表示用）
+  const rangeStart = minIsoDate(result.start_date, planRangeStart)
+  const rangeEnd = maxIsoDate(planRangeEnd, asOf)
 
   const targetKeys = new Map<
     string,
@@ -157,6 +186,15 @@ async function attachScheduleProgress(
     actualByTarget.set(key, daily)
   }
 
+  /** スケジュール対象全体の日×班実績（対象の重複加算なし） */
+  const mergedActual = new Map<string, number>()
+  for (const daily of actualByTarget.values()) {
+    for (const [key, minutes] of daily) {
+      if (minutes <= 0) continue
+      mergedActual.set(key, (mergedActual.get(key) || 0) + minutes)
+    }
+  }
+
   const completedByTargetSpec = new Map<string, number>()
   for (const [key, target] of targetKeys) {
     const lots = await listProductionLotRecords(
@@ -183,28 +221,97 @@ async function attachScheduleProgress(
   }
 
   const lotByKey = new Map(result.lots.map((lot) => [lot.key, lot]))
+  const workGroupMaster = await fetchWorkGroupOrder(supabase)
+  const nameByCode = new Map(workGroupMaster.map((g) => [g.work_group_code, g.work_group_name]))
+  const groupNoByCode = new Map(workGroupMaster.map((g) => [g.work_group_code, g.group_no]))
 
-  const cells: ScheduleOccupancyCell[] = result.calendar.cells.map((cell) => {
-    const lot = lotByKey.get(cell.lot_key)
-    if (!lot) return { ...cell, planned_minutes_per_day: 0, actual_minutes: 0, has_actual: false }
-    const group = lot.work_groups.find((g) => g.work_group_code === cell.work_group_code)
+  const cellByKey = new Map<string, ScheduleOccupancyCell>()
+  for (const cell of result.calendar.cells) {
+    const mapKey = `${cell.work_group_code}__${cell.date}`
+    const lot = cell.lot_key ? lotByKey.get(cell.lot_key) : null
+    const group = lot?.work_groups.find((g) => g.work_group_code === cell.work_group_code)
     const plannedPerDay =
       group && group.days > 0 ? Math.round((group.total_minutes / group.days) * 10) / 10 : 0
-    const targetKey = `${lot.target_type}:${lot.target_code}`
-    const actual =
-      actualByTarget.get(targetKey)?.get(`${cell.date}|${cell.work_group_code}`) || 0
-    return {
+    const actual = mergedActual.get(`${cell.date}|${cell.work_group_code}`) || 0
+    cellByKey.set(mapKey, {
       ...cell,
+      lot_key: cell.lot_key,
+      model: cell.model,
+      sequence: cell.sequence,
       planned_minutes_per_day: plannedPerDay,
-      actual_minutes: actual,
+      actual_minutes: Math.round(actual * 10) / 10,
+      has_plan: true,
       has_actual: actual > 0,
-    }
-  })
+    })
+  }
+
+  for (const [dailyKey, minutes] of mergedActual) {
+    if (minutes <= 0) continue
+    const sep = dailyKey.indexOf('|')
+    if (sep < 0) continue
+    const date = dailyKey.slice(0, sep)
+    const work_group_code = dailyKey.slice(sep + 1)
+    if (!date || !work_group_code) continue
+    if (date < rangeStart || date > rangeEnd) continue
+    const mapKey = `${work_group_code}__${date}`
+    if (cellByKey.has(mapKey)) continue
+    const work_group_name = nameByCode.get(work_group_code) || work_group_code
+    cellByKey.set(mapKey, {
+      date,
+      work_group_code,
+      work_group_name,
+      lot_key: null,
+      model: null,
+      sequence: null,
+      color_index: 0,
+      planned_minutes_per_day: 0,
+      actual_minutes: Math.round(minutes * 10) / 10,
+      has_plan: false,
+      has_actual: true,
+    })
+  }
+
+  const dates = Array.from(
+    new Set([
+      ...result.calendar.dates,
+      ...Array.from(cellByKey.values()).map((cell) => cell.date),
+    ])
+  ).sort()
+
+  const usedGroupCodes = new Set<string>([
+    ...result.calendar.work_groups.map((g) => g.work_group_code),
+    ...Array.from(cellByKey.values()).map((c) => c.work_group_code),
+  ])
+  const workGroups = Array.from(usedGroupCodes)
+    .map((work_group_code) => {
+      const fromCalendar = result.calendar.work_groups.find(
+        (g) => g.work_group_code === work_group_code
+      )
+      const work_group_name =
+        fromCalendar?.work_group_name || nameByCode.get(work_group_code) || work_group_code
+      const group_no = groupNoByCode.get(work_group_code) ?? 0
+      return {
+        work_group_code,
+        work_group_name,
+        process_order: getScheduleProcessOrder(work_group_code, work_group_name, group_no),
+      }
+    })
+    .sort(
+      (a, b) =>
+        a.process_order - b.process_order ||
+        a.work_group_code.localeCompare(b.work_group_code)
+    )
+    .map(({ work_group_code, work_group_name }) => ({ work_group_code, work_group_name }))
+
+  const cells = Array.from(cellByKey.values()).sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) || a.work_group_code.localeCompare(b.work_group_code)
+  )
 
   const lots: ScheduleLotResult[] = result.lots.map((lot) => {
     const targetKey = `${lot.target_type}:${lot.target_code}`
     const daily = actualByTarget.get(targetKey) || new Map<string, number>()
-    const workGroups = lot.work_groups.map((group) => {
+    const workGroupsForLot = lot.work_groups.map((group) => {
       let actualMinutes = 0
       for (const date of group.dates) {
         if (date > asOf) continue
@@ -217,16 +324,16 @@ async function attachScheduleProgress(
       }
     })
 
-    const plannedMinutes = workGroups.reduce((sum, g) => sum + g.total_minutes, 0)
-    const actualMinutes = workGroups.reduce((sum, g) => sum + g.actual_minutes, 0)
+    const plannedMinutes = workGroupsForLot.reduce((sum, g) => sum + g.total_minutes, 0)
+    const actualMinutes = workGroupsForLot.reduce((sum, g) => sum + g.actual_minutes, 0)
     const spec = normalizeSpecKey(lot.notes)
     const completedQty =
       completedByTargetSpec.get(`${targetKey}::${spec}`) ??
       (spec ? 0 : completedByTargetSpec.get(`${targetKey}::`) || 0)
 
-    return {
+    return withLotLeadTimes({
       ...lot,
-      work_groups: workGroups,
+      work_groups: workGroupsForLot,
       progress: {
         planned_qty: lot.quantity,
         completed_qty: completedQty,
@@ -235,7 +342,7 @@ async function attachScheduleProgress(
         actual_minutes: Math.round(actualMinutes * 10) / 10,
         minutes_progress_pct: pct(actualMinutes, plannedMinutes),
       },
-    }
+    })
   })
 
   const plannedQty = lots.reduce((sum, lot) => sum + lot.progress.planned_qty, 0)
@@ -247,7 +354,8 @@ async function attachScheduleProgress(
     ...result,
     lots,
     calendar: {
-      ...result.calendar,
+      dates,
+      work_groups: workGroups,
       cells,
     },
     progress_summary: {
@@ -265,6 +373,38 @@ function isWeekend(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const day = new Date(y, m - 1, d).getDay()
   return day === 0 || day === 6
+}
+
+function shiftCalendarDate(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** 着手〜完了の暦日数（両端含む） */
+export function countCalendarDaysInclusive(startDate: string, endDate: string): number {
+  const start = normalizeWorkDate(startDate)
+  const end = normalizeWorkDate(endDate)
+  if (end < start) return 0
+  const s = new Date(`${start}T00:00:00`)
+  const e = new Date(`${end}T00:00:00`)
+  return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+}
+
+/** 着手〜完了の稼働日数（土日除く・両端含む） */
+export function countWorkingDaysInclusive(startDate: string, endDate: string): number {
+  const start = normalizeWorkDate(startDate)
+  const end = normalizeWorkDate(endDate)
+  if (end < start) return 0
+  let count = 0
+  let current = start
+  while (current <= end) {
+    if (!isWeekend(current)) count += 1
+    if (current === end) break
+    current = shiftCalendarDate(current, 1)
+  }
+  return count
 }
 
 export function shiftWorkingDate(dateStr: string, days: number): string {
@@ -761,6 +901,7 @@ export async function buildProductionSchedule(
           color_index: lotIndex % 8,
           planned_minutes_per_day: plannedPerDay,
           actual_minutes: 0,
+          has_plan: true,
           has_actual: false,
         })
       }
@@ -787,6 +928,8 @@ export async function buildProductionSchedule(
       start_date: lotStart,
       end_date: lotEnd,
       total_days: workGroups.reduce((sum, g) => sum + g.days, 0),
+      lead_time_working_days: countWorkingDaysInclusive(lotStart, lotEnd),
+      lead_time_calendar_days: countCalendarDaysInclusive(lotStart, lotEnd),
       work_groups: workGroups,
       progress: {
         planned_qty: lot.quantity,
