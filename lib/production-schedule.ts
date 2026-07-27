@@ -6,6 +6,7 @@ import {
   aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
   composeUfTotalStMap,
   getFiscalYearAverageStByWorkGroupForSpec,
+  getProcessScheduleStSource,
   listProductionLotRecords,
   lotMatchesSpec,
   normalizeSpecKey,
@@ -542,10 +543,41 @@ async function resolveWorkGroupStMinutes(
   targetType: ProcessTargetType,
   targetCode: string,
   fiscalYear: number,
-  notes?: string | null
+  notes?: string | null,
+  model?: string | null
 ): Promise<{ source: ScheduleStSource; note: string | null; stByGroup: Map<string, number> }> {
   const normalized = normalizeTargetCode(targetCode)
   const specKey = normalizeSpecKey(notes)
+  const modelKey = String(model || '').trim()
+
+  // 工程管理で「機種×指令」明示適用された年平均STを最優先
+  const applied = modelKey
+    ? await getProcessScheduleStSource(supabase, targetType, normalized, modelKey)
+    : null
+  if (applied) {
+    const appliedSpec = applied.spec_key || null
+    const { map: fiscalMap } = await getFiscalYearAverageStByWorkGroupForSpec(
+      supabase,
+      targetType,
+      normalized,
+      applied.fiscal_year,
+      appliedSpec
+    )
+    if (fiscalMap.size > 0) {
+      const specLabel = appliedSpec ? ` ${appliedSpec}` : '（全体）'
+      return {
+        source: 'fiscal',
+        note: `工程管理適用 機種 ${applied.model} / ${String(applied.fiscal_year).slice(-2)}年度平均ST${specLabel}`,
+        stByGroup: fiscalMap,
+      }
+    }
+    // 指定はあるが平均が無い場合は警告付きで通常解決へフォールバックしない（根拠を明確に）
+    return {
+      source: 'none',
+      note: `工程管理で機種 ${applied.model} の${String(applied.fiscal_year).slice(-2)}年度平均ST適用指定ありだが平均STが算出できません`,
+      stByGroup: new Map(),
+    }
+  }
 
   // UF合計ST = DF基準ST + UF差分ST
   if (specKey === 'UF') {
@@ -816,7 +848,8 @@ export async function buildProductionSchedule(
       lot.target_type,
       targetCode,
       fiscalYear,
-      lot.notes
+      lot.notes,
+      lot.model
     )
 
     if (resolved.source === 'none') {

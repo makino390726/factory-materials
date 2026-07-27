@@ -25,6 +25,11 @@ export function normalizeProductCategory(value: unknown): ProductCategory {
   return DEFAULT_PRODUCT_CATEGORY
 }
 
+/** 暖房機のみ heater_bom 原価。それ以外は D指令原価を参照 */
+export function isHeaterProductCategory(value: unknown): boolean {
+  return normalizeProductCategory(value) === '暖房機'
+}
+
 /** 機種名・コードからカテゴリを推定（既存データの初期分類用） */
 export function inferProductCategory(model: string, name?: string | null): ProductCategory {
   const text = `${model} ${name || ''}`

@@ -28,6 +28,8 @@ type ProcessTarget = {
   target_code: string
   name: string
   subtitle: string | null
+  lot_count?: number
+  latest_lot_end?: string | null
 }
 
 type ProductionLotAnalysis = {
@@ -86,6 +88,25 @@ type FiscalYearWorkGroupSummary = {
     spec_label: string
     summary: FiscalYearWorkGroupSummary
   }>
+  schedule_st_source?: {
+    target_type: 'line' | 'instruction'
+    target_code: string
+    model: string
+    fiscal_year: number
+    spec_key: string
+    apply_to_schedule: boolean
+    updated_at: string | null
+  } | null
+  schedule_st_sources?: Array<{
+    target_type: 'line' | 'instruction'
+    target_code: string
+    model: string
+    fiscal_year: number
+    spec_key: string
+    apply_to_schedule: boolean
+    updated_at: string | null
+  }>
+  schedule_models?: Array<{ model: string; label: string }>
 }
 
 const formatMinutes = (value: number) => {
@@ -240,6 +261,7 @@ function ProcessManagementContent() {
   const [targetKey, setTargetKey] = useState(initialTargetKey)
   const [targets, setTargets] = useState<ProcessTarget[]>([])
   const [targetsLoading, setTargetsLoading] = useState(true)
+  const [onlyWithLots, setOnlyWithLots] = useState(true)
   const [periodEndInput, setPeriodEndInput] = useState(initialWorkDate)
   const [completedQtyInput, setCompletedQtyInput] = useState('')
   const [receiptSlipNoInput, setReceiptSlipNoInput] = useState('')
@@ -254,6 +276,17 @@ function ProcessManagementContent() {
   const [fiscalSummary, setFiscalSummary] = useState<FiscalYearWorkGroupSummary | null>(null)
   const [fiscalSpecKey, setFiscalSpecKey] = useState<string>('__ALL__')
   const [fiscalLoading, setFiscalLoading] = useState(false)
+  const [scheduleStSource, setScheduleStSource] = useState<
+    FiscalYearWorkGroupSummary['schedule_st_source']
+  >(null)
+  const [scheduleStSources, setScheduleStSources] = useState<
+    NonNullable<FiscalYearWorkGroupSummary['schedule_st_sources']>
+  >([])
+  const [scheduleModels, setScheduleModels] = useState<
+    NonNullable<FiscalYearWorkGroupSummary['schedule_models']>
+  >([])
+  const [scheduleApplyModel, setScheduleApplyModel] = useState('')
+  const [isSavingScheduleSt, setIsSavingScheduleSt] = useState(false)
 
   const fiscalYearOptions = useMemo(() => {
     const current = getCurrentFiscalYear()
@@ -275,11 +308,39 @@ function ProcessManagementContent() {
     )
   }, [targetKey, targets])
 
-  const lineTargets = useMemo(() => targets.filter((item) => item.target_type === 'line'), [targets])
+  const filteredTargets = useMemo(() => {
+    if (!onlyWithLots) return targets
+    return targets.filter((item) => (item.lot_count || 0) > 0)
+  }, [targets, onlyWithLots])
+
+  const lineTargets = useMemo(
+    () => filteredTargets.filter((item) => item.target_type === 'line'),
+    [filteredTargets]
+  )
   const instructionTargets = useMemo(
-    () => targets.filter((item) => item.target_type === 'instruction'),
+    () => filteredTargets.filter((item) => item.target_type === 'instruction'),
+    [filteredTargets]
+  )
+
+  const targetsWithLotsCount = useMemo(
+    () => targets.filter((item) => (item.lot_count || 0) > 0).length,
     [targets]
   )
+
+  useEffect(() => {
+    if (!targetKey || filteredTargets.length === 0) return
+    const stillVisible = filteredTargets.some(
+      (item) => toProcessTargetKey(item.target_type, item.target_code) === targetKey
+    )
+    if (!stillVisible) {
+      const preferred =
+        filteredTargets.find((item) => item.target_type === 'line' && item.target_code === '909') ||
+        filteredTargets[0]
+      if (preferred) {
+        setTargetKey(toProcessTargetKey(preferred.target_type, preferred.target_code))
+      }
+    }
+  }, [filteredTargets, targetKey])
 
   const selectedLot = useMemo(() => {
     if (!lotsResult?.lots.length) return null
@@ -313,11 +374,13 @@ function ProcessManagementContent() {
           setTargetKey((current) => {
             if (current) return current
             if (initialTargetKey) return initialTargetKey
-            const line909 = list.find(
+            const withLots = list.filter((item) => (item.lot_count || 0) > 0)
+            const preferredPool = withLots.length > 0 ? withLots : list
+            const line909 = preferredPool.find(
               (item) => item.target_type === 'line' && item.target_code === '909'
             )
             if (line909) return toProcessTargetKey('line', '909')
-            return toProcessTargetKey(list[0].target_type, list[0].target_code)
+            return toProcessTargetKey(preferredPool[0].target_type, preferredPool[0].target_code)
           })
         }
       } catch (err) {
@@ -410,21 +473,168 @@ function ProcessManagementContent() {
         target_code: selectedTarget.target_code,
         fiscal_year: String(fiscalYear),
       })
+      if (scheduleApplyModel.trim()) {
+        params.set('model', scheduleApplyModel.trim())
+      }
       const res = await fetch(`/api/process-management?${params}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || '年度集計の取得に失敗しました')
       setFiscalSummary(data as FiscalYearWorkGroupSummary)
+      const models =
+        (data.schedule_models as FiscalYearWorkGroupSummary['schedule_models']) || []
+      setScheduleModels(models)
+      const sources =
+        (data.schedule_st_sources as FiscalYearWorkGroupSummary['schedule_st_sources']) ||
+        []
+      setScheduleStSources(sources)
       setFiscalSpecKey('__ALL__')
+
+      const nextModel =
+        scheduleApplyModel.trim() ||
+        models[0]?.model ||
+        sources[0]?.model ||
+        ''
+      if (nextModel && nextModel !== scheduleApplyModel) {
+        setScheduleApplyModel(nextModel)
+      }
+      const matched = nextModel
+        ? sources.find((row) => row.model === nextModel) ?? null
+        : null
+      setScheduleStSource(matched)
     } catch {
       setFiscalSummary(null)
+      setScheduleStSource(null)
+      setScheduleStSources([])
+      setScheduleModels([])
     } finally {
       setFiscalLoading(false)
     }
   }
 
+  const isScheduleStAppliedToCurrentView = Boolean(
+    scheduleStSource &&
+      scheduleApplyModel &&
+      scheduleStSource.model === scheduleApplyModel &&
+      Number(scheduleStSource.fiscal_year) === Number(fiscalYear) &&
+      (scheduleStSource.spec_key || '') ===
+        (fiscalSpecKey === '__ALL__' ? '' : fiscalSpecKey || '')
+  )
+
+  const scheduleApplyStatusMessage = scheduleStSource
+    ? `設定状態: 適用中（機種 ${scheduleStSource.model} / ${
+        selectedTarget?.target_type === 'instruction' ? 'D指令' : 'L指令'
+      } ${scheduleStSource.target_code} / ${formatFiscalYearLabel(
+        Number(scheduleStSource.fiscal_year)
+      )}${
+        scheduleStSource.spec_key
+          ? ` / 規格 ${scheduleStSource.spec_key}`
+          : ' / 全体'
+      }の年平均ST）`
+    : scheduleApplyModel
+      ? `設定状態: 未適用（機種 ${scheduleApplyModel}）`
+      : '設定状態: 未適用（機種未選択）'
+
+  const handleToggleScheduleSt = async (checked: boolean) => {
+    if (!selectedTarget) return
+    const model = scheduleApplyModel.trim()
+    if (!model) {
+      const message = '適用する機種を選択してください'
+      setError(message)
+      window.alert(message)
+      return
+    }
+    setIsSavingScheduleSt(true)
+    setError(null)
+
+    // 表示を先に切り替えてフィードバックを確実にする
+    const optimistic = checked
+      ? {
+          target_type: selectedTarget.target_type,
+          target_code: selectedTarget.target_code,
+          model,
+          fiscal_year: Number(fiscalYear),
+          spec_key: fiscalSpecKey === '__ALL__' ? '' : fiscalSpecKey || '',
+          apply_to_schedule: true,
+          updated_at: new Date().toISOString(),
+        }
+      : null
+    const previous = scheduleStSource
+    const previousSources = scheduleStSources
+    setScheduleStSource(optimistic)
+    if (checked && optimistic) {
+      setScheduleStSources([
+        ...previousSources.filter((row) => row.model !== model),
+        optimistic,
+      ])
+    } else {
+      setScheduleStSources(previousSources.filter((row) => row.model !== model))
+    }
+
+    try {
+      const res = await fetch('/api/process-management', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set-schedule-st-source',
+          target_type: selectedTarget.target_type,
+          target_code: selectedTarget.target_code,
+          model,
+          fiscal_year: Number(fiscalYear),
+          spec_key: fiscalSpecKey === '__ALL__' ? '' : fiscalSpecKey,
+          apply_to_schedule: checked,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || 'スケジュール適用の保存に失敗しました')
+      }
+      const sources =
+        (data.schedule_st_sources as FiscalYearWorkGroupSummary['schedule_st_sources']) ||
+        []
+      setScheduleStSources(sources)
+      setScheduleStSource(
+        checked
+          ? data.schedule_st_source ?? optimistic
+          : sources.find((row) => row.model === model) ?? null
+      )
+      if (checked && data.standard_duration?.minutes > 0) {
+        window.alert(
+          `適用しました\n指令標準時間を年平均ST合計 ${data.standard_duration.minutes}分 に更新しました` +
+            (data.standard_duration.note ? `\n（${data.standard_duration.note}）` : '')
+        )
+      }
+    } catch (err) {
+      setScheduleStSource(previous)
+      setScheduleStSources(previousSources)
+      const message =
+        err instanceof Error ? err.message : 'スケジュール適用の保存に失敗しました'
+      setError(message)
+      window.alert(message)
+    } finally {
+      setIsSavingScheduleSt(false)
+    }
+  }
+
+  useEffect(() => {
+    setScheduleApplyModel('')
+    setScheduleStSource(null)
+    setScheduleStSources([])
+    setScheduleModels([])
+  }, [selectedTarget?.target_type, selectedTarget?.target_code])
+
   useEffect(() => {
     if (selectedTarget) loadFiscalSummary()
   }, [selectedTarget, fiscalYear])
+
+  useEffect(() => {
+    if (!scheduleApplyModel) {
+      setScheduleStSource(null)
+      return
+    }
+    setScheduleStSource(
+      scheduleStSources.find((row) => row.model === scheduleApplyModel) ?? null
+    )
+  }, [scheduleApplyModel, scheduleStSources])
 
   const handleSaveLot = async () => {
     const qty = Number(completedQtyInput)
@@ -520,16 +730,29 @@ function ProcessManagementContent() {
                   </Link>
                 </div>
               </div>
+              <label className="mt-1 mb-1 flex items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={onlyWithLots}
+                  onChange={(e) => setOnlyWithLots(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                入庫実績ありのみ（{targetsWithLotsCount}件 / 全{targets.length}件）
+              </label>
               <select
                 value={targetKey}
                 onChange={(e) => setTargetKey(e.target.value)}
-                disabled={targetsLoading || targets.length === 0}
+                disabled={targetsLoading || filteredTargets.length === 0}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
               >
                 {targetsLoading ? (
                   <option value="">読み込み中...</option>
-                ) : targets.length === 0 ? (
-                  <option value="">L指令・D指令が未登録です</option>
+                ) : filteredTargets.length === 0 ? (
+                  <option value="">
+                    {onlyWithLots
+                      ? '入庫実績のある指令がありません'
+                      : 'L指令・D指令が未登録です'}
+                  </option>
                 ) : (
                   <>
                     {lineTargets.length > 0 && (
@@ -540,6 +763,11 @@ function ProcessManagementContent() {
                             value={toProcessTargetKey(item.target_type, item.target_code)}
                           >
                             {item.target_code} — {item.name}
+                            {(item.lot_count || 0) > 0
+                              ? `（入庫${item.lot_count}件${
+                                  item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
+                                }）`
+                              : ''}
                           </option>
                         ))}
                       </optgroup>
@@ -553,6 +781,11 @@ function ProcessManagementContent() {
                           >
                             {item.target_code}
                             {item.subtitle ? ` — ${item.subtitle}` : ''}
+                            {(item.lot_count || 0) > 0
+                              ? `（入庫${item.lot_count}件${
+                                  item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
+                                }）`
+                              : ''}
                           </option>
                         ))}
                       </optgroup>
@@ -800,8 +1033,8 @@ function ProcessManagementContent() {
 
         {selectedTarget && (
           <div className="bg-white/95 rounded-2xl border border-indigo-100 p-6 shadow-xl mb-6 overflow-x-auto">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-              <div>
+            <div className="mb-4 space-y-4">
+              <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-slate-900">
                   会計年度 作業グループ別 平均ST（規格別）
                 </h2>
@@ -809,24 +1042,120 @@ function ProcessManagementContent() {
                   {selectedTarget.target_type === 'instruction' ? 'D指令' : 'L指令'}{' '}
                   {selectedTarget.target_code}（9月1日〜翌年8月31日）
                 </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  機種を明示して「スケジュールに適用」すると、その機種×指令の年平均STが生産スケジュールと指令標準時間（班別平均STの合計）の根拠になります。
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-black">年度</label>
-                <select
-                  value={fiscalYear}
-                  onChange={(e) => setFiscalYear(Number(e.target.value))}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-black"
-                >
-                  {fiscalYearOptions.map((year) => {
-                    const { start, end } = getFiscalYearDateRange(year)
-                    return (
-                      <option key={year} value={year}>
-                        {formatFiscalYearLabel(year)}（{start} 〜 {end}）
+
+              <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex min-w-[14rem] flex-1 flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">適用機種</label>
+                  <select
+                    value={scheduleApplyModel}
+                    onChange={(e) => setScheduleApplyModel(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-black"
+                  >
+                    <option value="">選択してください</option>
+                    {scheduleModels.map((item) => (
+                      <option key={item.model} value={item.model}>
+                        {item.label}
                       </option>
-                    )
-                  })}
-                </select>
+                    ))}
+                    {scheduleApplyModel &&
+                      !scheduleModels.some((item) => item.model === scheduleApplyModel) && (
+                        <option value={scheduleApplyModel}>{scheduleApplyModel}</option>
+                      )}
+                  </select>
+                </div>
+                <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    候補にない機種
+                  </label>
+                  <input
+                    type="text"
+                    value={
+                      scheduleModels.some((item) => item.model === scheduleApplyModel)
+                        ? ''
+                        : scheduleApplyModel
+                    }
+                    onChange={(e) => setScheduleApplyModel(e.target.value.trim())}
+                    placeholder="手入力"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-black"
+                  />
+                </div>
+                <div className="flex min-w-[12rem] flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">年度</label>
+                  <select
+                    value={fiscalYear}
+                    onChange={(e) => setFiscalYear(Number(e.target.value))}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-black"
+                  >
+                    {fiscalYearOptions.map((year) => {
+                      const { start, end } = getFiscalYearDateRange(year)
+                      return (
+                        <option key={year} value={year}>
+                          {formatFiscalYearLabel(year)}（{start} 〜 {end}）
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  disabled={
+                    fiscalLoading ||
+                    isSavingScheduleSt ||
+                    !scheduleApplyModel ||
+                    !displayedFiscalSummary ||
+                    displayedFiscalSummary.rows.length === 0
+                  }
+                  onClick={() => void handleToggleScheduleSt(!isScheduleStAppliedToCurrentView)}
+                  className={`inline-flex h-[42px] min-w-[10.5rem] items-center justify-center rounded-xl border-2 px-4 text-sm font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isScheduleStAppliedToCurrentView
+                      ? 'border-emerald-500 bg-emerald-700 text-white'
+                      : 'border-slate-500 bg-slate-800 text-white hover:border-emerald-400 hover:bg-slate-700'
+                  }`}
+                  aria-pressed={isScheduleStAppliedToCurrentView}
+                >
+                  {isSavingScheduleSt
+                    ? '保存中…'
+                    : isScheduleStAppliedToCurrentView
+                      ? '適用中'
+                      : 'スケジュールに適用'}
+                </button>
               </div>
+            </div>
+            <div
+              className={`mb-4 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                scheduleStSource
+                  ? 'border-emerald-400 bg-emerald-950 text-emerald-100'
+                  : 'border-slate-500 bg-slate-900 text-slate-100'
+              }`}
+            >
+              {scheduleApplyStatusMessage}
+              {scheduleStSource && !isScheduleStAppliedToCurrentView && (
+                <span className="ml-2 font-medium text-amber-200">
+                  ※いま表示中の年度・規格とは異なります
+                </span>
+              )}
+              {!scheduleStSource && (
+                <span className="mt-1 block font-normal text-slate-300">
+                  機種を選び「スケジュールに適用」を押すと、年平均STがスケジュール根拠になり、指令の標準時間（班別平均の合計）にも反映されます
+                </span>
+              )}
+              {scheduleStSources.length > 0 && (
+                <div className="mt-2 border-t border-white/20 pt-2 font-normal text-xs text-slate-200">
+                  この指令の適用一覧:{' '}
+                  {scheduleStSources
+                    .map(
+                      (row) =>
+                        `${row.model}（${formatFiscalYearLabel(Number(row.fiscal_year))}${
+                          row.spec_key ? `/${row.spec_key}` : '/全体'
+                        }）`
+                    )
+                    .join('、')}
+                </div>
+              )}
             </div>
             {fiscalLoading ? (
               <p className="text-sm text-slate-500 py-6 text-center">読み込み中...</p>

@@ -781,7 +781,8 @@ export default function LinesPage() {
               <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
               <p className="mt-1 text-sm text-slate-600">
                 各L指令の部品割り当てに共通明細（全機種、500・600系共通など）を設定し、確認後に一括で労賃を再計算します。
-                計算式: 1個あたり工賃 = (制作所要時間 ÷ 製造計画部品数) から算出
+                計算式: 1個あたり工賃 = (制作所要時間 ÷ 製造計画部品数) から算出。
+                制作所要時間は工程管理の年平均ST合計（無ければL指令マスタ標準時間）を採用します。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

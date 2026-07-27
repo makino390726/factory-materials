@@ -9,6 +9,47 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function isMissingProductCategoryError(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  const message = error.message || '';
+  return (
+    error.code === 'PGRST204' ||
+    message.includes('product_category') ||
+    (message.includes('column') && message.includes('schema cache'))
+  );
+}
+
+function formatSaveError(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return '計画の保存に失敗しました';
+  }
+  const record = error as { code?: string; message?: string };
+  const message = record.message || '';
+  if (isMissingProductCategoryError(record)) {
+    return 'heater_manufacturing_plans に product_category 列がありません。Supabaseで migrate-add-product-category.sql を実行してください。';
+  }
+  if (message.includes('heater_manufacturing_plans') && message.includes('does not exist')) {
+    return 'heater_manufacturing_plans テーブルがありません。Supabaseで create-manufacturing-plans-tables.sql を実行してください。';
+  }
+  if (message.includes('duplicate key') || record.code === '23505') {
+    return '同じ機種の明細が重複しています。ページを再読み込みしてから保存し直してください。';
+  }
+  return message || '計画の保存に失敗しました';
+}
+
+function normalizeDetails(
+  details: Array<{ model?: string; quantity?: number }> | null | undefined
+) {
+  const map = new Map<string, number>();
+  for (const row of details || []) {
+    const model = String(row?.model || '').trim();
+    const quantity = Number(row?.quantity);
+    if (!model || !Number.isFinite(quantity) || quantity <= 0) continue;
+    map.set(model, (map.get(model) || 0) + Math.floor(quantity));
+  }
+  return Array.from(map.entries()).map(([model, quantity]) => ({ model, quantity }));
+}
+
 async function runLaborSyncAfterPlanSave(planId: string) {
   try {
     return await syncConfirmedLaborFromManufacturingPlan(supabase, planId);
@@ -16,6 +57,27 @@ async function runLaborSyncAfterPlanSave(planId: string) {
     console.error('labor sync after manufacturing plan save failed:', err);
     return null;
   }
+}
+
+function summarizeLaborSync(labor_sync: Awaited<ReturnType<typeof runLaborSyncAfterPlanSave>>) {
+  if (!labor_sync) return null;
+  const failures = (labor_sync.results || [])
+    .filter((row: { success?: boolean; skipped?: boolean }) => !row.success && !row.skipped)
+    .slice(0, 5)
+    .map(
+      (row: {
+        part_key?: string;
+        line_code?: string;
+        reason?: string;
+      }) => `${row.part_key || '?'} / L${row.line_code || '?'}: ${row.reason || '不明なエラー'}`
+    );
+  return {
+    total: labor_sync.total,
+    success_count: labor_sync.success_count,
+    skipped_count: labor_sync.skipped_count,
+    failed_count: labor_sync.failed_count,
+    failures,
+  };
 }
 
 // 製造計画一覧取得
@@ -81,9 +143,11 @@ export async function POST(req: NextRequest) {
     const { plan_name, fiscal_year, plan_period, notes, details, product_category } =
       await req.json();
 
-    if (!plan_name || !fiscal_year || !details || details.length === 0) {
+    const detailsToInsert = normalizeDetails(details);
+
+    if (!plan_name || !fiscal_year || detailsToInsert.length === 0) {
       return NextResponse.json(
-        { error: 'plan_name, fiscal_year, and details are required' },
+        { error: '計画名、年度、台数1以上の明細が必要です' },
         { status: 400 }
       );
     }
@@ -104,11 +168,7 @@ export async function POST(req: NextRequest) {
         .single();
       planData = inserted.data;
       planError = inserted.error;
-      if (
-        planError &&
-        (planError.code === 'PGRST204' ||
-          (planError.message || '').includes('product_category'))
-      ) {
+      if (isMissingProductCategoryError(planError)) {
         const legacy = await supabase
           .from('heater_manufacturing_plans')
           .insert([{ plan_name, fiscal_year, plan_period, notes }])
@@ -121,32 +181,22 @@ export async function POST(req: NextRequest) {
 
     if (planError) throw planError;
 
-    // 明細を保存
-    const detailsToInsert = details
-      .filter((d: any) => d.quantity > 0)
-      .map((d: any) => ({
-        plan_id: planData.id,
-        model: d.model,
-        quantity: d.quantity,
-      }));
+    const { error: detailsError } = await supabase
+      .from('heater_manufacturing_plan_details')
+      .insert(detailsToInsert.map((d) => ({ ...d, plan_id: planData.id })));
 
-    if (detailsToInsert.length > 0) {
-      const { error: detailsError } = await supabase
-        .from('heater_manufacturing_plan_details')
-        .insert(detailsToInsert);
-
-      if (detailsError) throw detailsError;
-    }
+    if (detailsError) throw detailsError;
 
     const labor_sync = await runLaborSyncAfterPlanSave(planData.id);
+    const labor_sync_summary = summarizeLaborSync(labor_sync);
 
     return NextResponse.json(
-      { ...planData, details: detailsToInsert, labor_sync },
+      { ...planData, details: detailsToInsert, labor_sync: labor_sync_summary },
       { status: 201 }
     );
   } catch (err: any) {
     console.error('POST error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: formatSaveError(err) }, { status: 500 });
   }
 }
 
@@ -158,6 +208,14 @@ export async function PUT(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    }
+
+    const detailsToInsert = normalizeDetails(details);
+    if (detailsToInsert.length === 0) {
+      return NextResponse.json(
+        { error: '台数が1以上の機種がありません' },
+        { status: 400 }
+      );
     }
 
     const category =
@@ -180,11 +238,7 @@ export async function PUT(req: NextRequest) {
         })
         .eq('id', id);
       planError = updated.error;
-      if (
-        planError &&
-        (planError.code === 'PGRST204' ||
-          (planError.message || '').includes('product_category'))
-      ) {
+      if (isMissingProductCategoryError(planError)) {
         const legacy = await supabase
           .from('heater_manufacturing_plans')
           .update({
@@ -209,31 +263,19 @@ export async function PUT(req: NextRequest) {
 
     if (deleteError) throw deleteError;
 
-    // 新しい明細を挿入
-    if (details && details.length > 0) {
-      const detailsToInsert = details
-        .filter((d: any) => d.quantity > 0)
-        .map((d: any) => ({
-          plan_id: id,
-          model: d.model,
-          quantity: d.quantity,
-        }));
+    const { error: insertError } = await supabase
+      .from('heater_manufacturing_plan_details')
+      .insert(detailsToInsert.map((d) => ({ ...d, plan_id: id })));
 
-      if (detailsToInsert.length > 0) {
-        const { error: insertError } = await supabase
-          .from('heater_manufacturing_plan_details')
-          .insert(detailsToInsert);
-
-        if (insertError) throw insertError;
-      }
-    }
+    if (insertError) throw insertError;
 
     const labor_sync = await runLaborSyncAfterPlanSave(id);
+    const labor_sync_summary = summarizeLaborSync(labor_sync);
 
-    return NextResponse.json({ success: true, id, labor_sync });
+    return NextResponse.json({ success: true, id, labor_sync: labor_sync_summary });
   } catch (err: any) {
     console.error('PUT error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: formatSaveError(err) }, { status: 500 });
   }
 }
 

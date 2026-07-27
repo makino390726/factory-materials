@@ -6,9 +6,14 @@ import {
   aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
   createProductionLot,
   deleteProductionLot,
+  getProcessScheduleStSource,
+  listModelsForProcessTarget,
+  listProcessScheduleStSources,
   listProcessTargets,
   normalizeTargetCode,
   normalizeWorkDate,
+  resolveTargetStandardDurationMinutes,
+  setProcessScheduleStSource,
   type ProcessTargetType,
 } from '@/lib/process-management'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
@@ -51,13 +56,66 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'fiscal_year が不正です' }, { status: 400 })
       }
 
-      const { overall, by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
+      const normalizedCode = normalizeTargetCode(targetCode)
+      const model = searchParams.get('model')?.trim() || ''
+      const [{ overall, by_spec }, scheduleStSources, scheduleModels] = await Promise.all([
+        aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
+          supabase,
+          targetType,
+          normalizedCode,
+          fiscalYear
+        ),
+        listProcessScheduleStSources(supabase, targetType, normalizedCode),
+        listModelsForProcessTarget(supabase, targetType, normalizedCode),
+      ])
+      const scheduleStSource = model
+        ? scheduleStSources.find((row) => row.model === model) ?? null
+        : null
+      return NextResponse.json({
+        ...overall,
+        by_spec,
+        schedule_st_source: scheduleStSource,
+        schedule_st_sources: scheduleStSources,
+        schedule_models: scheduleModels,
+      })
+    }
+
+    if (list === 'schedule-st-source') {
+      const targetType = parseTargetType(searchParams.get('target_type'))
+      const targetCode = searchParams.get('target_code')?.trim()
+      const model = searchParams.get('model')?.trim() || ''
+      if (!targetType) {
+        return NextResponse.json({ error: 'target_type が必要です' }, { status: 400 })
+      }
+      if (!targetCode) {
+        return NextResponse.json({ error: 'target_code が必要です' }, { status: 400 })
+      }
+      const normalizedCode = normalizeTargetCode(targetCode)
+      const [source, sources] = await Promise.all([
+        getProcessScheduleStSource(supabase, targetType, normalizedCode, model || null),
+        listProcessScheduleStSources(supabase, targetType, normalizedCode),
+      ])
+      return NextResponse.json({
+        schedule_st_source: source,
+        schedule_st_sources: sources,
+      })
+    }
+
+    if (list === 'schedule-models') {
+      const targetType = parseTargetType(searchParams.get('target_type'))
+      const targetCode = searchParams.get('target_code')?.trim()
+      if (!targetType) {
+        return NextResponse.json({ error: 'target_type が必要です' }, { status: 400 })
+      }
+      if (!targetCode) {
+        return NextResponse.json({ error: 'target_code が必要です' }, { status: 400 })
+      }
+      const models = await listModelsForProcessTarget(
         supabase,
         targetType,
-        normalizeTargetCode(targetCode),
-        fiscalYear
+        normalizeTargetCode(targetCode)
       )
-      return NextResponse.json({ ...overall, by_spec })
+      return NextResponse.json({ models })
     }
 
     if (list === 'production-lots') {
@@ -106,6 +164,61 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+
+    if (body?.action === 'set-schedule-st-source') {
+      const targetType = parseTargetType(String(body?.target_type || ''))
+      const targetCode = String(body?.target_code || '').trim()
+      const model = String(body?.model || '').trim()
+      const fiscalYear = Number(body?.fiscal_year)
+      const apply = Boolean(body?.apply_to_schedule)
+      const specKey =
+        body?.spec_key === undefined || body?.spec_key === null
+          ? ''
+          : String(body.spec_key)
+
+      if (!targetType) {
+        return NextResponse.json({ error: 'target_type が必要です' }, { status: 400 })
+      }
+      if (!targetCode) {
+        return NextResponse.json({ error: 'target_code が必要です' }, { status: 400 })
+      }
+      if (!model) {
+        return NextResponse.json({ error: '適用する機種を指定してください' }, { status: 400 })
+      }
+
+      const source = await setProcessScheduleStSource(supabase, {
+        target_type: targetType,
+        target_code: targetCode,
+        model,
+        fiscal_year: fiscalYear,
+        spec_key: specKey === '__ALL__' ? '' : specKey,
+        apply_to_schedule: apply,
+      })
+      const sources = await listProcessScheduleStSources(
+        supabase,
+        targetType,
+        normalizeTargetCode(targetCode)
+      )
+      const standardDuration = apply
+        ? await resolveTargetStandardDurationMinutes(
+            supabase,
+            targetType,
+            normalizeTargetCode(targetCode),
+            {
+              fiscalYear,
+              specKey: specKey === '__ALL__' ? '' : specKey,
+              model,
+            }
+          )
+        : null
+      return NextResponse.json({
+        success: true,
+        schedule_st_source: source,
+        schedule_st_sources: sources,
+        standard_duration: standardDuration,
+      })
+    }
+
     const targetType = parseTargetType(String(body?.target_type || ''))
     const targetCode = String(body?.target_code || '').trim()
     const periodEnd = String(body?.period_end || body?.work_date || '').trim()

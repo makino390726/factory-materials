@@ -4,6 +4,7 @@ import {
   getPlannedPartQuantity,
 } from '@/lib/manufacturing-plan-quantity'
 import { parseAllocationModels } from '@/lib/part-commonality'
+import { resolveTargetStandardDurationMinutes } from '@/lib/process-management'
 
 export const UNIT_LABOR_COST = 17810
 export const UNIT_MINUTES = 480
@@ -38,6 +39,7 @@ export type LaborRecalcPreview = {
   per_unit_duration_minutes: number | null
   per_unit_labor_cost: number
   settings_confirmed: boolean
+  duration_source?: string | null
 }
 
 export type LaborRecalcResult = LaborRecalcPreview & {
@@ -56,11 +58,41 @@ export function resolveLineDurationMinutes(line: LineRow): number {
   return Math.max(0, Number(line.standard_duration_minutes || 0))
 }
 
+/** 工程管理の年平均ST合計を優先し、無ければマスタ標準時間 */
+export async function resolveLineDurationMinutesPreferred(
+  supabase: SupabaseClient,
+  line: LineRow,
+  cache?: Map<string, { minutes: number; note: string | null }>
+): Promise<{ minutes: number; note: string | null }> {
+  const key = String(line.line_code || '')
+  if (cache?.has(key)) {
+    return cache.get(key)!
+  }
+
+  try {
+    const resolved = await resolveTargetStandardDurationMinutes(supabase, 'line', key)
+    const minutes =
+      resolved.minutes > 0 ? resolved.minutes : resolveLineDurationMinutes(line)
+    const result = {
+      minutes,
+      note: resolved.minutes > 0 ? resolved.note : null,
+    }
+    cache?.set(key, result)
+    return result
+  } catch {
+    const result = { minutes: resolveLineDurationMinutes(line), note: null }
+    cache?.set(key, result)
+    return result
+  }
+}
+
 export function resolveAssignmentDurationMinutes(
   line: LineRow,
-  assignment: Pick<LinePartAssignmentRow, 'ratio'>
+  assignment: Pick<LinePartAssignmentRow, 'ratio'>,
+  baseMinutes?: number
 ): number {
-  const base = resolveLineDurationMinutes(line)
+  const base =
+    baseMinutes !== undefined ? Math.max(0, baseMinutes) : resolveLineDurationMinutes(line)
   const ratio = Math.max(0, Math.min(100, Number(assignment.ratio || 100)))
   return Math.round((base * ratio) / 100)
 }
@@ -69,10 +101,12 @@ export async function buildLaborRecalcPreview(
   supabase: SupabaseClient,
   assignment: LinePartAssignmentRow,
   line: LineRow,
-  planId?: string | null
+  planId?: string | null,
+  durationCache?: Map<string, { minutes: number; note: string | null }>
 ): Promise<LaborRecalcPreview> {
   const allocationModels = parseAllocationModels(assignment.allocation_models)
-  const totalDuration = resolveAssignmentDurationMinutes(line, assignment)
+  const duration = await resolveLineDurationMinutesPreferred(supabase, line, durationCache)
+  const totalDuration = resolveAssignmentDurationMinutes(line, assignment, duration.minutes)
   const planned = await getPlannedPartQuantity(
     supabase,
     assignment.part_key,
@@ -93,6 +127,7 @@ export async function buildLaborRecalcPreview(
     per_unit_duration_minutes: perUnitMinutes,
     per_unit_labor_cost: calcLaborCostFromMinutes(perUnitMinutes ?? 0),
     settings_confirmed: Boolean(assignment.settings_confirmed),
+    duration_source: duration.note,
   }
 }
 
@@ -106,13 +141,18 @@ export async function recalculateAssignmentLabor(
   supabase: SupabaseClient,
   assignment: LinePartAssignmentRow,
   line: LineRow,
-  options?: { planId?: string | null; requireConfirmed?: boolean }
+  options?: {
+    planId?: string | null
+    requireConfirmed?: boolean
+    durationCache?: Map<string, { minutes: number; note: string | null }>
+  }
 ): Promise<LaborRecalcResult> {
   const preview = await buildLaborRecalcPreview(
     supabase,
     assignment,
     line,
-    options?.planId
+    options?.planId,
+    options?.durationCache
   )
 
   if (options?.requireConfirmed && !assignment.settings_confirmed) {
@@ -230,6 +270,7 @@ export async function bulkRecalculateConfirmedAssignments(
   if (lineError) throw lineError
 
   const lineMap = new Map((lines || []).map((line) => [line.id, line as LineRow]))
+  const durationCache = new Map<string, { minutes: number; note: string | null }>()
   const results: LaborRecalcResult[] = []
 
   for (const assignment of assignments || []) {
@@ -256,7 +297,11 @@ export async function bulkRecalculateConfirmedAssignments(
         supabase,
         assignment as LinePartAssignmentRow,
         line,
-        { planId: options?.planId, requireConfirmed: onlyConfirmed }
+        {
+          planId: options?.planId,
+          requireConfirmed: onlyConfirmed,
+          durationCache,
+        }
       )
       results.push(result)
     } catch (err) {

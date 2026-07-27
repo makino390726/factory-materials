@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getMonthDateRange } from '@/lib/work-report-monthly-sync'
 import {
   formatFiscalYearLabel,
+  getCurrentFiscalYear,
   getFiscalYearDateRange,
   getFiscalYearFromDate,
 } from '@/lib/fiscal-year'
@@ -14,6 +15,10 @@ export type ProcessTarget = {
   target_code: string
   name: string
   subtitle: string | null
+  /** process_production_lots の入庫ロット件数（completed_qty > 0） */
+  lot_count?: number
+  /** 直近の入庫日（period_end） */
+  latest_lot_end?: string | null
 }
 
 export type ProcessWorkGroupRow = {
@@ -1993,9 +1998,471 @@ export async function deleteProductionLot(supabase: SupabaseClient, lotId: strin
   }
 }
 
+export type ProcessScheduleStSource = {
+  target_type: ProcessTargetType
+  target_code: string
+  /** 適用対象機種（必須） */
+  model: string
+  fiscal_year: number
+  /** '' = 全体 */
+  spec_key: string
+  apply_to_schedule: boolean
+  updated_at: string | null
+}
+
+function normalizeScheduleSpecKey(specKey: string | null | undefined): string {
+  if (!specKey || specKey === '__ALL__') return ''
+  return normalizeSpecKey(specKey) || String(specKey).trim()
+}
+
+function normalizeScheduleModel(model: string | null | undefined): string {
+  return String(model || '').trim()
+}
+
+function formatProcessScheduleStSourcesTableError(error: { message?: string; code?: string }) {
+  if (
+    error.code === '42P01' ||
+    error.message?.includes('process_schedule_st_sources') ||
+    error.message?.includes('schema cache')
+  ) {
+    return new Error(
+      'process_schedule_st_sources テーブルがありません。Supabaseで create-process-schedule-st-sources.sql を実行してください。'
+    )
+  }
+  if (error.message?.includes('model') && error.message?.includes('column')) {
+    return new Error(
+      'process_schedule_st_sources に model 列がありません。create-process-schedule-st-sources.sql の移行SQLを実行してください。'
+    )
+  }
+  return error instanceof Error ? error : new Error(String(error.message || error))
+}
+
+function mapScheduleStSourceRow(row: {
+  target_type: string
+  target_code: string
+  model?: string | null
+  fiscal_year: number
+  spec_key?: string | null
+  apply_to_schedule?: boolean
+  updated_at?: string | null
+}): ProcessScheduleStSource {
+  return {
+    target_type: row.target_type === 'instruction' ? 'instruction' : 'line',
+    target_code: String(row.target_code),
+    model: normalizeScheduleModel(row.model),
+    fiscal_year: Number(row.fiscal_year),
+    spec_key: normalizeScheduleSpecKey(row.spec_key),
+    apply_to_schedule: row.apply_to_schedule !== false,
+    updated_at: row.updated_at ? String(row.updated_at) : null,
+  }
+}
+
+/** 指令に紐づくスケジュール適用指定一覧 */
+export async function listProcessScheduleStSources(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string
+): Promise<ProcessScheduleStSource[]> {
+  const normalized = normalizeTargetCode(targetCode)
+  const { data, error } = await supabase
+    .from('process_schedule_st_sources')
+    .select('target_type, target_code, model, fiscal_year, spec_key, apply_to_schedule, updated_at')
+    .eq('target_type', targetType)
+    .eq('target_code', normalized)
+    .eq('apply_to_schedule', true)
+    .order('model', { ascending: true })
+
+  if (error) {
+    if (
+      error.code === '42P01' ||
+      error.message?.includes('process_schedule_st_sources') ||
+      error.message?.includes('schema cache')
+    ) {
+      return []
+    }
+    throw error
+  }
+
+  return (data || [])
+    .map(mapScheduleStSourceRow)
+    .filter((row) => row.model.length > 0)
+}
+
+export async function getProcessScheduleStSource(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  model?: string | null
+): Promise<ProcessScheduleStSource | null> {
+  const normalized = normalizeTargetCode(targetCode)
+  const modelKey = normalizeScheduleModel(model)
+
+  let query = supabase
+    .from('process_schedule_st_sources')
+    .select('target_type, target_code, model, fiscal_year, spec_key, apply_to_schedule, updated_at')
+    .eq('target_type', targetType)
+    .eq('target_code', normalized)
+    .eq('apply_to_schedule', true)
+
+  if (modelKey) {
+    query = query.eq('model', modelKey)
+  }
+
+  const { data, error } = await query
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    if (
+      error.code === '42P01' ||
+      error.message?.includes('process_schedule_st_sources') ||
+      error.message?.includes('schema cache')
+    ) {
+      return null
+    }
+    throw error
+  }
+  if (!data) return null
+  const mapped = mapScheduleStSourceRow(data)
+  if (!mapped.model) return null
+  return mapped
+}
+
+/** 工程管理の年平均STをスケジュール適用ON/OFF（機種必須） */
+export async function setProcessScheduleStSource(
+  supabase: SupabaseClient,
+  input: {
+    target_type: ProcessTargetType
+    target_code: string
+    model: string
+    fiscal_year: number
+    spec_key?: string | null
+    apply_to_schedule: boolean
+  }
+): Promise<ProcessScheduleStSource | null> {
+  const targetType = input.target_type
+  const targetCode = normalizeTargetCode(input.target_code)
+  const model = normalizeScheduleModel(input.model)
+  const fiscalYear = Number(input.fiscal_year)
+  const specKey = normalizeScheduleSpecKey(input.spec_key)
+
+  if (!targetCode) throw new Error('target_code が必要です')
+  if (!model) throw new Error('適用する機種を指定してください')
+  if (!Number.isFinite(fiscalYear)) throw new Error('fiscal_year が不正です')
+
+  if (!input.apply_to_schedule) {
+    const { error } = await supabase
+      .from('process_schedule_st_sources')
+      .delete()
+      .eq('target_type', targetType)
+      .eq('target_code', targetCode)
+      .eq('model', model)
+    if (error) throw formatProcessScheduleStSourcesTableError(error)
+    return null
+  }
+
+  const now = new Date().toISOString()
+  const payload = {
+    target_type: targetType,
+    target_code: targetCode,
+    model,
+    fiscal_year: fiscalYear,
+    spec_key: specKey,
+    apply_to_schedule: true,
+    updated_at: now,
+  }
+  const { data, error } = await supabase
+    .from('process_schedule_st_sources')
+    .upsert(payload, { onConflict: 'target_type,target_code,model' })
+    .select('target_type, target_code, model, fiscal_year, spec_key, apply_to_schedule, updated_at')
+    .maybeSingle()
+
+  if (error) throw formatProcessScheduleStSourcesTableError(error)
+
+  const source = mapScheduleStSourceRow(data || payload)
+
+  // 適用時は指令マスタの標準時間も年平均ST合計で更新
+  await syncTargetStandardDurationFromFiscalAverage(supabase, targetType, targetCode, {
+    fiscalYear,
+    specKey,
+    model,
+  })
+
+  return source
+}
+
+/** 班別年平均STマップの合計（指令標準時間として採用） */
+export function sumFiscalAverageStMinutes(map: Map<string, number>): number {
+  let sum = 0
+  for (const value of map.values()) {
+    if (Number.isFinite(value) && value > 0) sum += value
+  }
+  return sum > 0 ? Math.round(sum) : 0
+}
+
+/**
+ * 指令の標準時間を解決する。
+ * 優先: 工程管理の年平均ST合計（適用指定の年度・規格があればそれ）→ マスタ標準時間
+ */
+export async function resolveTargetStandardDurationMinutes(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  options?: {
+    fiscalYear?: number
+    specKey?: string | null
+    model?: string | null
+  }
+): Promise<{
+  minutes: number
+  source: 'fiscal' | 'master' | 'none'
+  fiscal_year: number | null
+  spec_key: string
+  note: string | null
+}> {
+  const normalized = normalizeTargetCode(targetCode)
+  let fiscalYear = options?.fiscalYear
+  let specKey =
+    options?.specKey === undefined ? undefined : normalizeScheduleSpecKey(options.specKey)
+
+  if (fiscalYear == null || specKey === undefined) {
+    let applied = options?.model
+      ? await getProcessScheduleStSource(supabase, targetType, normalized, options.model)
+      : null
+    if (!applied) {
+      const sources = await listProcessScheduleStSources(supabase, targetType, normalized)
+      applied =
+        [...sources].sort((a, b) =>
+          String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+        )[0] || null
+    }
+    if (applied) {
+      if (fiscalYear == null) fiscalYear = applied.fiscal_year
+      if (specKey === undefined) specKey = applied.spec_key
+    }
+  }
+
+  if (fiscalYear == null) fiscalYear = getCurrentFiscalYear()
+  if (specKey === undefined) specKey = ''
+
+  const { map } = await getFiscalYearAverageStByWorkGroupForSpec(
+    supabase,
+    targetType,
+    normalized,
+    fiscalYear,
+    specKey || null
+  )
+  const fiscalMinutes = sumFiscalAverageStMinutes(map)
+  if (fiscalMinutes > 0) {
+    return {
+      minutes: fiscalMinutes,
+      source: 'fiscal',
+      fiscal_year: fiscalYear,
+      spec_key: specKey,
+      note: `工程管理 ${formatFiscalYearLabel(fiscalYear)}平均ST合計${
+        specKey ? ` / ${specKey}` : ' / 全体'
+      }`,
+    }
+  }
+
+  if (targetType === 'line') {
+    const { data, error } = await supabase
+      .from('lines')
+      .select('standard_duration_minutes')
+      .eq('line_code', normalized)
+      .maybeSingle()
+    if (error) throw error
+    const minutes = Math.max(0, Math.round(Number(data?.standard_duration_minutes || 0)))
+    return {
+      minutes,
+      source: minutes > 0 ? 'master' : 'none',
+      fiscal_year: null,
+      spec_key: '',
+      note: minutes > 0 ? 'L指令マスタの標準時間' : null,
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('standard_duration_minutes')
+    .eq('order_no', normalized)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  const minutes = Math.max(0, Math.round(Number(data?.standard_duration_minutes || 0)))
+  return {
+    minutes,
+    source: minutes > 0 ? 'master' : 'none',
+    fiscal_year: null,
+    spec_key: '',
+    note: minutes > 0 ? 'D指令マスタの標準時間' : null,
+  }
+}
+
+/** 年平均ST合計を指令マスタの standard_duration_minutes へ反映 */
+export async function syncTargetStandardDurationFromFiscalAverage(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  options?: {
+    fiscalYear?: number
+    specKey?: string | null
+    model?: string | null
+  }
+): Promise<{
+  updated: boolean
+  minutes: number
+  source: 'fiscal' | 'master' | 'none'
+  note: string | null
+}> {
+  const normalized = normalizeTargetCode(targetCode)
+  const resolved = await resolveTargetStandardDurationMinutes(
+    supabase,
+    targetType,
+    normalized,
+    options
+  )
+
+  if (resolved.source !== 'fiscal' || resolved.minutes <= 0) {
+    return {
+      updated: false,
+      minutes: resolved.minutes,
+      source: resolved.source,
+      note: resolved.note,
+    }
+  }
+
+  const now = new Date().toISOString()
+  if (targetType === 'line') {
+    const { error } = await supabase
+      .from('lines')
+      .update({
+        standard_duration_minutes: resolved.minutes,
+        updated_at: now,
+      })
+      .eq('line_code', normalized)
+    if (error) throw error
+  } else {
+    const { error } = await supabase
+      .from('work_orders')
+      .update({
+        standard_duration_minutes: resolved.minutes,
+        updated_at: now,
+      })
+      .eq('order_no', normalized)
+    if (error) throw error
+  }
+
+  return {
+    updated: true,
+    minutes: resolved.minutes,
+    source: 'fiscal',
+    note: resolved.note,
+  }
+}
+
+/** 指令に紐づく機種候補（D: work_orders / L: heater_models） */
+export async function listModelsForProcessTarget(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string
+): Promise<Array<{ model: string; label: string }>> {
+  const normalized = normalizeTargetCode(targetCode)
+  const models = new Map<string, string>()
+
+  if (targetType === 'instruction') {
+    const { data, error } = await supabase
+      .from('work_orders')
+      .select('order_no, model, bom_model, product_name')
+      .eq('order_no', normalized)
+    if (error) throw error
+    for (const row of data || []) {
+      for (const candidate of [row.model, row.bom_model, row.order_no]) {
+        const key = normalizeScheduleModel(candidate)
+        if (!key) continue
+        const labelParts = [key]
+        if (row.product_name) labelParts.push(String(row.product_name))
+        if (!models.has(key)) models.set(key, labelParts.join(' / '))
+      }
+    }
+  } else {
+    const { data, error } = await supabase
+      .from('heater_models')
+      .select('model, name')
+      .order('model', { ascending: true })
+    if (error) throw error
+    for (const row of data || []) {
+      const key = normalizeScheduleModel(row.model)
+      if (!key) continue
+      models.set(key, row.name ? `${key} / ${row.name}` : key)
+    }
+  }
+
+  return Array.from(models.entries())
+    .map(([model, label]) => ({ model, label }))
+    .sort((a, b) => a.model.localeCompare(b.model, 'ja'))
+}
+
+/** 入庫ロットがある対象の件数・直近完成日を集計 */
+export async function listProductionLotStatsByTarget(
+  supabase: SupabaseClient
+): Promise<
+  Map<string, { lot_count: number; latest_lot_end: string | null; completed_qty_total: number }>
+> {
+  const stats = new Map<
+    string,
+    { lot_count: number; latest_lot_end: string | null; completed_qty_total: number }
+  >()
+
+  const pageSize = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('process_production_lots')
+      .select('target_type, target_code, period_end, completed_qty')
+      .gt('completed_qty', 0)
+      .range(from, from + pageSize - 1)
+
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('process_production_lots')) {
+        return stats
+      }
+      throw error
+    }
+
+    const rows = data || []
+    for (const row of rows) {
+      const targetType = row.target_type === 'instruction' ? 'instruction' : 'line'
+      const targetCode = normalizeTargetCode(String(row.target_code || ''))
+      if (!targetCode) continue
+      const key = `${targetType}:${targetCode}`
+      const periodEnd = String(row.period_end || '')
+      const qty = Number(row.completed_qty) || 0
+      const current = stats.get(key) || {
+        lot_count: 0,
+        latest_lot_end: null as string | null,
+        completed_qty_total: 0,
+      }
+      current.lot_count += 1
+      current.completed_qty_total += qty
+      if (!current.latest_lot_end || periodEnd > current.latest_lot_end) {
+        current.latest_lot_end = periodEnd || current.latest_lot_end
+      }
+      stats.set(key, current)
+    }
+
+    if (rows.length < pageSize) break
+    from += pageSize
+  }
+
+  return stats
+}
+
 /** ラインマスタ全件 + D指令マスタ全件 */
 export async function listProcessTargets(supabase: SupabaseClient): Promise<ProcessTarget[]> {
-  const [linesResult, ordersResult] = await Promise.all([
+  const [linesResult, ordersResult, lotStats] = await Promise.all([
     supabase
       .from('lines')
       .select('line_code, name, sort_order')
@@ -2006,6 +2473,7 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
       .from('work_orders')
       .select('order_no, product_name, model')
       .order('order_no', { ascending: true }),
+    listProductionLotStatsByTarget(supabase),
   ])
 
   if (linesResult.error) throw linesResult.error
@@ -2014,11 +2482,15 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
   const targets: ProcessTarget[] = []
 
   for (const line of linesResult.data || []) {
+    const target_code = String(line.line_code)
+    const stats = lotStats.get(`line:${normalizeTargetCode(target_code)}`)
     targets.push({
       target_type: 'line',
-      target_code: line.line_code,
+      target_code,
       name: line.name,
-      subtitle: `L指令 ${line.line_code}`,
+      subtitle: `L指令 ${target_code}`,
+      lot_count: stats?.lot_count || 0,
+      latest_lot_end: stats?.latest_lot_end || null,
     })
   }
 
@@ -2047,11 +2519,14 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
       info.product_name,
       modelList.length > 0 ? `規格: ${modelList.join(' / ')}` : null,
     ].filter(Boolean)
+    const stats = lotStats.get(`instruction:${orderNo}`)
     targets.push({
       target_type: 'instruction',
       target_code: orderNo,
       name: orderNo,
       subtitle: subtitleParts.length > 0 ? subtitleParts.join(' / ') : 'D指令',
+      lot_count: stats?.lot_count || 0,
+      latest_lot_end: stats?.latest_lot_end || null,
     })
   }
 

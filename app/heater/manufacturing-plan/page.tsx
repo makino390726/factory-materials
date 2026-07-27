@@ -53,6 +53,7 @@ interface BomDetail {
   quantity: number;
   cost_price: number;
   subtotal: number;
+  branch_no?: string;
 }
 
 interface ManufacturingData {
@@ -60,11 +61,38 @@ interface ManufacturingData {
   quantity: number;
   bomItems: BomDetail[];
   totalCost: number;
+  product_category?: ProductCategory;
+  cost_source?: 'heater_bom' | 'd_order';
+  order_no?: string | null;
+  work_order_id?: string | null;
+  has_saved_cost?: boolean | null;
+  material_total?: number | null;
+  labor_total?: number | null;
+  indirect_total?: number | null;
+  unit_total_cost?: number | null;
+  warning?: string | null;
+}
+
+interface InstructionSummary {
+  model: string;
+  quantity: number;
+  product_category: ProductCategory;
+  order_no: string | null;
+  work_order_id: string | null;
+  has_saved_cost: boolean;
+  unit_total_cost: number;
+  material_total: number;
+  labor_total: number;
+  indirect_total: number;
+  total_cost: number;
+  warning: string | null;
 }
 
 interface ManufacturingResponse {
   manufacturingData: ManufacturingData[];
   aggregatedItems: AggregatedItem[];
+  instructionSummaries?: InstructionSummary[];
+  warnings?: string[];
 }
 
 export default function ManufacturingPlanPage() {
@@ -270,10 +298,20 @@ export default function ManufacturingPlanPage() {
     }
 
     try {
-      const details = plans.filter(p => p.quantity > 0).map(p => ({
-        model: p.model,
-        quantity: p.quantity
+      setError(null);
+      const detailsMap = new Map<string, number>();
+      for (const p of plans) {
+        if (p.quantity <= 0) continue;
+        detailsMap.set(p.model, (detailsMap.get(p.model) || 0) + Number(p.quantity));
+      }
+      const details = Array.from(detailsMap.entries()).map(([model, quantity]) => ({
+        model,
+        quantity,
       }));
+      if (details.length === 0) {
+        setError('台数が1以上の機種がありません');
+        return;
+      }
       const product_category = planCategory || resolvePrimaryCategory(plans);
 
       const method = currentPlanId ? 'PUT' : 'POST';
@@ -296,8 +334,10 @@ export default function ManufacturingPlanPage() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error('Failed to save plan');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `計画の保存に失敗しました（HTTP ${res.status}）`);
+      }
       
       setCurrentPlanId(data.id || currentPlanId);
       setShowSaveDialog(false);
@@ -305,11 +345,19 @@ export default function ManufacturingPlanPage() {
 
       const sync = data.labor_sync;
       if (sync && typeof sync.success_count === 'number') {
+        const failureLines =
+          Array.isArray(sync.failures) && sync.failures.length > 0
+            ? `\n失敗内容:\n- ${sync.failures.join('\n- ')}`
+            : '';
         alert(
           `保存しました\n` +
             `共通按分の労賃再計算: 成功 ${sync.success_count}件` +
             (sync.skipped_count ? ` / スキップ ${sync.skipped_count}件` : '') +
-            (sync.failed_count ? ` / 失敗 ${sync.failed_count}件` : '')
+            (sync.failed_count ? ` / 失敗 ${sync.failed_count}件` : '') +
+            failureLines +
+            (sync.failed_count || sync.skipped_count
+              ? `\n\n※計画の保存自体は完了しています。労賃は L指令の共通部品設定・標準時間・計画台数を確認してください。`
+              : '')
         );
       } else {
         alert('保存しました');
@@ -362,7 +410,8 @@ export default function ManufacturingPlanPage() {
   };
 
   const calculateGrandTotal = () => {
-    return response?.aggregatedItems.reduce((sum, item) => sum + item.total_cost, 0) || 0;
+    if (!response) return 0
+    return response.manufacturingData.reduce((sum, item) => sum + (item.totalCost || 0), 0)
   };
 
   const calculatePurchaseTotal = () => {
@@ -517,8 +566,9 @@ export default function ManufacturingPlanPage() {
             </button>
           </div>
           <p className="mb-3 text-sm text-slate-600">
-            暖房機・たばこ乾燥機・食品乾燥機・光合成促進装置など、製品カテゴリを切り替えて台数を入力できます（同一計画に複数カテゴリを含められます）。
-            機種が無い場合は
+            暖房機は部品BOM原価、それ以外（たばこ乾燥機・食品乾燥機・光合成促進装置など）は
+            <span className="font-semibold text-rose-700"> D指令の原価計算結果</span>
+            を参照します。同一計画に複数カテゴリを含められます。機種が無い場合は
             <Link href="/heater/models" className="mx-1 text-blue-600 underline">
               機種マスタ
             </Link>
@@ -592,9 +642,114 @@ export default function ManufacturingPlanPage() {
         </div>
 
         {/* 計画結果 */}
-        {response && response.aggregatedItems.length > 0 && (
+        {response &&
+          (response.aggregatedItems.length > 0 ||
+            (response.instructionSummaries || []).length > 0 ||
+            response.manufacturingData.length > 0) && (
           <div className="space-y-8">
-            {/* 集約部品リスト */}
+            {(response.warnings || []).length > 0 && (
+              <div className="no-print rounded-lg border border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {(response.warnings || []).map((w, i) => (
+                  <p key={i}>{w}</p>
+                ))}
+              </div>
+            )}
+
+            {(response.instructionSummaries || []).length > 0 && (
+              <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+                <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-4">
+                  <h3 className="text-xl font-semibold">D指令原価（暖房機以外）</h3>
+                  <p className="text-rose-100 mt-1 text-sm">
+                    機種に対応するD指令の保存済み原価 × 製造台数で集計しています
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">機種</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">カテゴリ</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">D指令</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">台数</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">1台原価</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">材料費</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">工賃</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">間接費</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold text-slate-700">合計</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">状態</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(response.instructionSummaries || []).map((row) => (
+                        <tr key={`${row.model}-${row.order_no || 'none'}`} className="border-b border-slate-200">
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{row.model}</td>
+                          <td className="px-4 py-3 text-sm text-slate-700">{row.product_category}</td>
+                          <td className="px-4 py-3 text-sm font-mono text-slate-900">
+                            {row.order_no || '—'}
+                            {row.work_order_id && (
+                              <Link
+                                href={`/heater/models/dr8008?work_order_id=${encodeURIComponent(row.work_order_id)}`}
+                                className="ml-2 text-xs text-blue-600 underline no-print"
+                              >
+                                原価BOM
+                              </Link>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-slate-900">{row.quantity}</td>
+                          <td className="px-4 py-3 text-sm text-right font-mono text-slate-900">
+                            {formatCurrency(row.unit_total_cost || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-mono text-slate-900">
+                            {formatCurrency(row.material_total || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-mono text-slate-900">
+                            {formatCurrency(row.labor_total || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-mono text-slate-900">
+                            {formatCurrency(row.indirect_total || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-bold font-mono text-rose-700">
+                            {formatCurrency(row.total_cost || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {row.has_saved_cost ? (
+                              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                                保存済
+                              </span>
+                            ) : (
+                              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                未保存
+                              </span>
+                            )}
+                            {row.warning && (
+                              <p className="mt-1 text-xs text-amber-700">{row.warning}</p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-rose-50 border-t-2 border-rose-200">
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-900" colSpan={8}>
+                          D指令原価 合計
+                        </td>
+                        <td className="px-4 py-3 text-right text-lg font-bold font-mono text-rose-700">
+                          {formatCurrency(
+                            (response.instructionSummaries || []).reduce(
+                              (sum, row) => sum + (row.total_cost || 0),
+                              0
+                            )
+                          )}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {response.aggregatedItems.length > 0 && (
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4">
                 <div className="flex items-center justify-between">
@@ -603,7 +758,7 @@ export default function ManufacturingPlanPage() {
                       📦 全機種集約 - {response.aggregatedItems.length}種類の部品
                     </h3>
                     <p className="text-blue-100 mt-1">
-                      すべての機種で必要な部品を合計表示
+                      暖房機はBOM部品、D指令案件は指令原価明細を合計表示
                     </p>
                   </div>
                   <button
@@ -700,6 +855,7 @@ export default function ManufacturingPlanPage() {
                 </div>
               </div>
             </div>
+            )}
 
             {/* 機種別詳細（折りたたみ可能） */}
             <details className="no-print bg-white rounded-lg shadow-lg overflow-hidden">
@@ -712,13 +868,43 @@ export default function ManufacturingPlanPage() {
               <div className="space-y-6 p-6">
                 {response.manufacturingData.map((data) => (
                   <div key={data.model} className="border border-slate-300 rounded-lg p-4">
-                    <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-3 rounded mb-4">
+                    <div
+                      className={`text-white p-3 rounded mb-4 ${
+                        data.cost_source === 'd_order'
+                          ? 'bg-gradient-to-r from-rose-600 to-rose-700'
+                          : 'bg-gradient-to-r from-blue-600 to-blue-700'
+                      }`}
+                    >
                       <h4 className="font-semibold">
-                        {data.model} - {data.bomItems.length > 0 ? `${data.bomItems.length}種類の部品` : '部品なし'}
+                        {data.model}
+                        {data.cost_source === 'd_order'
+                          ? ` / D指令 ${data.order_no || '未紐付'} - ${
+                              data.bomItems.length > 0
+                                ? `${data.bomItems.length}明細`
+                                : '明細なし'
+                            }`
+                          : ` - ${
+                              data.bomItems.length > 0
+                                ? `${data.bomItems.length}種類の部品`
+                                : '部品なし'
+                            }`}
                       </h4>
-                      <p className="text-blue-100 text-sm">
+                      <p className="text-sm opacity-90">
                         製造台数: {data.quantity} 台 | 原価合計: {formatCurrency(data.totalCost)}
+                        {data.cost_source === 'd_order' && data.unit_total_cost != null
+                          ? ` | 1台: ${formatCurrency(data.unit_total_cost)}`
+                          : ''}
                       </p>
+                      {data.cost_source === 'd_order' && (
+                        <p className="text-sm opacity-90 mt-1">
+                          材料 {formatCurrency(data.material_total || 0)} / 工賃{' '}
+                          {formatCurrency(data.labor_total || 0)} / 間接{' '}
+                          {formatCurrency(data.indirect_total || 0)}
+                        </p>
+                      )}
+                      {data.warning && (
+                        <p className="mt-1 text-xs text-amber-100">{data.warning}</p>
+                      )}
                     </div>
 
                     {data.bomItems.length > 0 ? (
@@ -751,7 +937,11 @@ export default function ManufacturingPlanPage() {
                         </table>
                       </div>
                     ) : (
-                      <p className="text-center text-slate-600 text-sm">部品なし</p>
+                      <p className="text-center text-slate-600 text-sm">
+                        {data.cost_source === 'd_order'
+                          ? 'D指令原価明細がありません'
+                          : '部品なし'}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -762,7 +952,7 @@ export default function ManufacturingPlanPage() {
             {calculateGrandTotal() > 0 && (
               <div className="no-print bg-gradient-to-r from-orange-500 to-amber-500 rounded-lg shadow-lg p-6 text-white">
                 <div className="flex justify-between items-center">
-                  <span className="text-2xl font-bold">総原価合計（仕入金額）：</span>
+                  <span className="text-2xl font-bold">総原価合計：</span>
                   <span className="text-4xl font-bold font-mono">
                     {formatCurrency(calculateGrandTotal())}
                   </span>
@@ -773,7 +963,11 @@ export default function ManufacturingPlanPage() {
         )}
 
         {/* 初期表示メッセージ */}
-        {(!response || response.aggregatedItems.length === 0) && !loading && (
+        {(!response ||
+          (response.aggregatedItems.length === 0 &&
+            (response.instructionSummaries || []).length === 0 &&
+            response.manufacturingData.length === 0)) &&
+          !loading && (
           <div className="no-print bg-white rounded-lg shadow-lg p-8 text-center">
             <p className="text-lg text-slate-600">
               上記で機種別の台数を入力してから「原価計画を計算」ボタンをクリックしてください
@@ -857,6 +1051,11 @@ export default function ManufacturingPlanPage() {
                   />
                 </div>
               </div>
+              {error && (
+                <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowSaveDialog(false)}
