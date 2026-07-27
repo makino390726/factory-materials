@@ -143,6 +143,21 @@ export default function WorkOrderCostPage() {
     total_plan_qty: number
     model_count: number
   } | null>(null)
+  const [reusePastCost, setReusePastCost] = useState(false)
+  const [sourceWorkOrderId, setSourceWorkOrderId] = useState('')
+  const [pastCostOptions, setPastCostOptions] = useState<
+    Array<{
+      work_order_id: string
+      order_no: string
+      product_name: string | null
+      model: string | null
+      bom_model: string | null
+      cost_mode: string | null
+      total_cost: number
+      updated_at: string | null
+    }>
+  >([])
+  const [pastCostsLoading, setPastCostsLoading] = useState(false)
 
   useEffect(() => {
     const loadMonthlyLineMinutes = async () => {
@@ -180,6 +195,43 @@ export default function WorkOrderCostPage() {
 
     fetchWorkOrders()
   }, [])
+
+  useEffect(() => {
+    if (mode !== 'order') {
+      setReusePastCost(false)
+      setSourceWorkOrderId('')
+      return
+    }
+    const loadPastCosts = async () => {
+      setPastCostsLoading(true)
+      try {
+        const res = await fetch('/api/work-order-costs/list')
+        if (!res.ok) return
+        const data = await res.json()
+        setPastCostOptions(
+          Array.isArray(data)
+            ? data
+                .filter((row: any) => row?.work_order_id)
+                .map((row: any) => ({
+                  work_order_id: String(row.work_order_id),
+                  order_no: String(row.order_no || ''),
+                  product_name: row.product_name ?? null,
+                  model: row.model ?? null,
+                  bom_model: row.bom_model ?? null,
+                  cost_mode: row.cost_mode ?? null,
+                  total_cost: Number(row.total_cost || 0),
+                  updated_at: row.updated_at ? String(row.updated_at) : null,
+                }))
+            : []
+        )
+      } catch (err) {
+        console.error('過去原価一覧の取得エラー:', err)
+      } finally {
+        setPastCostsLoading(false)
+      }
+    }
+    void loadPastCosts()
+  }, [mode])
 
   // 選択パーツが変わったら localStorage から復元、なければ partsMaster から1行セット
   useEffect(() => {
@@ -425,14 +477,53 @@ export default function WorkOrderCostPage() {
     [branchOptions, selectedBranchId]
   )
 
+  const sourceWorkOrder = useMemo(
+    () => workOrders.find((order) => order.id === sourceWorkOrderId) || null,
+    [workOrders, sourceWorkOrderId]
+  )
+
+  const rankedPastCostOptions = useMemo(() => {
+    if (!selectedOrder) return pastCostOptions
+    const normalize = (value: string | null | undefined) => String(value || '').trim().toLowerCase()
+    const targetModel = normalize(selectedOrder.model)
+    const targetBom = normalize(selectedOrder.bom_model)
+    const targetName = normalize(selectedOrder.product_name)
+
+    const scoreOf = (row: (typeof pastCostOptions)[number]) => {
+      let score = 0
+      const model = normalize(row.model)
+      const bom = normalize(row.bom_model)
+      const name = normalize(row.product_name)
+      if (targetBom && bom && targetBom === bom) score += 100
+      if (targetModel && model && targetModel === model) score += 50
+      if (targetName && name) {
+        if (targetName === name) score += 30
+        else if (name.includes(targetName) || targetName.includes(name)) score += 10
+      }
+      return score
+    }
+
+    return [...pastCostOptions]
+      .filter((row) => row.work_order_id !== selectedWorkOrderId)
+      .sort((a, b) => {
+        const scoreDiff = scoreOf(b) - scoreOf(a)
+        if (scoreDiff !== 0) return scoreDiff
+        return String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+      })
+  }, [pastCostOptions, selectedOrder, selectedWorkOrderId])
+
+  const costLoadWorkOrderId =
+    mode === 'order' && reusePastCost ? sourceWorkOrderId : selectedWorkOrderId
+
   const loadCostDepsKey = [
-    selectedWorkOrderId,
-    selectedBranchId,
     mode,
-    selectedOrder?.cost_mode || '',
-    selectedOrder?.order_no || '',
-    selectedBranch?.part_key || '',
-    selectedBranch?.branch_no || '',
+    reusePastCost ? 'reuse' : 'own',
+    costLoadWorkOrderId,
+    reusePastCost ? '' : selectedBranchId,
+    reusePastCost ? '' : selectedOrder?.cost_mode || '',
+    reusePastCost ? '' : selectedOrder?.order_no || '',
+    reusePastCost ? '' : selectedBranch?.part_key || '',
+    reusePastCost ? '' : selectedBranch?.branch_no || '',
   ].join('|')
 
   const matchingLines = useMemo(() => {
@@ -1087,25 +1178,44 @@ export default function WorkOrderCostPage() {
     }
   }
 
-  // 選択したD指令（work_order_id）に既存の原価データがあればロードする
+  // 選択したD指令（または準用元）の原価データをロードする
   useEffect(() => {
     const load = async () => {
-      if (!selectedWorkOrderId) return
+      if (mode !== 'order') return
+      if (!costLoadWorkOrderId) {
+        if (reusePastCost) {
+          // 準用ONだが過去指令未選択 → 明細は触らない（保存先の選択待ち）
+          return
+        }
+        return
+      }
       try {
-        const res = await fetch(`/api/work-order-costs?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`)
+        const loadOrder =
+          workOrders.find((order) => order.id === costLoadWorkOrderId) ||
+          (reusePastCost ? sourceWorkOrder : selectedOrder)
+        const res = await fetch(
+          `/api/work-order-costs?work_order_id=${encodeURIComponent(costLoadWorkOrderId)}`
+        )
         if (!res.ok) return
         const data = await res.json()
-        const isBranchScopedOrder = mode === 'order' && Boolean(selectedBranch)
-        const branchCompositeKey = selectedOrder && selectedBranch
-          ? buildOrderBranchMasterId(selectedOrder.order_no, selectedBranch.branch_no)
-          : ''
-        const rawBranchCompositeKey = selectedOrder && selectedBranch
-          ? `${selectedOrder.order_no}-${selectedBranch.branch_no}`
-          : ''
 
-        const branchLegacyCompositeKey = selectedOrder && selectedBranch
-          ? buildOrderBranchMasterIdLegacy(selectedOrder.order_no, selectedBranch.branch_no)
-          : ''
+        // 準用時は過去指令の明細をそのまま全件表示（枝番絞り込みなし）
+        const isBranchScopedOrder =
+          !reusePastCost && mode === 'order' && Boolean(selectedBranch)
+        const branchOrderNo = loadOrder?.order_no || selectedOrder?.order_no || ''
+        const branchCompositeKey =
+          !reusePastCost && selectedOrder && selectedBranch
+            ? buildOrderBranchMasterId(selectedOrder.order_no, selectedBranch.branch_no)
+            : ''
+        const rawBranchCompositeKey =
+          !reusePastCost && selectedOrder && selectedBranch
+            ? `${selectedOrder.order_no}-${selectedBranch.branch_no}`
+            : ''
+
+        const branchLegacyCompositeKey =
+          !reusePastCost && selectedOrder && selectedBranch
+            ? buildOrderBranchMasterIdLegacy(selectedOrder.order_no, selectedBranch.branch_no)
+            : ''
 
         let branchKeyCandidates = [
           branchCompositeKey,
@@ -1135,7 +1245,9 @@ export default function WorkOrderCostPage() {
               for (const key of branchKeyCandidates) {
                 const matched = grouped.get(key)
                 if (matched && matched.length > 0) {
-                  const orderTypeItems = matched.filter((it: any) => String(it.master_type || '').trim() === '指令原価')
+                  const orderTypeItems = matched.filter(
+                    (it: any) => String(it.master_type || '').trim() === '指令原価'
+                  )
                   directBranchItems = orderTypeItems.length > 0 ? orderTypeItems : matched
                   break
                 }
@@ -1146,10 +1258,18 @@ export default function WorkOrderCostPage() {
 
         if (data.found || directBranchItems.length > 0) {
           const filteredSourceItems = (() => {
+            if (reusePastCost) {
+              return (data.items || []).filter(
+                (it: any) =>
+                  !it.master_type ||
+                  String(it.master_type).trim() === '指令原価' ||
+                  String(it.master_type).trim() === ''
+              )
+            }
             if (isBranchScopedOrder) {
               if (directBranchItems.length > 0) return directBranchItems
               const groupedByMasterId = new Map<string, any[]>()
-              for (const it of (data.items || [])) {
+              for (const it of data.items || []) {
                 const key = String(it.master_id || '').trim()
                 const list = groupedByMasterId.get(key) ?? []
                 list.push(it)
@@ -1164,9 +1284,8 @@ export default function WorkOrderCostPage() {
             return data.items || []
           })()
 
-          // header/itemsを画面にセット
           const items = filteredSourceItems.map((it: any) => ({
-            id: it.id || crypto.randomUUID(),
+            id: crypto.randomUUID(),
             product_code: it.product_code || '',
             part_name: it.part_name || '',
             spec: it.spec || '',
@@ -1180,10 +1299,15 @@ export default function WorkOrderCostPage() {
 
           setPartRows(items.length > 0 ? items : [createPartRow()])
 
-          // BOM時は枝番で絞った行から工賃系を復元、通常はヘッダ合計を使用
-          if (isBranchScopedOrder && selectedBranch) {
-            const laborFromItems = filteredSourceItems.reduce((sum: number, it: any) => sum + Number(it.labor_cost || 0), 0)
-            const indirectFromItems = filteredSourceItems.reduce((sum: number, it: any) => sum + Number(it.indirect_cost || 0), 0)
+          if (!reusePastCost && isBranchScopedOrder && selectedBranch) {
+            const laborFromItems = filteredSourceItems.reduce(
+              (sum: number, it: any) => sum + Number(it.labor_cost || 0),
+              0
+            )
+            const indirectFromItems = filteredSourceItems.reduce(
+              (sum: number, it: any) => sum + Number(it.indirect_cost || 0),
+              0
+            )
             const autoLabor = calculateAutoLaborCost()
             if (selectedBranch.branch_no === '00') {
               const savedHeaderLabor = Number(data.header?.total_labor_cost || 0)
@@ -1213,18 +1337,21 @@ export default function WorkOrderCostPage() {
           } else if (data.header) {
             setLaborIndirectCost(String(data.header.total_indirect_cost || 0))
             const savedLabor = Number(data.header.total_labor_cost || 0)
-            const autoLabor = calculateAutoLaborCost()
+            const autoLabor = reusePastCost ? savedLabor : calculateAutoLaborCost()
             setLaborCost(String(savedLabor > 0 ? savedLabor : autoLabor))
             if (data.header.labor_cost_type) {
               setLaborCostType(data.header.labor_cost_type)
             }
           }
-        } else {
-          // 新規: 自動計算（工賃）を反映
+        } else if (!reusePastCost) {
           setPartRows([createPartRow()])
           setLaborIndirectCost('0')
           setLaborCost(String(calculateAutoLaborCost()))
           setLaborCostType('加')
+        } else {
+          alert(
+            `過去指令 ${branchOrderNo || costLoadWorkOrderId} に原価データが見つかりませんでした`
+          )
         }
       } catch (error) {
         console.error('load cost error:', error)
@@ -1240,6 +1367,24 @@ export default function WorkOrderCostPage() {
       if (!selectedWorkOrderId) {
         alert('D指令を選択してください')
         return
+      }
+      if (reusePastCost && !sourceWorkOrderId) {
+        alert('準用する過去指令を選択してください')
+        return
+      }
+      if (reusePastCost && sourceWorkOrderId) {
+        const sourceLabel =
+          sourceWorkOrder?.order_no ||
+          rankedPastCostOptions.find((row) => row.work_order_id === sourceWorkOrderId)
+            ?.order_no ||
+          sourceWorkOrderId
+        if (
+          !confirm(
+            `過去指令 ${sourceLabel} の原価を、保存先 D指令 ${selectedOrder?.order_no || ''} として保存します。よろしいですか？`
+          )
+        ) {
+          return
+        }
       }
     } else {
       // line モードではパーツ選択が必須
@@ -1366,7 +1511,15 @@ export default function WorkOrderCostPage() {
           const text = await res.text()
           console.debug('work-order-costs PUT', res.status, text)
           if (res.ok) {
-            alert('更新しました')
+            alert(
+              reusePastCost
+                ? `過去原価を準用し、D指令 ${selectedOrder?.order_no || ''} に更新しました`
+                : '更新しました'
+            )
+            if (reusePastCost) {
+              setReusePastCost(false)
+              setSourceWorkOrderId('')
+            }
           } else {
             alert('更新に失敗しました')
           }
@@ -1380,7 +1533,15 @@ export default function WorkOrderCostPage() {
           const text = await res.text()
           console.debug('work-order-costs POST', res.status, text)
           if (res.ok) {
-            alert('登録しました')
+            alert(
+              reusePastCost
+                ? `過去原価を準用し、D指令 ${selectedOrder?.order_no || ''} に登録しました`
+                : '登録しました'
+            )
+            if (reusePastCost) {
+              setReusePastCost(false)
+              setSourceWorkOrderId('')
+            }
           } else {
             alert('登録に失敗しました')
           }
@@ -1681,7 +1842,13 @@ export default function WorkOrderCostPage() {
                     <>
                       <select
                         value={selectedWorkOrderId}
-                        onChange={(event) => setSelectedWorkOrderId(event.target.value)}
+                        onChange={(event) => {
+                          const nextId = event.target.value
+                          setSelectedWorkOrderId(nextId)
+                          if (sourceWorkOrderId && sourceWorkOrderId === nextId) {
+                            setSourceWorkOrderId('')
+                          }
+                        }}
                         className="flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-500/50 focus:outline-none"
                       >
                         <option value="">D指令を選択してください</option>
@@ -1733,6 +1900,71 @@ export default function WorkOrderCostPage() {
                   </select>
                 </div>
               )}
+              {mode === 'order' && (
+                <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/30 p-3 space-y-3">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={reusePastCost}
+                      disabled={!selectedWorkOrderId}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        setReusePastCost(checked)
+                        if (!checked) {
+                          setSourceWorkOrderId('')
+                        }
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-amber-400 text-amber-500 focus:ring-amber-400"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-amber-100">
+                        過去原価計算を準用する
+                      </span>
+                      <span className="block text-xs text-amber-200/80 mt-0.5">
+                        類似する過去D指令の原価を読み込み、いま選択中のD指令（
+                        {selectedOrder?.order_no || '未選択'}
+                        ）として保存します
+                      </span>
+                    </span>
+                  </label>
+                  {reusePastCost && (
+                    <div>
+                      <label className="text-xs font-semibold text-amber-200">
+                        準用する過去指令番号
+                      </label>
+                      <select
+                        value={sourceWorkOrderId}
+                        onChange={(event) => setSourceWorkOrderId(event.target.value)}
+                        className="mt-1 w-full rounded-xl border-2 border-amber-500/50 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/40 focus:outline-none"
+                      >
+                        <option value="">過去指令を選択してください</option>
+                        {rankedPastCostOptions.map((row) => (
+                          <option key={row.work_order_id} value={row.work_order_id}>
+                            {row.order_no}
+                            {row.product_name ? ` - ${row.product_name}` : ''}
+                            {row.model ? ` / ${row.model}` : ''}
+                            {`（¥${Math.round(row.total_cost).toLocaleString()}）`}
+                          </option>
+                        ))}
+                      </select>
+                      {pastCostsLoading && (
+                        <p className="mt-1 text-xs text-amber-200/70">過去原価一覧を読み込み中...</p>
+                      )}
+                      {!pastCostsLoading && rankedPastCostOptions.length === 0 && (
+                        <p className="mt-1 text-xs text-amber-200/70">
+                          準用できる過去原価がありません
+                        </p>
+                      )}
+                      {sourceWorkOrderId && (
+                        <p className="mt-2 text-xs text-amber-100">
+                          表示中: 過去指令の原価 → 保存先は{' '}
+                          <span className="font-semibold">{selectedOrder?.order_no}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {isLoading && (
                 <p className="mt-2 text-xs text-slate-400">読み込み中...</p>
               )}
@@ -1750,6 +1982,14 @@ export default function WorkOrderCostPage() {
                   <>
                     <p className="text-sm text-slate-400">型式: {selectedOrder?.model || '-'}</p>
                     <p className="text-sm text-slate-400">数量: {selectedOrder?.qty?.toLocaleString() || '-'}</p>
+                    {reusePastCost && sourceWorkOrderId && (
+                      <p className="text-sm text-amber-300">
+                        準用元: {sourceWorkOrder?.order_no ||
+                          rankedPastCostOptions.find((r) => r.work_order_id === sourceWorkOrderId)
+                            ?.order_no ||
+                          sourceWorkOrderId}
+                      </p>
+                    )}
                     {(selectedOrder?.cost_mode === 'bom' || branchOptions.length > 0) && (
                       <p className="text-sm text-violet-300">
                         枝番: {selectedBranch ? `${selectedBranch.branch_no} / ${selectedBranch.part_name || '部品名未設定'}` : '未選択'}
