@@ -652,6 +652,9 @@ export default function WorkOrderCostPage() {
         }))
         setBranchOptions(mapped)
         setSelectedBranchId((prev) => {
+          // direct 原価は枝番で絞り込まない。BOM のときだけ既定枝番を選ぶ
+          const order = workOrders.find((item) => item.id === selectedWorkOrderId)
+          if (order?.cost_mode !== 'bom') return ''
           if (prev && mapped.some((branch) => branch.id === prev)) return prev
           return mapped[0]?.id || ''
         })
@@ -1200,20 +1203,24 @@ export default function WorkOrderCostPage() {
         const data = await res.json()
 
         // 準用時は過去指令の明細をそのまま全件表示（枝番絞り込みなし）
+        // 通常時も BOM で枝番選択中のみ絞る。direct は常に全明細を表示する。
         const isBranchScopedOrder =
-          !reusePastCost && mode === 'order' && Boolean(selectedBranch)
+          !reusePastCost &&
+          mode === 'order' &&
+          selectedOrder?.cost_mode === 'bom' &&
+          Boolean(selectedBranch)
         const branchOrderNo = loadOrder?.order_no || selectedOrder?.order_no || ''
         const branchCompositeKey =
-          !reusePastCost && selectedOrder && selectedBranch
+          isBranchScopedOrder && selectedOrder && selectedBranch
             ? buildOrderBranchMasterId(selectedOrder.order_no, selectedBranch.branch_no)
             : ''
         const rawBranchCompositeKey =
-          !reusePastCost && selectedOrder && selectedBranch
+          isBranchScopedOrder && selectedOrder && selectedBranch
             ? `${selectedOrder.order_no}-${selectedBranch.branch_no}`
             : ''
 
         const branchLegacyCompositeKey =
-          !reusePastCost && selectedOrder && selectedBranch
+          isBranchScopedOrder && selectedOrder && selectedBranch
             ? buildOrderBranchMasterIdLegacy(selectedOrder.order_no, selectedBranch.branch_no)
             : ''
 
@@ -1256,18 +1263,33 @@ export default function WorkOrderCostPage() {
           }
         }
 
+        const orderLevelItems = (data.items || []).filter((it: any) => {
+          const masterType = String(it.master_type || '').trim()
+          const masterId = String(it.master_id || '').trim()
+          const isOrderCost = !masterType || masterType === '指令原価'
+          if (!isOrderCost) return false
+          if (!selectedOrder?.order_no) return true
+          return (
+            masterId === selectedOrder.order_no ||
+            masterId.startsWith(`${selectedOrder.order_no}-`) ||
+            !masterId
+          )
+        })
+
         if (data.found || directBranchItems.length > 0) {
+          let usedBranchItems = false
           const filteredSourceItems = (() => {
             if (reusePastCost) {
-              return (data.items || []).filter(
-                (it: any) =>
-                  !it.master_type ||
-                  String(it.master_type).trim() === '指令原価' ||
-                  String(it.master_type).trim() === ''
-              )
+              return (data.items || []).filter((it: any) => {
+                const masterType = String(it.master_type || '').trim()
+                return !masterType || masterType === '指令原価'
+              })
             }
             if (isBranchScopedOrder) {
-              if (directBranchItems.length > 0) return directBranchItems
+              if (directBranchItems.length > 0) {
+                usedBranchItems = true
+                return directBranchItems
+              }
               const groupedByMasterId = new Map<string, any[]>()
               for (const it of data.items || []) {
                 const key = String(it.master_id || '').trim()
@@ -1277,11 +1299,16 @@ export default function WorkOrderCostPage() {
               }
               for (const key of branchKeyCandidates) {
                 const matched = groupedByMasterId.get(key)
-                if (matched && matched.length > 0) return matched
+                if (matched && matched.length > 0) {
+                  usedBranchItems = true
+                  return matched
+                }
               }
-              return []
+              // 枝番に一致しない場合でも、指令の原価明細があれば表示を空にしない
+              if (orderLevelItems.length > 0) return orderLevelItems
+              return data.items || []
             }
-            return data.items || []
+            return orderLevelItems.length > 0 ? orderLevelItems : data.items || []
           })()
 
           const items = filteredSourceItems.map((it: any) => ({
@@ -1299,7 +1326,7 @@ export default function WorkOrderCostPage() {
 
           setPartRows(items.length > 0 ? items : [createPartRow()])
 
-          if (!reusePastCost && isBranchScopedOrder && selectedBranch) {
+          if (!reusePastCost && isBranchScopedOrder && selectedBranch && usedBranchItems) {
             const laborFromItems = filteredSourceItems.reduce(
               (sum: number, it: any) => sum + Number(it.labor_cost || 0),
               0
