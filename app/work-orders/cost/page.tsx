@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
 
 type WorkOrderOption = {
@@ -125,13 +124,7 @@ export default function WorkOrderCostPage() {
   const [searchResults, setSearchResults] = useState<{[key: string]: Product[]}>({})
   const [isSearching, setIsSearching] = useState(false)
   const timersRef = useRef<Record<string, number>>({})
-  const searchParams = useSearchParams()
-  const initialModeParam = searchParams.get('mode')
-  const initialMode =
-    initialModeParam === 'line' || initialModeParam === 'parts' || initialModeParam === 'order'
-      ? initialModeParam
-      : 'order'
-  const [mode, setMode] = useState<'order' | 'line' | 'parts'>(initialMode)
+  const [mode, setMode] = useState<'order' | 'line' | 'parts'>('order')
   const [heaterModels, setHeaterModels] = useState<
     Array<{ model: string; name: string | null }>
   >([])
