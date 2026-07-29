@@ -43,7 +43,11 @@ interface PartsMaster {
   product_code: string | null;
   part_name: string;
   spec: string | null;
+  cost_price?: number | null;
+  shelf_no?: string | null;
 }
+
+type PartInputMode = 'existing' | 'new';
 
 export default function BomPage() {
   const searchParams = useSearchParams();
@@ -52,25 +56,48 @@ export default function BomPage() {
   const [models, setModels] = useState<HeaterModel[]>([]);
   const [parts, setParts] = useState<PartsMaster[]>([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [partInputMode, setPartInputMode] = useState<PartInputMode>('existing');
   const [formData, setFormData] = useState<{
     model: string;
     part_key: string;
     quantity: number;
     product_code: string;
     cost_price: number;
+    part_name: string;
+    spec: string;
   }>({
     model: initialModel,
     part_key: '',
     quantity: 0,
     product_code: '',
     cost_price: 0,
+    part_name: '',
+    spec: '',
   });
   const [filterModel, setFilterModel] = useState(initialModel);
   /** 機種構成一覧の印刷に印字する「時点原価」ラベル（印刷ボタン押下時に確定） */
   const [modelListCostAsOfLabel, setModelListCostAsOfLabel] = useState<string | null>(null);
+
+  const emptyForm = (model = '') => ({
+    model,
+    part_key: '',
+    quantity: 0,
+    product_code: '',
+    cost_price: 0,
+    part_name: '',
+    spec: '',
+  });
+
+  const resetCreateForm = () => {
+    setFormData(emptyForm(filterModel || formData.model));
+    setPartInputMode('existing');
+    setIsEditing(false);
+    setEditingKey(null);
+  };
 
   useEffect(() => {
     fetchBom();
@@ -134,37 +161,75 @@ export default function BomPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.model || !formData.part_key) {
+    if (!formData.model || !formData.part_key.trim()) {
       setError('機種と部品は必須です');
       return;
     }
+    if (partInputMode === 'new' && !formData.part_name.trim()) {
+      setError('新規部品の品名は必須です');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
     try {
+      const partKey = formData.part_key.trim();
+
+      if (partInputMode === 'new') {
+        const partRes = await fetch('/api/heater/parts-master', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            part_key: partKey,
+            part_name: formData.part_name.trim(),
+            product_code: formData.product_code.trim() || null,
+            spec: formData.spec.trim() || null,
+            cost_price: Number(formData.cost_price) || 0,
+            shelf_no: null,
+          }),
+        });
+        if (!partRes.ok) {
+          const errJson = await partRes.json().catch(() => ({}));
+          throw new Error(errJson.error || '部品マスタの新規登録に失敗しました');
+        }
+      }
+
       const res = await fetch('/api/heater/bom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          model: formData.model,
+          part_key: partKey,
+          quantity: Number(formData.quantity) || 0,
+        }),
       });
-      if (!res.ok) throw new Error('Failed to create BOM item');
-      await fetchBom();
-      setFormData({ model: '', part_key: '', quantity: 0, product_code: '', cost_price: 0 });
-      setIsEditing(false);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'BOM行の登録に失敗しました');
+      }
+
+      await Promise.all([fetchBom(), fetchParts()]);
+      resetCreateForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleEdit = (item: BomItem) => {
-    console.log('Edit button clicked:', item);
     setEditingKey(`${item.model}-${item.part_key}`);
+    setPartInputMode('existing');
     setFormData({
       model: item.model,
       part_key: item.part_key,
       quantity: item.quantity,
       product_code: item.product_code || '',
       cost_price: item.cost_price || 0,
+      part_name: item.part_name || '',
+      spec: item.spec || '',
     });
     setIsEditing(true);
-    // スクロールしてフォームに焦点を当てる
     setTimeout(() => {
       document.querySelector('form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
@@ -173,20 +238,39 @@ export default function BomPage() {
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingKey) return;
+    setSaving(true);
+    setError(null);
     try {
       const res = await fetch('/api/heater/bom', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          model: formData.model,
+          part_key: formData.part_key,
+          quantity: Number(formData.quantity) || 0,
+          cost_price: Number(formData.cost_price) || 0,
+        }),
       });
       if (!res.ok) throw new Error('Failed to update BOM item');
       await fetchBom();
-      setFormData({ model: '', part_key: '', quantity: 0, product_code: '', cost_price: 0 });
-      setEditingKey(null);
-      setIsEditing(false);
+      resetCreateForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const handleSelectExistingPart = (partKey: string) => {
+    const selected = parts.find((p) => p.part_key === partKey);
+    setFormData((prev) => ({
+      ...prev,
+      part_key: partKey,
+      product_code: selected?.product_code || '',
+      cost_price: Number(selected?.cost_price || 0),
+      part_name: selected?.part_name || '',
+      spec: selected?.spec || '',
+    }));
   };
 
   const handleDelete = async (model: string, partKey: string) => {
@@ -420,6 +504,53 @@ export default function BomPage() {
         <div className="bg-slate-800/70 border border-slate-600/50 rounded-2xl p-5">
           <h2 className="text-lg font-semibold text-white mb-4">② {isEditing ? 'BOMを編集' : '新しいBOMを追加'}</h2>
           <form onSubmit={isEditing ? handleUpdate : handleCreate} className="space-y-4">
+            {!isEditing && (
+              <div className="inline-flex rounded-full bg-slate-900 p-1 border border-slate-600">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPartInputMode('existing');
+                    setFormData((prev) => ({
+                      ...prev,
+                      part_key: '',
+                      product_code: '',
+                      cost_price: 0,
+                      part_name: '',
+                      spec: '',
+                    }));
+                  }}
+                  className={`px-4 py-1.5 rounded-full text-sm font-semibold transition ${
+                    partInputMode === 'existing'
+                      ? 'bg-violet-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  既存部品を選択
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPartInputMode('new');
+                    setFormData((prev) => ({
+                      ...prev,
+                      part_key: '',
+                      product_code: '',
+                      cost_price: 0,
+                      part_name: '',
+                      spec: '',
+                    }));
+                  }}
+                  className={`px-4 py-1.5 rounded-full text-sm font-semibold transition ${
+                    partInputMode === 'new'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  新規部品を登録
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">機種 *</label>
@@ -437,22 +568,37 @@ export default function BomPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">部品 *</label>
-                <select
-                  value={formData.part_key}
-                  onChange={(e) => setFormData({ ...formData, part_key: e.target.value })}
-                  disabled={isEditing}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
-                >
-                  <option value="">選択してください</option>
-                  {parts.map((p) => (
-                    <option key={p.part_key} value={p.part_key}>
-                      {p.part_name} ({p.product_code || p.part_key})
-                    </option>
-                  ))}
-                </select>
-              </div>
+
+              {isEditing || partInputMode === 'existing' ? (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">部品 *</label>
+                  <select
+                    value={formData.part_key}
+                    onChange={(e) => handleSelectExistingPart(e.target.value)}
+                    disabled={isEditing}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+                  >
+                    <option value="">選択してください</option>
+                    {parts.map((p) => (
+                      <option key={p.part_key} value={p.part_key}>
+                        {p.part_name} ({p.product_code || p.part_key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">部品キー *</label>
+                  <input
+                    type="text"
+                    value={formData.part_key}
+                    onChange={(e) => setFormData({ ...formData, part_key: e.target.value })}
+                    placeholder="例: SGR300-PANEL"
+                    className="w-full px-3 py-2 bg-slate-900 border border-emerald-600/60 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-slate-400 mb-1">1台当たり必要数</label>
                 <input
@@ -460,50 +606,100 @@ export default function BomPage() {
                   step="0.01"
                   value={formData.quantity}
                   onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })}
-                  disabled={isEditing}
                   min="0"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">部品キー</label>
-                <input
-                  type="text"
-                  value={formData.part_key}
-                  disabled={true}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-slate-300"
-                />
+
+            {!isEditing && partInputMode === 'new' && (
+              <div className="rounded-xl border border-emerald-600/40 bg-emerald-950/20 p-4 space-y-4">
+                <p className="text-xs text-emerald-200">
+                  パーツリストに未登録の部品を、BOM追加と同時に新規登録します。
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">品名 *</label>
+                    <input
+                      type="text"
+                      value={formData.part_name}
+                      onChange={(e) => setFormData({ ...formData, part_name: e.target.value })}
+                      placeholder="部品名"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">製品コード</label>
+                    <input
+                      type="text"
+                      value={formData.product_code}
+                      onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
+                      placeholder="任意"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">規格</label>
+                    <input
+                      type="text"
+                      value={formData.spec}
+                      onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
+                      placeholder="任意"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">原価単価 (¥)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.cost_price}
+                      onChange={(e) => setFormData({ ...formData, cost_price: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">原価単価 (¥)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.cost_price}
-                  onChange={(e) => setFormData({ ...formData, cost_price: parseFloat(e.target.value) || 0 })}
-                  disabled={!isEditing}
-                  min="0"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
-                />
+            )}
+
+            {(isEditing || partInputMode === 'existing') && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">部品キー</label>
+                  <input
+                    type="text"
+                    value={formData.part_key}
+                    disabled={true}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">原価単価 (¥)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.cost_price}
+                    onChange={(e) => setFormData({ ...formData, cost_price: parseFloat(e.target.value) || 0 })}
+                    disabled={!isEditing}
+                    min="0"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+                  />
+                </div>
               </div>
-            </div>
+            )}
             <div className="flex flex-wrap gap-2 pt-2">
               <button
                 type="submit"
-                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition"
+                disabled={saving}
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold text-sm transition"
               >
-                {isEditing ? '更新' : '登録'}
+                {saving ? '処理中…' : isEditing ? '更新' : partInputMode === 'new' ? '部品＋BOM登録' : '登録'}
               </button>
               {isEditing && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setEditingKey(null);
-                    setFormData({ model: '', part_key: '', quantity: 0, product_code: '', cost_price: 0 });
-                  }}
+                  onClick={resetCreateForm}
                   className="px-5 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold text-sm transition"
                 >
                   キャンセル
