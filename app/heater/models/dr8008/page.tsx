@@ -16,6 +16,20 @@ type WorkOrder = {
   bom_model: string | null
   cost_mode: string | null
   qty: number | null
+  is_cost_template?: boolean | null
+}
+
+type CostTemplateInfo = {
+  work_order_id: string
+  order_no: string
+  product_name: string | null
+  model: string | null
+  bom_model: string | null
+  cost_mode: string | null
+  is_cost_template: boolean
+  has_saved_cost: boolean
+  total_cost: number
+  updated_at: string | null
 }
 
 type CostItem = {
@@ -64,6 +78,9 @@ type SavedCostHeader = {
   cost_saved_at: string | null
   material_total: number
   labor_total: number
+  bom_labor_total: number
+  assembly_labor_total: number
+  assembly_labor_minutes: number
   indirect_total: number
   grand_total: number
 }
@@ -81,6 +98,28 @@ type BreakdownData = {
   current_cost_price: number | null
   grand_total: number
   sections: Section[]
+}
+
+type CostSource = 'order' | 'heater_model'
+
+type HeaterModelOption = {
+  model: string
+  name: string | null
+  product_category?: string | null
+}
+
+type ModelCostRow = {
+  model: string
+  name: string | null
+  product_category: string
+  bom_part_count: number
+  bom_total: number
+  assembly_labor_total: number
+  unit_total: number
+  order_count: number
+  qty_total: number
+  production_total: number
+  current_cost_price: number | null
 }
 
 // =============================================================
@@ -111,31 +150,105 @@ export default function WorkOrderBomCostPage() {
   const [summaryRows, setSummaryRows] = useState<OrderSummaryRow[]>([])
   const [summaryTotals, setSummaryTotals] = useState<OrderSummaryTotals | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
+  const [costTemplate, setCostTemplate] = useState<CostTemplateInfo | null>(null)
+  const [templateLoading, setTemplateLoading] = useState(false)
+  const [applyingTemplate, setApplyingTemplate] = useState(false)
+  const [settingTemplate, setSettingTemplate] = useState(false)
+  const [costSource, setCostSource] = useState<CostSource>('order')
+  const [heaterModels, setHeaterModels] = useState<HeaterModelOption[]>([])
+  const [selectedHeaterModel, setSelectedHeaterModel] = useState('')
+  const [modelCostRows, setModelCostRows] = useState<ModelCostRow[]>([])
+  const [modelCostTotals, setModelCostTotals] = useState<{
+    bom_total: number
+    unit_total: number
+    production_total: number
+    order_count: number
+    qty_total: number
+  } | null>(null)
+  const [modelMeta, setModelMeta] = useState<{
+    name: string | null
+    product_category: string | null
+    assembly_labor_total: number
+    order_count: number
+    qty_total: number
+    unit_total: number
+  } | null>(null)
 
-  // D指令一覧を取得
+  // D指令一覧・機種マスタを取得
   useEffect(() => {
     fetch('/api/work-orders')
       .then(r => r.json())
       .then(d => setWorkOrders(Array.isArray(d) ? d : []))
       .catch(() => {})
+    fetch('/api/heater/models')
+      .then(r => r.json())
+      .then(d => setHeaterModels(Array.isArray(d) ? d : []))
+      .catch(() => setHeaterModels([]))
   }, [])
 
-  // URL パラメータから初期D指令 ID を設定
+  // URL パラメータから初期D指令 ID / 機種を設定
   useEffect(() => {
     const id = searchParams.get('work_order_id')
-    if (id) setSelectedWorkOrderId(id)
+    if (id) {
+      setCostSource('order')
+      setSelectedWorkOrderId(id)
+    }
+    const model = searchParams.get('model')?.trim()
+    if (model) {
+      setCostSource('heater_model')
+      setSelectedHeaterModel(model)
+      setBomModelInput(model)
+      setSelectedWorkOrderId('')
+      setSelectedWorkOrder(null)
+    }
+    const source = searchParams.get('source')?.trim()
+    if (!id && !model && (source === 'heater_model' || source === 'model')) {
+      setCostSource('heater_model')
+    }
   }, [searchParams])
+
+  // 機種マスタ選択時に自動集計（枝番別表示）
+  useEffect(() => {
+    if (costSource !== 'heater_model' || !selectedHeaterModel || viewMode !== 'branch') return
+    void load(selectedHeaterModel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costSource, selectedHeaterModel, viewMode])
 
   // D指令が選択されたら bom_model をセット
   useEffect(() => {
     if (!selectedWorkOrderId) {
       setSelectedWorkOrder(null)
+      setCostTemplate(null)
       return
     }
     const wo = workOrders.find(w => w.id === selectedWorkOrderId) ?? null
     setSelectedWorkOrder(wo)
     if (wo?.bom_model) setBomModelInput(wo.bom_model)
   }, [selectedWorkOrderId, workOrders])
+
+  // 製品名に一致する原価テンプレートを検索
+  useEffect(() => {
+    if (!selectedWorkOrderId) {
+      setCostTemplate(null)
+      return
+    }
+    let cancelled = false
+    setTemplateLoading(true)
+    fetch(`/api/work-orders/cost-template?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!cancelled) setCostTemplate(json.template ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCostTemplate(null)
+      })
+      .finally(() => {
+        if (!cancelled) setTemplateLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWorkOrderId])
 
   const applyOrderCostResponse = (orderJson: any, wo: WorkOrder | null) => {
     const sections: Section[] = (orderJson.branches || []).map((branch: any) => ({
@@ -175,6 +288,9 @@ export default function WorkOrderBomCostPage() {
       cost_saved_at: orderJson.cost_saved_at ?? null,
       material_total: Number(orderJson.material_total || 0),
       labor_total: Number(orderJson.labor_total || 0),
+      bom_labor_total: Number(orderJson.bom_labor_total || 0),
+      assembly_labor_total: Number(orderJson.assembly_labor_total || orderJson.order_labor_cost || 0),
+      assembly_labor_minutes: Number(orderJson.assembly_labor_minutes || 0),
       indirect_total: Number(orderJson.indirect_total || 0),
       grand_total: Number(orderJson.grand_total || 0),
     })
@@ -203,8 +319,31 @@ export default function WorkOrderBomCostPage() {
     }
   }
 
+
+  const loadModelCostList = async () => {
+    setSummaryLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/heater/models/cost?list=1')
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || '機種原価一覧の取得に失敗しました')
+      setModelCostRows(Array.isArray(json.rows) ? json.rows : [])
+      setModelCostTotals(json.totals ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '機種原価一覧の取得に失敗しました')
+      setModelCostRows([])
+      setModelCostTotals(null)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (viewMode !== 'list') return
+    if (costSource === 'heater_model') {
+      void loadModelCostList()
+      return
+    }
     let cancelled = false
     const run = async () => {
       setSummaryLoading(true)
@@ -235,7 +374,7 @@ export default function WorkOrderBomCostPage() {
     return () => {
       cancelled = true
     }
-  }, [viewMode, workOrderListFilter])
+  }, [viewMode, workOrderListFilter, costSource])
 
   const handleSelectSummaryRow = async (row: OrderSummaryRow) => {
     setSelectedWorkOrderId(row.work_order_id)
@@ -261,6 +400,88 @@ export default function WorkOrderBomCostPage() {
       setError(e instanceof Error ? e.message : '取得に失敗しました')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleApplyTemplate = async () => {
+    if (!selectedWorkOrderId || !costTemplate) return
+    const label = `${costTemplate.order_no}${costTemplate.product_name ? `（${costTemplate.product_name}）` : ''}`
+    if (
+      !confirm(
+        `製品原価テンプレート ${label} の内訳をこのD指令（${selectedWorkOrder?.order_no || ''}）に取り込みます。\n既存の枝番・原価明細は上書きされます。よろしいですか？`
+      )
+    ) {
+      return
+    }
+    setApplyingTemplate(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/work-orders/cost-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply_template',
+          work_order_id: selectedWorkOrderId,
+          template_work_order_id: costTemplate.work_order_id,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'テンプレート取込に失敗しました')
+      }
+      setSaveMessage(
+        `テンプレート ${costTemplate.order_no} から ${json.item_count ?? 0} 件の明細を取り込みました（合計 ¥${Number(json.total_cost || 0).toLocaleString()}）`
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'テンプレート取込中にエラーが発生しました')
+    } finally {
+      setApplyingTemplate(false)
+    }
+  }
+
+  const handleSetAsTemplate = async (enabled: boolean) => {
+    if (!selectedWorkOrderId) return
+    if (enabled && !savedCostHeader?.has_saved_cost) {
+      setError('原価を確定保存してからテンプレート登録してください')
+      return
+    }
+    const message = enabled
+      ? `このD指令（${selectedWorkOrder?.order_no || ''}）を「${selectedWorkOrder?.product_name || '製品名未設定'}」の原価テンプレートとして登録します。`
+      : `このD指令の原価テンプレート登録を解除します。`
+    if (!confirm(message)) return
+
+    setSettingTemplate(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/work-orders/cost-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_template',
+          work_order_id: selectedWorkOrderId,
+          enabled,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'テンプレート設定に失敗しました')
+      }
+      setSelectedWorkOrder((prev) =>
+        prev ? { ...prev, is_cost_template: enabled } : prev
+      )
+      setSaveMessage(
+        enabled
+          ? `「${selectedWorkOrder?.product_name || selectedWorkOrder?.order_no}」の原価テンプレートとして登録しました`
+          : '原価テンプレート登録を解除しました'
+      )
+      const listRes = await fetch('/api/work-orders')
+      const listJson = await listRes.json()
+      if (Array.isArray(listJson)) setWorkOrders(listJson)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'テンプレート設定中にエラーが発生しました')
+    } finally {
+      setSettingTemplate(false)
     }
   }
 
@@ -303,7 +524,7 @@ export default function WorkOrderBomCostPage() {
     try {
       // D指令が選択されている場合は、D指令マスタ（work_order_branches）ベースで集計する。
       // heater_bom はL指令側用途として切り分ける。
-      if (selectedWorkOrderId) {
+      if (costSource === 'order' && selectedWorkOrderId) {
         const orderRes = await fetch(
           `/api/work-orders/bom-cost?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`
         )
@@ -328,22 +549,68 @@ export default function WorkOrderBomCostPage() {
         return
       }
 
-      const targetModel = (model ?? bomModelInput).trim()
+      const targetModel = (
+        model ||
+        (costSource === 'heater_model' ? selectedHeaterModel : '') ||
+        bomModelInput
+      ).trim()
       if (!targetModel) {
-        setError('BOMモデルを入力してください（例: DR8-008）')
+        setError(
+          costSource === 'heater_model'
+            ? '機種マスタを選択してください'
+            : 'BOMモデルを入力してください（例: DR8-008）'
+        )
         return
       }
 
-      const res = await fetch(
-        `/api/heater/bom/cost-breakdown?model=${encodeURIComponent(targetModel)}`
-      )
+      const [res, metaRes] = await Promise.all([
+        fetch(`/api/heater/bom/cost-breakdown?model=${encodeURIComponent(targetModel)}`),
+        fetch(`/api/heater/models/cost?model=${encodeURIComponent(targetModel)}`),
+      ])
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || `HTTP ${res.status}`)
       }
       const json: BreakdownData = await res.json()
       setData(json)
-      setExpandedSections(new Set(json.sections.map(s => s.part_key)))
+      setExpandedSections(new Set(json.sections.map((s) => s.part_key)))
+
+      const metaJson = metaRes.ok ? await metaRes.json() : null
+      if (metaJson && !metaJson.error) {
+        const assembly = Number(metaJson.assembly_labor_total || 0)
+        setModelMeta({
+          name: metaJson.name ?? null,
+          product_category: metaJson.product_category ?? null,
+          assembly_labor_total: assembly,
+          order_count: Number(metaJson.order_count || 0),
+          qty_total: Number(metaJson.qty_total || 0),
+          unit_total: Number(metaJson.unit_total || json.grand_total),
+        })
+        setSavedCostHeader({
+          has_saved_cost: false,
+          cost_saved_at: null,
+          material_total: Number(metaJson.material_total || 0),
+          labor_total: Number(metaJson.bom_labor_total || 0) + assembly,
+          bom_labor_total: Number(metaJson.bom_labor_total || 0),
+          assembly_labor_total: assembly,
+          assembly_labor_minutes: 0,
+          indirect_total: Number(metaJson.indirect_total || 0),
+          grand_total: Number(metaJson.unit_total || json.grand_total),
+        })
+      } else {
+        setModelMeta(null)
+        setSavedCostHeader({
+          has_saved_cost: false,
+          cost_saved_at: null,
+          material_total: 0,
+          labor_total: 0,
+          bom_labor_total: 0,
+          assembly_labor_total: 0,
+          assembly_labor_minutes: 0,
+          grand_total: Number(json.grand_total || 0),
+          indirect_total: 0,
+        })
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '取得に失敗しました')
     } finally {
@@ -464,15 +731,15 @@ export default function WorkOrderBomCostPage() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <span className="px-3 py-1 rounded-full bg-violet-500/20 border border-violet-400/40 text-violet-300 text-xs font-bold tracking-widest uppercase">
-              BOM集計
+              標準原価
             </span>
-            <span className="text-slate-400 text-sm">D指令原価計算</span>
+            <span className="text-slate-400 text-sm">機種 / D指令</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-white">
-            D指令原価BOM
+            機種標準原価
           </h1>
           <p className="mt-2 text-sm text-slate-400">
-            D指令原価計算で保存した結果を表示します（1台分）。未保存のD指令はD指令原価計算画面で計算・保存してください。
+            機種マスタのBOM原価を確認します。必要なら子D指令単位でも切り替えできます（1台分）。
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -489,34 +756,77 @@ export default function WorkOrderBomCostPage() {
         </div>
       </div>
 
-      {/* ① D指令選択パネル */}
+      {/* ① 計算対象選択パネル */}
       <div className="max-w-screen-xl mx-auto mb-6 bg-slate-800/70 border border-slate-600/50 rounded-2xl p-5">
         <p className="text-sm font-semibold text-slate-300 mb-3">
-          ① D指令を選択（または BOM モデルを直接入力）
+          ① 計算対象を選択
         </p>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => {
+              setCostSource('heater_model')
+              setSelectedWorkOrderId('')
+              setSelectedWorkOrder(null)
+              setCostTemplate(null)
+            }}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
+              costSource === 'heater_model'
+                ? 'bg-cyan-600 text-white'
+                : 'bg-slate-900 text-slate-300 border border-slate-600'
+            }`}
+          >
+            機種マスタごと（標準）
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCostSource('order')
+              setModelMeta(null)
+              setViewMode('branch')
+            }}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
+              costSource === 'order'
+                ? 'bg-violet-600 text-white'
+                : 'bg-slate-900 text-slate-300 border border-slate-600'
+            }`}
+          >
+            D指令ごと（実績）
+          </button>
+          <Link href="/heater/model-orders" className="ml-auto text-xs text-cyan-300 underline">
+            機種別制作指令へ
+          </Link>
+        </div>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <span className="text-xs text-slate-400">D指令リスト:</span>
-          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-            <input
-              type="radio"
-              name="workOrderListFilter"
-              checked={workOrderListFilter === 'bom'}
-              onChange={() => setWorkOrderListFilter('bom')}
-              className="accent-violet-500"
-            />
-            BOM出力D指令のみ
-          </label>
-          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-            <input
-              type="radio"
-              name="workOrderListFilter"
-              checked={workOrderListFilter === 'all'}
-              onChange={() => setWorkOrderListFilter('all')}
-              className="accent-violet-500"
-            />
-            全D指令
-          </label>
-          <span className="text-slate-600">|</span>
+          {costSource === 'order' && (
+            <>
+              <span className="text-xs text-slate-400">D指令リスト:</span>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="radio"
+                  name="workOrderListFilter"
+                  checked={workOrderListFilter === 'bom'}
+                  onChange={() => setWorkOrderListFilter('bom')}
+                  className="accent-violet-500"
+                />
+                BOM出力D指令のみ
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="radio"
+                  name="workOrderListFilter"
+                  checked={workOrderListFilter === 'all'}
+                  onChange={() => setWorkOrderListFilter('all')}
+                  className="accent-violet-500"
+                />
+                全D指令
+              </label>
+              <span className="text-slate-600">|</span>
+            </>
+          )}
+          {costSource === 'heater_model' && (
+            <span className="text-xs text-slate-400 mr-2">機種マスタのBOM原価</span>
+          )}
           <span className="text-xs text-slate-400">表示:</span>
           <button
             type="button"
@@ -541,58 +851,100 @@ export default function WorkOrderBomCostPage() {
             一覧表示
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-3 items-end">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">D指令</label>
-            <select
-              value={selectedWorkOrderId}
-              onChange={e => setSelectedWorkOrderId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-            >
-              <option value="">─ D指令を選択 ─</option>
-              {filteredWorkOrders.map(wo => (
-                <option key={wo.id} value={wo.id}>
-                  {wo.order_no}
-                  {wo.product_name ? ` │ ${wo.product_name}` : ''}
-                  {wo.cost_mode === 'bom' ? ' [BOM]' : ''}
-                  {wo.bom_model ? ` (${wo.bom_model})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="text-slate-500 text-sm pb-2 text-center hidden md:block">または</div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">BOMモデル（直接入力）</label>
-            <input
-              type="text"
-              value={bomModelInput}
-              onChange={e => setBomModelInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && load()}
-              placeholder="例: DR8-008"
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
-            />
-          </div>
-          <button
-            onClick={() => load()}
-            disabled={loading || (!selectedWorkOrderId && !bomModelInput.trim())}
-            className="px-6 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/50 disabled:cursor-not-allowed text-white font-semibold text-sm transition"
-          >
-            {loading ? '集計中…' : '集計'}
-          </button>
-          {selectedWorkOrderId && (
+        {costSource === 'order' ? (
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] gap-3 items-end">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">D指令</label>
+              <select
+                value={selectedWorkOrderId}
+                onChange={e => setSelectedWorkOrderId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+              >
+                <option value="">─ D指令を選択 ─</option>
+                {filteredWorkOrders.map(wo => (
+                  <option key={wo.id} value={wo.id}>
+                    {wo.order_no}
+                    {wo.product_name ? ` │ ${wo.product_name}` : ''}
+                    {wo.cost_mode === 'bom' ? ' [BOM]' : ''}
+                    {wo.bom_model ? ` (${wo.bom_model})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="text-slate-500 text-sm pb-2 text-center hidden md:block">または</div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">BOMモデル（直接入力）</label>
+              <input
+                type="text"
+                value={bomModelInput}
+                onChange={e => setBomModelInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && load()}
+                placeholder="例: DR8-008"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
             <button
-              onClick={handleSync}
-              disabled={syncing || loading || !bomModelInput.trim()}
-              className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800/50 disabled:cursor-not-allowed text-white font-semibold text-sm transition"
-              title="工賃枝番(00)を含めて枝番を再生成してから集計します"
+              onClick={() => load()}
+              disabled={loading || (!selectedWorkOrderId && !bomModelInput.trim())}
+              className="px-6 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/50 disabled:cursor-not-allowed text-white font-semibold text-sm transition"
             >
-              {syncing ? '同期中…' : '🔄 BOM同期→集計'}
+              {loading ? '集計中…' : '集計'}
             </button>
-          )}
-        </div>
+            {selectedWorkOrderId && (
+              <button
+                onClick={handleSync}
+                disabled={syncing || loading || !bomModelInput.trim()}
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800/50 disabled:cursor-not-allowed text-white font-semibold text-sm transition"
+                title="工賃枝番(00)を含めて枝番を再生成してから集計します"
+              >
+                {syncing ? '同期中…' : '🔄 BOM同期→集計'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">機種マスタ</label>
+              <select
+                value={selectedHeaterModel}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSelectedHeaterModel(v)
+                  setBomModelInput(v)
+                }}
+                className="w-full px-3 py-2 bg-slate-900 border border-cyan-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              >
+                <option value="">─ 機種を選択 ─</option>
+                {heaterModels.map((m) => (
+                  <option key={m.model} value={m.model}>
+                    {m.model}{m.name ? ` │ ${m.name}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => load(selectedHeaterModel)}
+                disabled={loading || !selectedHeaterModel}
+                className="px-6 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900/50 disabled:cursor-not-allowed text-white font-semibold text-sm transition"
+              >
+                {loading ? '集計中…' : '機種原価を集計'}
+              </button>
+              <Link href={selectedHeaterModel ? `/heater/bom?model=${encodeURIComponent(selectedHeaterModel)}` : '/heater/bom'}>
+                <button
+                  type="button"
+                  disabled={!selectedHeaterModel}
+                  className="px-4 py-2 rounded-lg border border-orange-500/50 bg-orange-950/40 text-orange-200 text-sm font-semibold disabled:opacity-40"
+                >
+                  BOM設定
+                </button>
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* 選択中のD指令情報 */}
-        {selectedWorkOrder && (
+        {selectedWorkOrder && costSource === 'order' && (
           <div className="mt-3 pt-3 border-t border-slate-700 flex flex-wrap gap-4 text-xs text-slate-400">
             <span>D指令: <span className="text-white font-semibold">{selectedWorkOrder.order_no}</span></span>
             {selectedWorkOrder.product_name && (
@@ -610,12 +962,224 @@ export default function WorkOrderBomCostPage() {
             {selectedWorkOrder.qty != null && (
               <span>製作数: <span className="text-yellow-300 font-bold">{selectedWorkOrder.qty} 台</span></span>
             )}
+            {selectedWorkOrder.is_cost_template && (
+              <span className="px-2 py-0.5 rounded bg-amber-700/40 text-amber-200 font-bold">原価テンプレート</span>
+            )}
+            {savedCostHeader && (savedCostHeader.assembly_labor_total > 0 || savedCostHeader.bom_labor_total > 0) && (
+              <span className="text-slate-300">
+                工賃内訳: BOM ¥{savedCostHeader.bom_labor_total.toLocaleString()}
+                ＋ 制作 ¥{savedCostHeader.assembly_labor_total.toLocaleString()}
+                {savedCostHeader.assembly_labor_minutes > 0
+                  ? `（${savedCostHeader.assembly_labor_minutes}分）`
+                  : ''}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* 選択中の機種マスタ情報 */}
+        {costSource === 'heater_model' && selectedHeaterModel && (
+          <div className="mt-3 pt-3 border-t border-slate-700 flex flex-wrap gap-4 text-xs text-slate-400">
+            <span>
+              機種コード:{' '}
+              <span className="text-cyan-300 font-semibold font-mono">{selectedHeaterModel}</span>
+            </span>
+            {modelMeta?.name && (
+              <span>
+                品名: <span className="text-slate-200">{modelMeta.name}</span>
+              </span>
+            )}
+            {modelMeta?.product_category && (
+              <span className="px-2 py-0.5 rounded bg-cyan-900/50 text-cyan-200">
+                {modelMeta.product_category}
+              </span>
+            )}
+            {modelMeta && (
+              <>
+                <span>
+                  BOM原価:{' '}
+                  <span className="text-yellow-300 font-bold">
+                    ¥{(modelMeta.unit_total - modelMeta.assembly_labor_total).toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  制作工賃(平均):{' '}
+                  <span className="text-emerald-300 font-bold">
+                    ¥{modelMeta.assembly_labor_total.toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  1台合計:{' '}
+                  <span className="text-yellow-200 font-extrabold">
+                    ¥{modelMeta.unit_total.toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  紐づく指令 {modelMeta.order_count}件 / 台数合計 {modelMeta.qty_total}台
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 製品原価テンプレート */}
+        {selectedWorkOrderId && costSource === 'order' && (
+          <div className="mt-3 pt-3 border-t border-slate-700">
+            {templateLoading ? (
+              <p className="text-xs text-slate-500">原価テンプレートを検索中…</p>
+            ) : costTemplate &&
+              costTemplate.work_order_id !== selectedWorkOrderId &&
+              !savedCostHeader?.has_saved_cost ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-950/30 px-4 py-3">
+                <div className="text-xs text-amber-100">
+                  <p className="font-semibold text-amber-200 mb-1">
+                    同じ製品の原価テンプレートが見つかりました
+                  </p>
+                  <p>
+                    {costTemplate.order_no}
+                    {costTemplate.product_name ? ` │ ${costTemplate.product_name}` : ''}
+                    {' '}— 合計 ¥{costTemplate.total_cost.toLocaleString()}
+                    {costTemplate.is_cost_template ? '（標準テンプレート）' : '（過去計算）'}
+                  </p>
+                  <p className="mt-1 text-amber-200/70">
+                    取り込めば、同じ製品の原価計算を繰り返す必要がありません
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyTemplate}
+                  disabled={applyingTemplate || loading}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-bold transition whitespace-nowrap"
+                >
+                  {applyingTemplate ? '取込中…' : '📋 テンプレートから取込'}
+                </button>
+              </div>
+            ) : costTemplate &&
+              costTemplate.work_order_id !== selectedWorkOrderId &&
+              savedCostHeader?.has_saved_cost ? (
+              <p className="text-xs text-slate-500">
+                参照可能テンプレート: {costTemplate.order_no}
+                {costTemplate.product_name ? `（${costTemplate.product_name}）` : ''}
+                {' '}— 上書きする場合は「テンプレートから取込」を使用
+                <button
+                  type="button"
+                  onClick={handleApplyTemplate}
+                  disabled={applyingTemplate || loading}
+                  className="ml-2 px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs transition"
+                >
+                  {applyingTemplate ? '取込中…' : '再取込'}
+                </button>
+              </p>
+            ) : !costTemplate && selectedWorkOrder?.product_name ? (
+              <p className="text-xs text-slate-500">
+                「{selectedWorkOrder.product_name}」の原価テンプレートは未登録です。
+                原価確定後に「製品原価マスタに設定」できます。
+              </p>
+            ) : null}
           </div>
         )}
       </div>
 
+      {/* 一覧表示 */}
+      {viewMode === 'list' && costSource === 'heater_model' && (
+        <div className="max-w-screen-xl mx-auto mb-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">機種マスタ原価 一覧</h2>
+              <p className="text-xs text-slate-400 mt-1">
+                機種ごとのBOM積み上げ原価＋制作工賃（紐づく指令の平均）。行クリックで枝番別明細を開きます。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadModelCostList()}
+              disabled={summaryLoading}
+              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-semibold transition"
+            >
+              {summaryLoading ? '読込中…' : '一覧を更新'}
+            </button>
+          </div>
+          {summaryLoading && modelCostRows.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">一覧を読み込み中…</div>
+          ) : modelCostRows.length === 0 ? (
+            <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-6 text-amber-300 text-center">
+              表示対象の機種がありません
+            </div>
+          ) : (
+            <div className="bg-slate-900/80 border-2 border-cyan-800/50 rounded-3xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-800 border-b border-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-bold text-cyan-300">機種コード</th>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">品名</th>
+                      <th className="px-4 py-3 text-left font-bold text-slate-300">カテゴリ</th>
+                      <th className="px-4 py-3 text-right font-bold text-sky-300">BOM原価</th>
+                      <th className="px-4 py-3 text-right font-bold text-emerald-300">制作工賃</th>
+                      <th className="px-4 py-3 text-right font-bold text-yellow-300">1台合計</th>
+                      <th className="px-4 py-3 text-right font-bold text-slate-300">指令/台数</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/80">
+                    {modelCostRows.map((row, idx) => (
+                      <tr
+                        key={row.model}
+                        onClick={() => {
+                          setSelectedHeaterModel(row.model)
+                          setBomModelInput(row.model)
+                          setViewMode('branch')
+                          void load(row.model)
+                        }}
+                        className={`cursor-pointer transition hover:bg-cyan-900/30 ${
+                          idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20'
+                        } ${selectedHeaterModel === row.model ? 'ring-1 ring-inset ring-cyan-400/60' : ''}`}
+                      >
+                        <td className="px-4 py-3 font-mono font-semibold text-cyan-300">{row.model}</td>
+                        <td className="px-4 py-3 text-slate-200">{row.name || '（未設定）'}</td>
+                        <td className="px-4 py-3 text-slate-400">{row.product_category}</td>
+                        <td className="px-4 py-3 text-right text-sky-300">
+                          ¥{row.bom_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-emerald-300">
+                          ¥{row.assembly_labor_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-yellow-300">
+                          ¥{row.unit_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-400">
+                          {row.order_count} / {row.qty_total}台
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {modelCostTotals && (
+                    <tfoot className="bg-slate-800/90 border-t-2 border-cyan-500/40">
+                      <tr>
+                        <td colSpan={3} className="px-4 py-3 font-bold text-cyan-200">
+                          合計（{modelCostRows.length} 機種）
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-sky-300">
+                          ¥{modelCostTotals.bom_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-500">—</td>
+                        <td className="px-4 py-3 text-right font-extrabold text-yellow-300">
+                          ¥{modelCostTotals.unit_total.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-400">
+                          {modelCostTotals.order_count} / {modelCostTotals.qty_total}台
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 一覧表示（D指令単位サマリ） */}
-      {viewMode === 'list' && (
+      {viewMode === 'list' && costSource === 'order' && (
         <div className="max-w-screen-xl mx-auto mb-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -786,13 +1350,13 @@ export default function WorkOrderBomCostPage() {
             <div className="bg-amber-900/30 border border-amber-500/40 rounded-2xl p-5 text-amber-200">
               <p className="font-bold mb-1">このD指令は原価が未保存です</p>
               <p className="text-sm text-amber-100/90">
-                D指令原価計算画面で計算・保存すると、この画面に反映されます。
+                D指令実績原価画面で計算・保存すると、この画面に反映されます。
               </p>
               <Link
                 href={`/work-orders/cost?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`}
                 className="inline-block mt-3 px-4 py-2 rounded-lg bg-amber-700/60 hover:bg-amber-600/70 text-sm font-semibold text-white transition"
               >
-                D指令原価計算へ →
+                D指令実績原価へ →
               </Link>
             </div>
           )}
@@ -1068,6 +1632,21 @@ export default function WorkOrderBomCostPage() {
               )}
             </div>
             <div className="flex gap-3">
+              {selectedWorkOrderId && (
+                <button
+                  type="button"
+                  onClick={() => handleSetAsTemplate(!selectedWorkOrder?.is_cost_template)}
+                  disabled={settingTemplate || (!selectedWorkOrder?.is_cost_template && !savedCostHeader?.has_saved_cost)}
+                  className="px-5 py-3 rounded-xl bg-amber-700 hover:bg-amber-600 disabled:opacity-40 text-white font-semibold border border-amber-500 transition"
+                  title="原価確定保存後、このD指令を同製品の標準原価として登録"
+                >
+                  {settingTemplate
+                    ? '設定中…'
+                    : selectedWorkOrder?.is_cost_template
+                      ? 'テンプレート解除'
+                      : '製品原価マスタに設定'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => load()}

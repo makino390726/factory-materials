@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import Link from 'next/link';
 import {
   DEFAULT_PRODUCT_CATEGORY,
@@ -41,6 +41,22 @@ export default function HeaterModelsPage() {
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productPage, setProductPage] = useState(1);
   const productsPerPage = 10;
+  const [expandedModel, setExpandedModel] = useState<string | null>(null);
+  const [childOrders, setChildOrders] = useState<
+    Record<
+      string,
+      Array<{
+        id: string;
+        order_no: string;
+        qty: number | null;
+        standard_duration_minutes: number | null;
+        assembly_labor_cost: number | null;
+        current_period_minutes: number | null;
+        labor_receipt_date: string | null;
+      }>
+    >
+  >({});
+  const [childLoading, setChildLoading] = useState<string | null>(null);
 
   useEffect(() => {
     fetchModels();
@@ -77,6 +93,31 @@ export default function HeaterModelsPage() {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const toggleChildOrders = async (modelCode: string) => {
+    if (expandedModel === modelCode) {
+      setExpandedModel(null);
+      return;
+    }
+    setExpandedModel(modelCode);
+    if (childOrders[modelCode]) return;
+    setChildLoading(modelCode);
+    try {
+      const res = await fetch(
+        `/api/work-orders?heater_model=${encodeURIComponent(modelCode)}`
+      );
+      const data = await res.json();
+      setChildOrders((prev) => ({
+        ...prev,
+        [modelCode]: Array.isArray(data) ? data : [],
+      }));
+    } catch {
+      setChildOrders((prev) => ({ ...prev, [modelCode]: [] }));
+    } finally {
+      setChildLoading(null);
     }
   };
 
@@ -198,11 +239,18 @@ export default function HeaterModelsPage() {
           <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400">
             機種マスタ
           </h1>
-          <Link href="/">
-            <button className="px-6 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium rounded-lg transition-all duration-300 border border-slate-600 hover:border-slate-500">
-              ← ホーム
-            </button>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/heater/model-orders">
+              <button className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-medium rounded-lg transition border border-cyan-500">
+                機種別制作指令
+              </button>
+            </Link>
+            <Link href="/">
+              <button className="px-6 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium rounded-lg transition-all duration-300 border border-slate-600 hover:border-slate-500">
+                ← ホーム
+              </button>
+            </Link>
+          </div>
         </div>
 
         {error && (
@@ -411,6 +459,7 @@ export default function HeaterModelsPage() {
                   <tr>
                     <th className="px-6 py-3 text-left font-semibold text-slate-200">機種コード</th>
                     <th className="px-6 py-3 text-left font-semibold text-slate-200">カテゴリ</th>
+                    <th className="px-6 py-3 text-left font-semibold text-slate-200">制作指令</th>
                     <th className="px-6 py-3 text-left font-semibold text-slate-200">機種名</th>
                     <th className="px-6 py-3 text-left font-semibold text-slate-200">商品コード</th>
                     <th className="px-6 py-3 text-right font-semibold text-slate-200">操作</th>
@@ -418,21 +467,33 @@ export default function HeaterModelsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {displayedModels.map((model) => (
-                    <tr key={model.model} className="hover:bg-slate-800/60">
+                    <Fragment key={model.model}>
+                      <tr className="hover:bg-slate-800/60">
                       <td className="px-6 py-3 font-medium text-white">{model.model}</td>
                       <td className="px-6 py-3 text-slate-200">{model.product_category || '-'}</td>
+                      <td className="px-6 py-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleChildOrders(model.model)}
+                          className="rounded border border-violet-500/40 bg-violet-950/50 px-2 py-1 text-xs font-medium text-violet-100 hover:bg-violet-900/60"
+                        >
+                          {childLoading === model.model
+                            ? '読込中…'
+                            : expandedModel === model.model
+                              ? '閉じる'
+                              : '指令一覧'}
+                        </button>
+                      </td>
                       <td className="px-6 py-3 text-slate-200">{model.name || '-'}</td>
                       <td className="px-6 py-3 font-mono text-sm text-slate-300">
                         {model.product_code || '-'}
                       </td>
                       <td className="space-x-2 px-6 py-3 text-right">
-                        {model.model === 'DR8-008' && (
-                          <Link href="/heater/models/dr8008">
-                            <button className="rounded border border-amber-400/50 bg-amber-900/50 px-3 py-1 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-800/60">
-                              原価計算
-                            </button>
-                          </Link>
-                        )}
+                        <Link href={`/heater/models/dr8008?model=${encodeURIComponent(model.model)}`}>
+                          <button className="rounded border border-amber-400/50 bg-amber-900/50 px-3 py-1 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-800/60">
+                            標準原価
+                          </button>
+                        </Link>
                         <button
                           onClick={() => handleEdit(model)}
                           className="rounded border border-cyan-500/40 bg-cyan-950/50 px-3 py-1 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-900/60"
@@ -447,6 +508,88 @@ export default function HeaterModelsPage() {
                         </button>
                       </td>
                     </tr>
+                    {expandedModel === model.model && (
+                      <tr key={`${model.model}-children`} className="bg-slate-950/70">
+                        <td colSpan={6} className="px-6 py-4">
+                          {childLoading === model.model ? (
+                            <p className="text-xs text-slate-400">読み込み中…</p>
+                          ) : (childOrders[model.model] || []).length === 0 ? (
+                            <p className="text-xs text-slate-400">
+                              この機種に紐づく制作指令はありません。D指令マスタで親機種を指定して登録してください。
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+                                <span>
+                                  指令台数合計:{' '}
+                                  <strong className="text-yellow-300">
+                                    {(childOrders[model.model] || []).reduce(
+                                      (s, o) => s + (Number(o.qty) || 0),
+                                      0
+                                    )}
+                                  </strong>{' '}
+                                  台
+                                </span>
+                                <Link
+                                  href={`/work-orders`}
+                                  className="text-cyan-300 underline hover:text-cyan-200"
+                                >
+                                  D指令マスタで追加
+                                </Link>
+                              </div>
+                              <table className="w-full text-xs border border-slate-700 rounded overflow-hidden">
+                                <thead className="bg-slate-900 text-slate-400">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left">指令番号</th>
+                                    <th className="px-3 py-2 text-right">指令台数</th>
+                                    <th className="px-3 py-2 text-right">時間(分)</th>
+                                    <th className="px-3 py-2 text-right">制作工賃</th>
+                                    <th className="px-3 py-2 text-left">入庫確定日</th>
+                                    <th className="px-3 py-2 text-right">操作</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(childOrders[model.model] || []).map((order) => (
+                                    <tr key={order.id} className="border-t border-slate-800">
+                                      <td className="px-3 py-2 font-mono text-cyan-300">
+                                        {order.order_no}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-slate-200">
+                                        {order.qty ?? '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-slate-200">
+                                        {order.standard_duration_minutes?.toLocaleString() ?? '-'}
+                                        {(order.current_period_minutes ?? 0) === 0 &&
+                                          order.labor_receipt_date && (
+                                            <span className="ml-1 text-emerald-400">(リセット済)</span>
+                                          )}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-amber-200">
+                                        {(order.assembly_labor_cost ?? 0) > 0
+                                          ? `¥${Number(order.assembly_labor_cost).toLocaleString()}`
+                                          : '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-slate-400">
+                                        {order.labor_receipt_date || '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-right">
+                                        <Link
+                                          href={`/heater/models/dr8008?work_order_id=${order.id}`}
+                                          className="text-amber-300 underline hover:text-amber-200"
+                                        >
+                                          原価
+                                        </Link>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

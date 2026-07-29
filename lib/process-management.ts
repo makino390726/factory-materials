@@ -1973,7 +1973,47 @@ export async function createProductionLot(
     })
   )
 
-  return data.id as string
+  // D指令入庫: 期間実績から制作工賃を自動確定し、現サイクル時間をリセット
+  let assemblyLabor: {
+    assembly_labor_minutes: number
+    assembly_labor_cost: number
+    labor_receipt_date: string | null
+  } | null = null
+  if (targetType === 'instruction') {
+    try {
+      const minutesByGroup = await aggregateTargetWorkGroupMinutesInRange(
+        supabase,
+        targetType,
+        normalizedCode,
+        start,
+        end,
+        lineId
+      )
+      let periodTotalMinutes = 0
+      for (const value of minutesByGroup.values()) {
+        periodTotalMinutes += Number(value) || 0
+      }
+      const { applyInstructionReceiptLaborResetWithQty } = await import(
+        '@/lib/work-order-assembly-labor'
+      )
+      assemblyLabor = await applyInstructionReceiptLaborResetWithQty(
+        supabase,
+        normalizedCode,
+        end,
+        periodTotalMinutes,
+        completedQty
+      )
+    } catch (laborError) {
+      console.warn('制作工賃の入庫リセットに失敗（ロット自体は保存済み）:', laborError)
+    }
+  }
+
+  return {
+    lot_id: data.id as string,
+    period_start: start,
+    period_end: end,
+    assembly_labor: assemblyLabor,
+  }
 }
 
 export async function deleteProductionLot(supabase: SupabaseClient, lotId: string) {
@@ -2345,14 +2385,32 @@ export async function syncTargetStandardDurationFromFiscalAverage(
       .eq('line_code', normalized)
     if (error) throw error
   } else {
+    const { calcAssemblyLaborFromMinutes } = await import('@/lib/work-order-assembly-labor')
+    const labor = calcAssemblyLaborFromMinutes(resolved.minutes)
     const { error } = await supabase
       .from('work_orders')
       .update({
         standard_duration_minutes: resolved.minutes,
+        assembly_labor_minutes: labor.assembly_labor_minutes,
+        assembly_labor_cost: labor.assembly_labor_cost,
         updated_at: now,
       })
       .eq('order_no', normalized)
-    if (error) throw error
+    if (error) {
+      // 制作工賃列未追加環境では標準時間のみ更新
+      if (String(error.message || '').includes('assembly_labor')) {
+        const { error: fallbackError } = await supabase
+          .from('work_orders')
+          .update({
+            standard_duration_minutes: resolved.minutes,
+            updated_at: now,
+          })
+          .eq('order_no', normalized)
+        if (fallbackError) throw fallbackError
+      } else {
+        throw error
+      }
+    }
   }
 
   return {

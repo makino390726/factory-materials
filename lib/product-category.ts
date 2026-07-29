@@ -6,6 +6,7 @@ export const PRODUCT_CATEGORIES = [
   'たばこ乾燥機',
   '食品乾燥機',
   '光合成促進装置',
+  '作業器機',
   'その他',
 ] as const
 
@@ -36,6 +37,7 @@ export function inferProductCategory(model: string, name?: string | null): Produ
   if (/たばこ|タバコ|煙草|葉たばこ|葉タバコ/.test(text)) return 'たばこ乾燥機'
   if (/食品乾燥|食品用乾燥|フードドライ|食品ドライ/.test(text)) return '食品乾燥機'
   if (/光合成|促成装置|促進装置|CO2発生|炭酸ガス/.test(text)) return '光合成促進装置'
+  if (/作業器機|作業機器|作業機/.test(text)) return '作業器機'
   if (/温風|暖房|ヒータ|ヒーター/.test(text)) return '暖房機'
   if (/乾燥機|ドライヤ|ドライヤー/.test(text)) return 'その他'
   return DEFAULT_PRODUCT_CATEGORY

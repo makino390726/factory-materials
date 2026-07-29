@@ -19,6 +19,13 @@ type WorkOrder = {
   cost_mode: 'direct' | 'bom' | null
   bom_model: string | null
   exclude_from_work_report?: boolean | null
+  is_cost_template?: boolean | null
+  cost_template_work_order_id?: string | null
+  heater_model?: string | null
+  assembly_labor_minutes?: number | null
+  assembly_labor_cost?: number | null
+  current_period_minutes?: number | null
+  labor_receipt_date?: string | null
 }
 
 type BranchRow = {
@@ -61,7 +68,11 @@ export default function WorkOrdersPage() {
     completed: false,
     completed_date: '',
     standard_duration_minutes: '',
+    is_cost_template: false,
+    cost_template_work_order_id: '',
+    heater_model: '',
   })
+  const [heaterModels, setHeaterModels] = useState<Array<{ model: string; name: string | null }>>([])
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null)
   const [history, setHistory] = useState<
     Array<{
@@ -154,6 +165,9 @@ export default function WorkOrdersPage() {
       completed: order.completed || false,
       completed_date: order.completed_date || '',
       standard_duration_minutes: order.standard_duration_minutes?.toString() ?? '',
+      is_cost_template: Boolean(order.is_cost_template),
+      cost_template_work_order_id: order.cost_template_work_order_id || '',
+      heater_model: order.heater_model || '',
     })
 
     // DB列未反映などで cost_mode が取得できない場合でも、枝番が存在すればBOM編集モードを復帰する
@@ -400,6 +414,19 @@ export default function WorkOrdersPage() {
 
   useEffect(() => {
     fetchOrders()
+    fetch('/api/heater/models')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setHeaterModels(
+            data.map((m: { model: string; name: string | null }) => ({
+              model: m.model,
+              name: m.name ?? null,
+            }))
+          )
+        }
+      })
+      .catch(() => setHeaterModels([]))
   }, [])
 
   useEffect(() => {
@@ -411,6 +438,19 @@ export default function WorkOrdersPage() {
 
     void startEditingOrder(target)
   }, [orders, searchParams])
+
+  // 機種別マスタから「制作指令を追加」で来た場合、親機種を初期セット
+  useEffect(() => {
+    const heaterModel = searchParams.get('heater_model')?.trim()
+    if (!heaterModel || editingId) return
+    const hm = heaterModels.find((m) => m.model === heaterModel)
+    setFormData((prev) => ({
+      ...prev,
+      heater_model: heaterModel,
+      product_name: prev.product_name || hm?.name || prev.product_name,
+      model: prev.model || heaterModel,
+    }))
+  }, [searchParams, heaterModels, editingId])
 
   useEffect(() => {
     if (!editingId || !formData.has_bom) {
@@ -522,6 +562,9 @@ export default function WorkOrdersPage() {
       completed: false,
       completed_date: '',
       standard_duration_minutes: '',
+      is_cost_template: false,
+      cost_template_work_order_id: '',
+      heater_model: '',
     })
     setEditingId(null)
   }
@@ -565,6 +608,9 @@ export default function WorkOrdersPage() {
           completed: formData.completed || null,
           completed_date: formData.completed_date || null,
           standard_duration_minutes: Number(formData.standard_duration_minutes) || 0,
+          is_cost_template: formData.is_cost_template,
+          cost_template_work_order_id: formData.cost_template_work_order_id.trim() || null,
+          heater_model: formData.heater_model.trim() || null,
         }),
       })
 
@@ -651,11 +697,18 @@ export default function WorkOrdersPage() {
               D指令マスタ
             </h1>
           </div>
-          <Link href="/">
-            <button className="px-6 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium rounded-lg transition-all duration-300 border border-slate-600 hover:border-slate-500">
-              ← ホーム
-            </button>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/heater/model-orders">
+              <button className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-medium rounded-lg transition border border-cyan-500">
+                機種別制作指令
+              </button>
+            </Link>
+            <Link href="/">
+              <button className="px-6 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium rounded-lg transition-all duration-300 border border-slate-600 hover:border-slate-500">
+                ← ホーム
+              </button>
+            </Link>
+          </div>
         </div>
 
         {error && (
@@ -696,8 +749,99 @@ export default function WorkOrdersPage() {
                   onChange={(event) =>
                     setFormData({ ...formData, product_name: event.target.value })
                   }
+                  placeholder="例: 凍結防止用熱源機"
                   className={formFieldClass}
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  同じ製品名のD指令は、原価テンプレートを自動参照できます
+                </p>
+              </div>
+              <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 space-y-2">
+                <label className="block text-sm font-medium text-cyan-900 mb-1">
+                  親機種（任意・併用型）
+                </label>
+                <select
+                  value={formData.heater_model}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    const hm = heaterModels.find((m) => m.model === value)
+                    setFormData({
+                      ...formData,
+                      heater_model: value,
+                      product_name:
+                        formData.product_name || (hm?.name ? hm.name : formData.product_name),
+                      model: formData.model || value,
+                    })
+                  }}
+                  className={formFieldClass}
+                >
+                  <option value="">─ なし（従来の単独D指令） ─</option>
+                  {heaterModels.map((m) => (
+                    <option key={m.model} value={m.model}>
+                      {m.model}{m.name ? ` │ ${m.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-cyan-800">
+                  機種を選ぶと機種マスタ配下の制作指令になります。未選択なら従来どおりです。
+                  制作工賃は標準時間から自動計算（分÷480×¥17,810）。工程管理の入庫で確定・時間リセットされます。
+                </p>
+                {formData.standard_duration_minutes && Number(formData.standard_duration_minutes) > 0 && (
+                  <p className="text-xs font-semibold text-cyan-900">
+                    制作工賃（自動）: ¥
+                    {Math.round(
+                      (Number(formData.standard_duration_minutes) / 480) * 17810
+                    ).toLocaleString()}
+                    （{formData.standard_duration_minutes}分）
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="is-cost-template"
+                    type="checkbox"
+                    checked={formData.is_cost_template}
+                    onChange={(event) =>
+                      setFormData({ ...formData, is_cost_template: event.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-amber-600"
+                  />
+                  <label htmlFor="is-cost-template" className="text-sm font-medium text-amber-900">
+                    このD指令を製品の原価テンプレート（標準内訳）として使う
+                  </label>
+                </div>
+                {!formData.is_cost_template && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      参照する原価テンプレート（任意）
+                    </label>
+                    <select
+                      value={formData.cost_template_work_order_id}
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          cost_template_work_order_id: event.target.value,
+                        })
+                      }
+                      className={formFieldClass}
+                    >
+                      <option value="">─ 自動（製品名で検索） ─</option>
+                      {orders
+                        .filter(
+                          (order) =>
+                            order.is_cost_template &&
+                            order.id !== editingId &&
+                            order.product_name
+                        )
+                        .map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {order.order_no} │ {order.product_name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">型式</label>
@@ -1056,14 +1200,36 @@ export default function WorkOrdersPage() {
                             {costDoneIds.has(order.id) && (
                               <span className="text-sm font-bold text-rose-300">原価計算済</span>
                             )}
+                            {order.is_cost_template && (
+                              <span className="rounded border border-amber-400/50 bg-amber-950 px-1.5 py-0.5 text-xs font-bold text-amber-100">
+                                原価テンプレ
+                              </span>
+                            )}
+                            {order.heater_model && (
+                              <span className="rounded border border-cyan-400/50 bg-cyan-950 px-1.5 py-0.5 text-xs font-bold text-cyan-100">
+                                {order.heater_model}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="py-3 pr-4">{order.product_name || '-'}</td>
+                        <td className="py-3 pr-4">
+                          {order.product_name || '-'}
+                          {order.cost_template_work_order_id && (
+                            <span className="ml-1 text-xs text-amber-600" title="原価テンプレート参照あり">
+                              📋
+                            </span>
+                          )}
+                        </td>
                         <td className="py-3 pr-4">{order.model || '-'}</td>
                         <td className="py-3 pr-4">{order.bom_model || '-'}</td>
                         <td className="py-3 pr-4">{order.qty || '-'}</td>
                         <td className="py-3 pr-4 text-right">
-                          {order.standard_duration_minutes?.toLocaleString() ?? '-'}
+                          <div>{order.standard_duration_minutes?.toLocaleString() ?? '-'}</div>
+                          {(order.assembly_labor_cost ?? 0) > 0 && (
+                            <div className="text-xs text-cyan-700">
+                              制作工賃 ¥{Number(order.assembly_labor_cost).toLocaleString()}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 pr-4">
                           <span
@@ -1102,9 +1268,9 @@ export default function WorkOrdersPage() {
                               </span>
                             </Link>
                             {order.cost_mode === 'bom' ? (
-                              <Link href={`/work-orders/bom-cost?id=${order.id}`}>
+                              <Link href={`/heater/models/dr8008?work_order_id=${order.id}`}>
                                 <span className="px-2 py-1 rounded-md bg-violet-600 text-white hover:bg-violet-700 transition text-xs cursor-pointer font-medium">
-                                  BOM
+                                  原価
                                 </span>
                               </Link>
                             ) : null}

@@ -175,6 +175,7 @@ export default function WorkOrderCostPage() {
       }
     }
     loadMonthlyLineMinutes()
+
   }, [])
 
   useEffect(() => {
@@ -1841,16 +1842,21 @@ export default function WorkOrderCostPage() {
           <div>
             <div className="flex items-center gap-4">
               <p className="text-rose-200 text-sm uppercase tracking-[0.35em]">Order Costing</p>
-              <div className="ml-4 inline-flex bg-slate-800 rounded-full p-1">
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>D指令原価計算</button>
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>L指令原価計算</button>
+              <div className="ml-4 inline-flex flex-wrap bg-slate-800 rounded-full p-1 gap-0.5 items-center">
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>D指令実績</button>
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>L指令実績</button>
+                <Link href="/heater/models/dr8008?source=heater_model" className="px-3 py-1 rounded-full text-sm text-emerald-300 hover:bg-emerald-900/50">
+                  機種標準原価 →
+                </Link>
               </div>
             </div>
             <h1 className="text-3xl sm:text-4xl font-semibold text-white">
-              {mode === 'order' ? 'D指令書原価計算' : 'L指令原価計算'}
+              {mode === 'order' ? 'D指令実績原価' : 'L指令実績原価'}
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              {mode === 'order' ? 'D指令別の材料費・工賃・間接費を集計するイメージ画面' : 'パーツマスタを参照してL指令単位の原価計算を行います'}
+              {mode === 'order'
+                ? 'D指令ごとの材料費・工賃・間接費を編集・保存します（実績スナップショット）'
+                : 'パーツマスタを参照してL指令単位の原価を編集・保存します'}
             </p>
           </div>
           <Link href="/">
@@ -2369,6 +2375,7 @@ export default function WorkOrderCostPage() {
               </div>
             )}
           </div>
+
         </div>
       </div>
     </div>

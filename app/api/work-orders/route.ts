@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  calcAssemblyLaborFromMinutes,
+} from '@/lib/work-order-assembly-labor'
 
 export const runtime = 'nodejs'
 
@@ -24,6 +27,23 @@ function hasWorkOrdersCostColumnError(error: any) {
 
 function hasExcludeFromWorkReportColumnError(error: any) {
   return hasMissingColumnError(error, 'exclude_from_work_report')
+}
+
+function hasCostTemplateColumnError(error: any) {
+  return (
+    hasMissingColumnError(error, 'is_cost_template') ||
+    hasMissingColumnError(error, 'cost_template_work_order_id')
+  )
+}
+
+function hasHeaterModelLaborColumnError(error: any) {
+  return (
+    hasMissingColumnError(error, 'heater_model') ||
+    hasMissingColumnError(error, 'assembly_labor_minutes') ||
+    hasMissingColumnError(error, 'assembly_labor_cost') ||
+    hasMissingColumnError(error, 'current_period_minutes') ||
+    hasMissingColumnError(error, 'labor_receipt_date')
+  )
 }
 
 async function syncWorkOrderBranchesFromBom(workOrderId: string, bomModel: string) {
@@ -116,6 +136,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const orderNo = searchParams.get('orderNo')?.trim()
     const productName = searchParams.get('productName')?.trim()
+    const heaterModel = searchParams.get('heater_model')?.trim()
     const forWorkReport = searchParams.get('for_work_report') === '1'
 
     let query = supabase.from('work_orders').select('*')
@@ -132,7 +153,21 @@ export async function GET(req: Request) {
       query = query.ilike('product_name', `%${productName}%`)
     }
 
+    if (heaterModel) {
+      query = query.eq('heater_model', heaterModel)
+    }
+
     const { data, error } = await query.order('created_at', { ascending: false })
+
+    if (error && heaterModel && hasHeaterModelLaborColumnError(error)) {
+      return NextResponse.json(
+        {
+          error:
+            'heater_model 列がありません。Supabaseで migrate-add-work-order-heater-model-labor.sql を実行してください。',
+        },
+        { status: 500 }
+      )
+    }
 
     if (error && forWorkReport && hasExcludeFromWorkReportColumnError(error)) {
       let fallbackQuery = supabase.from('work_orders').select('*')
@@ -174,6 +209,9 @@ export async function POST(req: Request) {
       cost_mode,
       bom_model,
       exclude_from_work_report,
+      is_cost_template,
+      cost_template_work_order_id,
+      heater_model,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -181,6 +219,14 @@ export async function POST(req: Request) {
     const normalizedBomModel = normalizedCostMode === 'bom'
       ? (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : normalizedOrderNo)
       : (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : null)
+    const normalizedCostTemplateId =
+      typeof cost_template_work_order_id === 'string' && cost_template_work_order_id.trim()
+        ? cost_template_work_order_id.trim()
+        : null
+    const normalizedHeaterModel =
+      typeof heater_model === 'string' && heater_model.trim() ? heater_model.trim() : null
+    const durationMinutes = parseStandardDuration(standard_duration_minutes)
+    const assemblyLabor = calcAssemblyLaborFromMinutes(durationMinutes)
 
     if (!normalizedOrderNo) {
       return NextResponse.json(
@@ -210,7 +256,7 @@ export async function POST(req: Request) {
       completed: false,
       completed_date: null,
       // DB has NOT NULL constraint on standard_duration_minutes
-      standard_duration_minutes: parseStandardDuration(standard_duration_minutes),
+      standard_duration_minutes: durationMinutes,
     }
     const extendedPayload = {
       ...basePayload,
@@ -218,6 +264,12 @@ export async function POST(req: Request) {
       bom_model: normalizedBomModel,
       exclude_from_work_report:
         typeof exclude_from_work_report === 'boolean' ? exclude_from_work_report : false,
+      is_cost_template: Boolean(is_cost_template),
+      cost_template_work_order_id: normalizedCostTemplateId,
+      heater_model: normalizedHeaterModel,
+      assembly_labor_minutes: assemblyLabor.assembly_labor_minutes,
+      assembly_labor_cost: assemblyLabor.assembly_labor_cost,
+      current_period_minutes: 0,
     }
 
     let data: any[] | null = null
@@ -228,7 +280,13 @@ export async function POST(req: Request) {
     error = primaryInsert.error
 
     // DBマイグレーション未反映環境向けフォールバック
-    if (error && (hasWorkOrdersCostColumnError(error) || hasExcludeFromWorkReportColumnError(error))) {
+    if (
+      error &&
+      (hasWorkOrdersCostColumnError(error) ||
+        hasExcludeFromWorkReportColumnError(error) ||
+        hasCostTemplateColumnError(error) ||
+        hasHeaterModelLaborColumnError(error))
+    ) {
       const fallbackInsert = await supabase.from('work_orders').insert([basePayload]).select()
       data = fallbackInsert.data
       error = fallbackInsert.error
@@ -273,6 +331,9 @@ export async function PUT(req: Request) {
       cost_mode,
       bom_model,
       exclude_from_work_report,
+      is_cost_template,
+      cost_template_work_order_id,
+      heater_model,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -280,6 +341,18 @@ export async function PUT(req: Request) {
     const normalizedBomModel = normalizedCostMode === 'bom'
       ? (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : normalizedOrderNo)
       : (typeof bom_model === 'string' && bom_model.trim() ? bom_model.trim() : null)
+    const normalizedCostTemplateId =
+      typeof cost_template_work_order_id === 'string' && cost_template_work_order_id.trim()
+        ? cost_template_work_order_id.trim()
+        : null
+    const normalizedHeaterModel =
+      typeof heater_model === 'string' && heater_model.trim()
+        ? heater_model.trim()
+        : heater_model === null || heater_model === ''
+          ? null
+          : undefined
+    const durationMinutes = parseStandardDuration(standard_duration_minutes)
+    const assemblyLabor = calcAssemblyLaborFromMinutes(durationMinutes)
 
     if (!id) {
       return NextResponse.json({ error: 'IDが必要です' }, { status: 400 })
@@ -306,7 +379,7 @@ export async function PUT(req: Request) {
       completed: typeof completed === 'boolean' ? completed : null,
       completed_date: completed_date || null,
       // Ensure NOT NULL column gets a number
-      standard_duration_minutes: parseStandardDuration(standard_duration_minutes),
+      standard_duration_minutes: durationMinutes,
     }
     const extendedPayload = {
       ...basePayload,
@@ -315,6 +388,13 @@ export async function PUT(req: Request) {
       ...(typeof exclude_from_work_report === 'boolean'
         ? { exclude_from_work_report }
         : {}),
+      ...(typeof is_cost_template === 'boolean' ? { is_cost_template } : {}),
+      ...(cost_template_work_order_id !== undefined
+        ? { cost_template_work_order_id: normalizedCostTemplateId }
+        : {}),
+      ...(heater_model !== undefined ? { heater_model: normalizedHeaterModel } : {}),
+      assembly_labor_minutes: assemblyLabor.assembly_labor_minutes,
+      assembly_labor_cost: assemblyLabor.assembly_labor_cost,
     }
 
     let data: any[] | null = null
@@ -332,7 +412,10 @@ export async function PUT(req: Request) {
     // DBマイグレーション未反映環境向けフォールバック
     if (
       error &&
-      (hasWorkOrdersCostColumnError(error) || hasExcludeFromWorkReportColumnError(error))
+      (hasWorkOrdersCostColumnError(error) ||
+        hasExcludeFromWorkReportColumnError(error) ||
+        hasCostTemplateColumnError(error) ||
+        hasHeaterModelLaborColumnError(error))
     ) {
       const fallbackUpdate = await supabase
         .from('work_orders')

@@ -226,9 +226,17 @@ export default function Home() {
 
         {/* 製造計画・原価セクション */}
         <div className="w-full max-w-4xl mb-12">
-          <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-400 to-orange-400 mb-6 text-center">
+          <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-400 to-orange-400 mb-2 text-center">
             製造計画・原価
           </h2>
+          <p className="mb-6 text-center text-sm text-slate-400">
+            原価はここだけ見ればOK：
+            <span className="text-amber-300">機種標準原価</span>
+            {' / '}
+            <span className="text-rose-300">D指令実績原価</span>
+            {' / '}
+            <span className="text-orange-300">部品表(BOM)</span>
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* 製造計画・原価管理 */}
             <Link href="/heater/manufacturing-plan">
@@ -269,15 +277,44 @@ export default function Home() {
               </div>
             </Link>
 
-            {/* 原価計算 */}
+            {/* 機種標準原価（BOM積み上げ確認） */}
+            <Link href="/heater/models/dr8008?source=heater_model">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-600/30 to-orange-900/30 rounded-2xl border-2 border-amber-400 group-hover:border-amber-300 group-hover:shadow-[0_0_20px_rgba(251,191,36,0.6)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-1">
+                  <div className="text-3xl">🔢</div>
+                  <h3 className="text-base font-bold text-amber-300 group-hover:text-amber-200 transition">
+                    機種標準原価
+                  </h3>
+                  <p className="text-[10px] text-amber-200/70">BOM×単価の確認</p>
+                </div>
+              </div>
+            </Link>
+
+            {/* D指令実績原価 */}
             <Link href="/work-orders/cost">
               <div className="group relative h-32 cursor-pointer">
                 <div className="absolute inset-0 bg-gradient-to-br from-red-600/20 to-red-900/20 rounded-2xl border-2 border-red-400 group-hover:border-red-300 group-hover:shadow-[0_0_20px_rgba(239,68,68,0.5)] transition-all duration-300" />
-                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-1">
                   <div className="text-4xl">💰</div>
-                  <h3 className="text-lg font-bold text-red-300 group-hover:text-red-200 transition">
-                    原価計算
+                  <h3 className="text-base font-bold text-red-300 group-hover:text-red-200 transition">
+                    D指令実績原価
                   </h3>
+                  <p className="text-[10px] text-rose-200/70">指令ごとの編集・保存</p>
+                </div>
+              </div>
+            </Link>
+
+            {/* 部品表（BOM）メンテ */}
+            <Link href="/heater/bom">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-orange-600/20 to-orange-900/20 rounded-2xl border-2 border-orange-400 group-hover:border-orange-300 group-hover:shadow-[0_0_20px_rgba(234,88,12,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-1">
+                  <div className="text-4xl">🏗️</div>
+                  <h3 className="text-base font-bold text-orange-300 group-hover:text-orange-200 transition">
+                    部品表(BOM)
+                  </h3>
+                  <p className="text-[10px] text-orange-200/70">構成部品のメンテ</p>
                 </div>
               </div>
             </Link>
@@ -308,6 +345,19 @@ export default function Home() {
               </div>
             </Link>
 
+            {/* 機種別制作指令（階層） */}
+            <Link href="/heater/model-orders">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-cyan-600/20 to-teal-900/20 rounded-2xl border-2 border-cyan-400 group-hover:border-cyan-300 group-hover:shadow-[0_0_20px_rgba(34,211,238,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
+                  <div className="text-4xl">🌳</div>
+                  <h3 className="text-base font-bold text-cyan-300 group-hover:text-cyan-200 transition text-center leading-snug">
+                    機種別制作指令
+                  </h3>
+                </div>
+              </div>
+            </Link>
+
             {/* 工程管理表 */}
             <Link href="/process-management">
               <div className="group relative h-32 cursor-pointer">
@@ -321,19 +371,6 @@ export default function Home() {
               </div>
             </Link>
 
-            {/* D指令原価BOM */}
-            <Link href="/heater/models/dr8008">
-              <div className="group relative h-32 cursor-pointer">
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-600/30 to-orange-900/30 rounded-2xl border-2 border-amber-400 group-hover:border-amber-300 group-hover:shadow-[0_0_20px_rgba(251,191,36,0.6)] transition-all duration-300" />
-                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
-                  <div className="text-3xl">🔢</div>
-                  <h3 className="text-base font-bold text-amber-300 group-hover:text-amber-200 transition">
-                    D指令原価BOM
-                  </h3>
-                </div>
-              </div>
-            </Link>
-
             {/* パーツリスト */}
             <Link href="/heater/parts-master">
               <div className="group relative h-32 cursor-pointer">
@@ -342,19 +379,6 @@ export default function Home() {
                   <div className="text-4xl">🔧</div>
                   <h3 className="text-lg font-bold text-amber-300 group-hover:text-amber-200 transition">
                     パーツリスト
-                  </h3>
-                </div>
-              </div>
-            </Link>
-
-            {/* 構成部品（BOM） */}
-            <Link href="/heater/bom">
-              <div className="group relative h-32 cursor-pointer">
-                <div className="absolute inset-0 bg-gradient-to-br from-orange-600/20 to-orange-900/20 rounded-2xl border-2 border-orange-400 group-hover:border-orange-300 group-hover:shadow-[0_0_20px_rgba(234,88,12,0.5)] transition-all duration-300" />
-                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
-                  <div className="text-4xl">🏗️</div>
-                  <h3 className="text-lg font-bold text-orange-300 group-hover:text-orange-200 transition">
-                    構成部品(BOM)
                   </h3>
                 </div>
               </div>

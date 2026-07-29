@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 function formatCostAsOfJa(d: Date): string {
   const s = new Intl.DateTimeFormat('ja-JP', {
@@ -45,6 +46,8 @@ interface PartsMaster {
 }
 
 export default function BomPage() {
+  const searchParams = useSearchParams();
+  const initialModel = searchParams.get('model')?.trim() || '';
   const [bom, setBom] = useState<BomItem[]>([]);
   const [models, setModels] = useState<HeaterModel[]>([]);
   const [parts, setParts] = useState<PartsMaster[]>([]);
@@ -59,13 +62,13 @@ export default function BomPage() {
     product_code: string;
     cost_price: number;
   }>({
-    model: '',
+    model: initialModel,
     part_key: '',
     quantity: 0,
     product_code: '',
     cost_price: 0,
   });
-  const [filterModel, setFilterModel] = useState('');
+  const [filterModel, setFilterModel] = useState(initialModel);
   /** 機種構成一覧の印刷に印字する「時点原価」ラベル（印刷ボタン押下時に確定） */
   const [modelListCostAsOfLabel, setModelListCostAsOfLabel] = useState<string | null>(null);
 
@@ -74,6 +77,13 @@ export default function BomPage() {
     fetchModels();
     fetchParts();
   }, []);
+
+  useEffect(() => {
+    const model = searchParams.get('model')?.trim() || '';
+    if (!model) return;
+    setFilterModel(model);
+    setFormData((prev) => (prev.model ? prev : { ...prev, model }));
+  }, [searchParams]);
 
   useEffect(() => {
     const onBeforePrint = () => {
@@ -342,12 +352,12 @@ export default function BomPage() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <span className="px-3 py-1 rounded-full bg-violet-500/20 border border-violet-400/40 text-violet-300 text-xs font-bold tracking-widest uppercase">
-                BOM集計
+                部品表
               </span>
               <span className="text-slate-400 text-sm">構成部品マスタ</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white">BOM（構成部品）</h1>
-            <p className="mt-2 text-sm text-slate-400">機種別の構成部品と原価を管理します。D指令BOMと同じ表示トーンで確認できます。</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-white">部品表(BOM)</h1>
+            <p className="mt-2 text-sm text-slate-400">機種別の構成部品を登録・編集します。原価の確認は「機種標準原価」画面を使います。</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link href="/masters/import#ec30-bom">
@@ -355,9 +365,9 @@ export default function BomPage() {
                 図番管理表（BOM）取込
               </button>
             </Link>
-            <Link href="/heater/models/dr8008">
+            <Link href="/heater/models/dr8008?source=heater_model">
               <button className="px-5 py-2 rounded-full border border-slate-500/60 text-slate-300 hover:text-white hover:border-slate-400 transition text-sm">
-                ← D指令原価BOM
+                ← 機種標準原価
               </button>
             </Link>
             <Link href="/">
