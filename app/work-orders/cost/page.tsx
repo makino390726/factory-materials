@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
 
 type WorkOrderOption = {
@@ -124,7 +125,41 @@ export default function WorkOrderCostPage() {
   const [searchResults, setSearchResults] = useState<{[key: string]: Product[]}>({})
   const [isSearching, setIsSearching] = useState(false)
   const timersRef = useRef<Record<string, number>>({})
-  const [mode, setMode] = useState<'order' | 'line'>('order')
+  const searchParams = useSearchParams()
+  const initialModeParam = searchParams.get('mode')
+  const initialMode =
+    initialModeParam === 'line' || initialModeParam === 'parts' || initialModeParam === 'order'
+      ? initialModeParam
+      : 'order'
+  const [mode, setMode] = useState<'order' | 'line' | 'parts'>(initialMode)
+  const [heaterModels, setHeaterModels] = useState<
+    Array<{ model: string; name: string | null }>
+  >([])
+  const [selectedHeaterModel, setSelectedHeaterModel] = useState('')
+  const [partsCostLoading, setPartsCostLoading] = useState(false)
+  const [partsCostError, setPartsCostError] = useState<string | null>(null)
+  const [partsCostRows, setPartsCostRows] = useState<
+    Array<{
+      model: string
+      name: string | null
+      bom_total: number
+      assembly_labor_total: number
+      unit_total: number
+      order_count: number
+      qty_total: number
+      bom_part_count: number
+    }>
+  >([])
+  const [partsCostDetail, setPartsCostDetail] = useState<{
+    model: string
+    name: string | null
+    bom_total: number
+    assembly_labor_total: number
+    unit_total: number
+    order_count: number
+    qty_total: number
+    bom_part_count: number
+  } | null>(null)
   const [partsMaster, setPartsMaster] = useState<Product[]>([])
   const [lineMasters, setLineMasters] = useState<LineMaster[]>([])
   const [selectedPartKey, setSelectedPartKey] = useState('')
@@ -176,7 +211,70 @@ export default function WorkOrderCostPage() {
     }
     loadMonthlyLineMinutes()
 
+    fetch('/api/heater/models')
+      .then((r) => r.json())
+      .then((d) => setHeaterModels(Array.isArray(d) ? d : []))
+      .catch(() => setHeaterModels([]))
   }, [])
+
+  const loadPartsCostList = async () => {
+    setPartsCostLoading(true)
+    setPartsCostError(null)
+    try {
+      const res = await fetch('/api/heater/models/cost?list=1')
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || '製品パーツ原価一覧の取得に失敗しました')
+      setPartsCostRows(Array.isArray(json.rows) ? json.rows : [])
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : '製品パーツ原価一覧の取得に失敗しました')
+      setPartsCostRows([])
+    } finally {
+      setPartsCostLoading(false)
+    }
+  }
+
+  const loadPartsCostDetail = async (modelCode: string) => {
+    if (!modelCode) {
+      setPartsCostDetail(null)
+      return
+    }
+    setPartsCostLoading(true)
+    setPartsCostError(null)
+    try {
+      const res = await fetch(`/api/heater/models/cost?model=${encodeURIComponent(modelCode)}`)
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || '製品パーツ原価の取得に失敗しました')
+      setPartsCostDetail({
+        model: json.model,
+        name: json.name ?? null,
+        bom_total: Number(json.bom_total || 0),
+        assembly_labor_total: Number(json.assembly_labor_total || 0),
+        unit_total: Number(json.unit_total || 0),
+        order_count: Number(json.order_count || 0),
+        qty_total: Number(json.qty_total || 0),
+        bom_part_count: Number(json.bom_part_count || 0),
+      })
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : '製品パーツ原価の取得に失敗しました')
+      setPartsCostDetail(null)
+    } finally {
+      setPartsCostLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (mode !== 'parts') return
+    void loadPartsCostList()
+  }, [mode])
+
+  useEffect(() => {
+    if (mode !== 'parts') return
+    if (!selectedHeaterModel) {
+      setPartsCostDetail(null)
+      return
+    }
+    void loadPartsCostDetail(selectedHeaterModel)
+  }, [mode, selectedHeaterModel])
 
   useEffect(() => {
     const fetchWorkOrders = async () => {
@@ -1842,21 +1940,21 @@ export default function WorkOrderCostPage() {
           <div>
             <div className="flex items-center gap-4">
               <p className="text-rose-200 text-sm uppercase tracking-[0.35em]">Order Costing</p>
-              <div className="ml-4 inline-flex flex-wrap bg-slate-800 rounded-full p-1 gap-0.5 items-center">
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>D指令実績</button>
-                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>L指令実績</button>
-                <Link href="/heater/models/dr8008?source=heater_model" className="px-3 py-1 rounded-full text-sm text-emerald-300 hover:bg-emerald-900/50">
-                  機種標準原価 →
-                </Link>
+              <div className="ml-4 inline-flex flex-wrap bg-slate-800 rounded-full p-1 gap-0.5">
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'order' ? 'bg-rose-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('order')}>D指令</button>
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'line' ? 'bg-cyan-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('line')}>L指令</button>
+                <button className={`px-3 py-1 rounded-full text-sm ${mode === 'parts' ? 'bg-emerald-500 text-white' : 'text-slate-300'}`} onClick={() => setMode('parts')}>製品パーツ計算</button>
               </div>
             </div>
             <h1 className="text-3xl sm:text-4xl font-semibold text-white">
-              {mode === 'order' ? 'D指令実績原価' : 'L指令実績原価'}
+              {mode === 'order' ? 'D指令原価' : mode === 'line' ? 'L指令原価' : '製品パーツ計算'}
             </h1>
             <p className="mt-2 text-sm text-slate-300">
               {mode === 'order'
-                ? 'D指令ごとの材料費・工賃・間接費を編集・保存します（実績スナップショット）'
-                : 'パーツマスタを参照してL指令単位の原価を編集・保存します'}
+                ? 'D指令ごとの材料費・工賃・間接費を編集・保存します'
+                : mode === 'line'
+                  ? 'パーツマスタを参照してL指令単位の原価を編集・保存します'
+                  : '機種BOM×パーツ単価で製品（1台）原価を確認します'}
             </p>
           </div>
           <Link href="/">
@@ -1867,6 +1965,129 @@ export default function WorkOrderCostPage() {
         </div>
 
         <div className="bg-slate-900/95 rounded-3xl border-2 border-slate-700 shadow-2xl p-6 sm:p-8">
+          {mode === 'parts' ? (
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[260px] flex-1">
+                  <label className="text-sm font-semibold text-emerald-200">機種（製品）</label>
+                  <select
+                    value={selectedHeaterModel}
+                    onChange={(e) => setSelectedHeaterModel(e.target.value)}
+                    className="mt-2 w-full rounded-xl border-2 border-emerald-600/50 bg-slate-800 px-4 py-3 text-slate-100 font-medium focus:border-emerald-400 focus:outline-none"
+                  >
+                    <option value="">機種を選択してください</option>
+                    {heaterModels.map((m) => (
+                      <option key={m.model} value={m.model}>
+                        {m.model}{m.name ? ` - ${m.name}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadPartsCostList()
+                    if (selectedHeaterModel) void loadPartsCostDetail(selectedHeaterModel)
+                  }}
+                  disabled={partsCostLoading}
+                  className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {partsCostLoading ? '集計中…' : '再集計'}
+                </button>
+                {selectedHeaterModel && (
+                  <Link href={`/heater/models/dr8008?model=${encodeURIComponent(selectedHeaterModel)}`}>
+                    <button type="button" className="rounded-xl border border-violet-400/50 bg-violet-950/50 px-4 py-3 text-sm font-semibold text-violet-100">
+                      明細を開く
+                    </button>
+                  </Link>
+                )}
+                {selectedHeaterModel && (
+                  <Link href={`/heater/bom?model=${encodeURIComponent(selectedHeaterModel)}`}>
+                    <button type="button" className="rounded-xl border border-orange-400/50 bg-orange-950/40 px-4 py-3 text-sm font-semibold text-orange-100">
+                      BOM設定
+                    </button>
+                  </Link>
+                )}
+              </div>
+
+              {partsCostError && (
+                <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+                  {partsCostError}
+                </div>
+              )}
+
+              {partsCostDetail && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
+                    <p className="text-xs text-slate-400">機種</p>
+                    <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{partsCostDetail.model}</p>
+                    <p className="text-xs text-slate-400">{partsCostDetail.name || '（品名未設定）'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
+                    <p className="text-xs text-slate-400">BOM原価（1台）</p>
+                    <p className="mt-1 text-xl font-bold text-sky-300">¥{partsCostDetail.bom_total.toLocaleString()}</p>
+                    <p className="text-xs text-slate-500">{partsCostDetail.bom_part_count} パーツ</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
+                    <p className="text-xs text-slate-400">制作工賃（平均）</p>
+                    <p className="mt-1 text-xl font-bold text-emerald-300">¥{partsCostDetail.assembly_labor_total.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-2xl border border-yellow-500/40 bg-yellow-950/30 p-4">
+                    <p className="text-xs text-yellow-200/80">1台合計</p>
+                    <p className="mt-1 text-2xl font-extrabold text-yellow-300">¥{partsCostDetail.unit_total.toLocaleString()}</p>
+                    <p className="text-xs text-slate-400">指令 {partsCostDetail.order_count} / 台数 {partsCostDetail.qty_total}</p>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <h2 className="mb-2 text-sm font-bold text-slate-200">製品パーツ原価一覧</h2>
+                <div className="overflow-x-auto rounded-2xl border border-slate-700">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-950 text-left text-xs text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">機種コード</th>
+                        <th className="px-3 py-2">品名</th>
+                        <th className="px-3 py-2 text-right">BOM原価</th>
+                        <th className="px-3 py-2 text-right">制作工賃</th>
+                        <th className="px-3 py-2 text-right">1台合計</th>
+                        <th className="px-3 py-2 text-right">パーツ数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {partsCostLoading && partsCostRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
+                        </tr>
+                      ) : partsCostRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-8 text-center text-slate-500">機種がありません</td>
+                        </tr>
+                      ) : (
+                        partsCostRows.map((row) => (
+                          <tr
+                            key={row.model}
+                            onClick={() => setSelectedHeaterModel(row.model)}
+                            className={`cursor-pointer border-t border-slate-800 hover:bg-emerald-950/30 ${
+                              selectedHeaterModel === row.model ? 'bg-emerald-950/40' : ''
+                            }`}
+                          >
+                            <td className="px-3 py-2 font-mono text-emerald-300">{row.model}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.name || '-'}</td>
+                            <td className="px-3 py-2 text-right text-sky-300">¥{row.bom_total.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right text-emerald-300">¥{row.assembly_labor_total.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{row.unit_total.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right text-slate-400">{row.bom_part_count}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+          <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_1fr]">
             <div>
                 <label className="text-sm font-semibold text-slate-200">{mode === 'order' ? 'D指令' : 'パーツリスト選択'}</label>
@@ -2376,6 +2597,8 @@ export default function WorkOrderCostPage() {
             )}
           </div>
 
+          </>
+          )}
         </div>
       </div>
     </div>
