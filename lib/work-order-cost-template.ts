@@ -287,6 +287,7 @@ export async function applyCostTemplateToWorkOrder(
     const itemsPayload = sourceItems.map((item, index) => ({
       work_order_cost_id: targetCostId,
       line_no: index + 1,
+      component_name: (item as any).component_name ?? null,
       product_code: item.product_code,
       part_name: item.part_name,
       spec: item.spec,

@@ -43,6 +43,7 @@ type LineMaster = {
 
 type PartRow = {
   id: string
+  component_name: string
   product_code: string
   part_name: string
   spec: string
@@ -56,6 +57,7 @@ type PartRow = {
 
 const createPartRow = (): PartRow => ({
   id: crypto.randomUUID(),
+  component_name: '',
   product_code: '',
   part_name: '',
   spec: '',
@@ -153,6 +155,9 @@ export default function WorkOrderCostPage() {
     cost_price: 0,
   })
   const [partsReturnModel, setPartsReturnModel] = useState('')
+  const [modelCostImportFile, setModelCostImportFile] = useState<File | null>(null)
+  const [modelCostImporting, setModelCostImporting] = useState(false)
+  const [modelCostImportResult, setModelCostImportResult] = useState<string | null>(null)
   const [partsMaster, setPartsMaster] = useState<Product[]>([])
   const [lineMasters, setLineMasters] = useState<LineMaster[]>([])
   const [selectedPartKey, setSelectedPartKey] = useState('')
@@ -328,6 +333,60 @@ export default function WorkOrderCostPage() {
     setMode('line')
   }
 
+  const handleImportModelCostExcel = async () => {
+    if (!modelCostImportFile) {
+      setPartsCostError('Excel / CSV ファイルを選択してください')
+      return
+    }
+    setModelCostImporting(true)
+    setPartsCostError(null)
+    setModelCostImportResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', modelCostImportFile)
+      if (selectedHeaterModel) fd.append('model', selectedHeaterModel)
+      const res = await fetch('/api/heater/bom/import-model-cost', {
+        method: 'POST',
+        body: fd,
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'Excel取込に失敗しました')
+      }
+      const msg =
+        `取込完了: ${json.imported_rows}行 / ` +
+        `パーツ新規${json.parts_created}・更新${json.parts_updated} / ` +
+        `BOM新規${json.bom_created}・更新${json.bom_updated}` +
+        (json.error_count ? ` / 警告${json.error_count}件` : '')
+      setModelCostImportResult(msg)
+      if (Array.isArray(json.errors) && json.errors.length > 0) {
+        setPartsCostError(json.errors.slice(0, 5).join('\n'))
+      }
+      setModelCostImportFile(null)
+      if (selectedHeaterModel) {
+        await loadModelBomParts(selectedHeaterModel)
+      } else if (json.imported_rows > 0) {
+        // Excelに機種がある場合、先頭行の機種を選んで一覧更新
+        setPartsCostError(null)
+      }
+      const refreshed = await fetch('/api/heater/parts-master')
+      if (refreshed.ok) {
+        const data = await refreshed.json()
+        const mapped = (data || []).map((p: any, i: number) => ({
+          id: p.part_key || p.id || p.product_code || `pm-${i}`,
+          product_code: p.part_key || p.product_code || '',
+          name: p.part_name || p.name || '',
+          cost_price: p.cost_price || 0,
+        }))
+        setPartsMaster(mapped)
+      }
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'Excel取込に失敗しました')
+    } finally {
+      setModelCostImporting(false)
+    }
+  }
+
   useEffect(() => {
     if (mode !== 'parts') return
     if (!selectedHeaterModel) {
@@ -435,6 +494,7 @@ export default function WorkOrderCostPage() {
         if (Array.isArray(items) && items.length > 0) {
           const restored = items.map((it: any) => ({
             id: it.id || crypto.randomUUID(),
+            component_name: it.component_name || '',
             product_code: it.product_code || '',
             part_name: it.part_name || '',
             spec: it.spec || '',
@@ -461,6 +521,7 @@ export default function WorkOrderCostPage() {
       }
       setPartRows([{
         id: crypto.randomUUID(),
+        component_name: '',
         product_code: p.product_code || '',
         part_name: p.part_name || p.name || '',
         spec: p.spec || '',
@@ -1475,6 +1536,7 @@ export default function WorkOrderCostPage() {
 
           const items = filteredSourceItems.map((it: any) => ({
             id: crypto.randomUUID(),
+            component_name: it.component_name || '',
             product_code: it.product_code || '',
             part_name: it.part_name || '',
             spec: it.spec || '',
@@ -1599,6 +1661,7 @@ export default function WorkOrderCostPage() {
       : (selectedOrder?.order_no || '')
     const itemsPayload = partRows.map((r, idx) => ({
       line_no: idx + 1,
+      component_name: r.component_name || null,
       product_code: r.product_code,
       part_name: r.part_name,
       spec: r.spec,
@@ -1655,7 +1718,7 @@ export default function WorkOrderCostPage() {
           // 保存成功時に localStorage に退避、明細をクリア
           try {
             const key = `linecost:${selectedPartKey}`
-            const itemsPayload = partRows.map(r => ({ product_code: r.product_code, part_name: r.part_name, spec: r.spec, quantity: r.quantity, unit_price: r.unit_price, material_cost: r.material_cost, labor: r.labor_cost, indirect_cost: r.indirect_cost, total: calculateRowTotal(r as any), cost_type: r.cost_type || '加', master_type: 'ライン原価', master_id: selectedPartKey }))
+            const itemsPayload = partRows.map(r => ({ component_name: r.component_name, product_code: r.product_code, part_name: r.part_name, spec: r.spec, quantity: r.quantity, unit_price: r.unit_price, material_cost: r.material_cost, labor: r.labor_cost, indirect_cost: r.indirect_cost, total: calculateRowTotal(r as any), cost_type: r.cost_type || '加', master_type: 'ライン原価', master_id: selectedPartKey }))
             localStorage.setItem(key, JSON.stringify(itemsPayload || []))
           } catch (err) {
             console.error('localStorage save error', err)
@@ -1808,6 +1871,7 @@ export default function WorkOrderCostPage() {
 
         const itemsPayload = parsed.map((item: any, idx: number) => ({
           line_no: idx + 1,
+          component_name: item.component_name ?? null,
           product_code: item.product_code ?? '',
           part_name: item.part_name ?? '',
           spec: item.spec ?? '',
@@ -1945,6 +2009,7 @@ export default function WorkOrderCostPage() {
             if (Array.isArray(items) && items.length > 0) {
               const restored = items.map((it: any) => ({
                 id: it.id || crypto.randomUUID(),
+                component_name: it.component_name || '',
                 product_code: it.product_code || '',
                 part_name: it.part_name || '',
                 spec: it.spec || '',
@@ -2076,8 +2141,49 @@ export default function WorkOrderCostPage() {
                 )}
               </div>
 
+              <div className="rounded-2xl border border-indigo-500/40 bg-indigo-950/20 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold text-indigo-200">Excel自動取込</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      列例: 機種 / 部品キー / 品名 / 製品コード / 規格 / 数量 / 単価
+                      {selectedHeaterModel ? '（機種列が空なら選択中の機種を使用）' : '（機種列は必須）'}
+                    </p>
+                  </div>
+                  <a
+                    href="/samples/model-parts-cost-import-sample.csv"
+                    download="機種別原価取込サンプル.csv"
+                    className="rounded-full border border-indigo-400/50 bg-indigo-900/40 px-4 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-800/50"
+                  >
+                    サンプルCSVをダウンロード
+                  </a>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => {
+                      setModelCostImportFile(e.target.files?.[0] ?? null)
+                      setModelCostImportResult(null)
+                    }}
+                    className="rounded-xl border border-indigo-500/50 bg-slate-900 px-3 py-2 text-sm text-indigo-100 file:mr-3 file:rounded-full file:border-0 file:bg-indigo-600 file:px-3 file:py-1 file:text-white"
+                  />
+                  <button
+                    type="button"
+                    disabled={modelCostImporting || !modelCostImportFile}
+                    onClick={() => void handleImportModelCostExcel()}
+                    className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {modelCostImporting ? '取込中…' : 'Excel取込実行'}
+                  </button>
+                </div>
+                {modelCostImportResult && (
+                  <p className="text-sm text-emerald-300">{modelCostImportResult}</p>
+                )}
+              </div>
+
               {partsCostError && (
-                <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+                <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200 whitespace-pre-wrap">
                   {partsCostError}
                 </div>
               )}
@@ -2399,7 +2505,8 @@ export default function WorkOrderCostPage() {
             <table className="min-w-full text-sm">
               <thead className="text-left bg-gradient-to-r from-slate-800 to-slate-700">
                 <tr>
-                  <th className="py-4 pr-4 pl-4 font-bold text-slate-200 border-b-2 border-slate-600">商品コード</th>
+                  <th className="py-4 pr-4 pl-4 font-bold text-slate-200 border-b-2 border-slate-600">構成部品名</th>
+                  <th className="py-4 pr-4 font-bold text-slate-200 border-b-2 border-slate-600">商品コード</th>
                   <th className="py-4 pr-4 font-bold text-slate-200 border-b-2 border-slate-600">部品名</th>
                   <th className="py-4 pr-4 font-bold text-slate-200 border-b-2 border-slate-600">規格</th>
                   <th className="py-4 pr-4 font-bold text-slate-200 border-b-2 border-slate-600">数量</th>
@@ -2415,6 +2522,7 @@ export default function WorkOrderCostPage() {
               <tbody className="text-slate-300">
                 <tr className="bg-rose-900/40 border-b border-rose-800/50">
                   <td className="py-4 pr-4 pl-4 text-slate-500">-</td>
+                  <td className="py-4 pr-4 text-slate-500">-</td>
                   <td className="py-4 pr-4">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-rose-300">工賃</span>
@@ -2503,6 +2611,14 @@ export default function WorkOrderCostPage() {
                   return (
                     <tr key={row.id} className={`border-b border-slate-700 ${isEven ? 'bg-slate-800/50' : 'bg-slate-900/30'}`}>
                       <td className="py-4 pr-4 pl-4">
+                        <input
+                          value={row.component_name}
+                          onChange={(event) => handlePartChange(row.id, 'component_name', event.target.value)}
+                          className="w-40 rounded-lg border-2 border-slate-600 bg-slate-800 text-slate-100 px-3 py-2 font-medium shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/50 focus:outline-none"
+                          placeholder="例: 制御ボックス本体"
+                        />
+                      </td>
+                      <td className="py-4 pr-4">
                         <input
                           value={row.product_code}
                           onChange={(event) => handlePartChange(row.id, 'product_code', event.target.value)}

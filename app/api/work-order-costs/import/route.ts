@@ -19,6 +19,7 @@ type ImportRow = {
   order_no: string
   branch_no: string
   display_name: string
+  component_name: string
   product_code: string
   part_name: string
   spec: string
@@ -101,6 +102,7 @@ const mapRow = (row: Record<string, unknown>, index: number): ImportRow | null =
     order_no: orderNo,
     branch_no: branchNo,
     display_name: String(pick(row, ['display_name', 'displayname', '表示名']) ?? '').trim(),
+    component_name: String(pick(row, ['component_name', '構成部品名', '構成要素', '備考']) ?? '').trim(),
     product_code: String(pick(row, ['product_code', 'productcode', 'コード', '商品コード']) ?? '').trim(),
     part_name: String(pick(row, ['part_name', 'partname', '部品名']) ?? '').trim(),
     spec: String(pick(row, ['spec', '規格']) ?? '').trim(),
@@ -457,6 +459,7 @@ export async function POST(req: Request) {
       const rowsToInsert = rows.map((row) => ({
         work_order_cost_id: workOrderCostId,
         line_no: row.line_no,
+        component_name: row.component_name || null,
         product_code: row.product_code,
         part_name: row.part_name,
         spec: row.spec,

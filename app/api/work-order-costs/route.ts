@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       const itemsToInsert = items.map((it: any, idx: number) => ({
         work_order_cost_id: createdHeader.id,
         line_no: it.line_no ?? idx + 1,
+        component_name: it.component_name ?? null,
         product_code: it.product_code,
         part_name: it.part_name,
         spec: it.spec,
@@ -151,6 +152,7 @@ export async function PUT(req: Request) {
       const itemsToInsert = items.map((it: any, idx: number) => ({
         work_order_cost_id: ex.id,
         line_no: it.line_no ?? idx + 1,
+        component_name: it.component_name ?? null,
         product_code: it.product_code,
         part_name: it.part_name,
         spec: it.spec,
