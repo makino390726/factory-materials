@@ -131,28 +131,28 @@ export default function WorkOrderCostPage() {
   const [selectedHeaterModel, setSelectedHeaterModel] = useState('')
   const [partsCostLoading, setPartsCostLoading] = useState(false)
   const [partsCostError, setPartsCostError] = useState<string | null>(null)
-  const [partsCostRows, setPartsCostRows] = useState<
+  const [modelBomParts, setModelBomParts] = useState<
     Array<{
-      model: string
-      name: string | null
-      bom_total: number
-      assembly_labor_total: number
-      unit_total: number
-      order_count: number
-      qty_total: number
-      bom_part_count: number
+      part_key: string
+      part_name: string | null
+      product_code: string | null
+      bom_quantity: number
+      unit_cost: number
+      subtotal: number
     }>
   >([])
-  const [partsCostDetail, setPartsCostDetail] = useState<{
-    model: string
-    name: string | null
-    bom_total: number
-    assembly_labor_total: number
-    unit_total: number
-    order_count: number
-    qty_total: number
-    bom_part_count: number
-  } | null>(null)
+  const [modelBomGrandTotal, setModelBomGrandTotal] = useState(0)
+  const [showNewBomPartForm, setShowNewBomPartForm] = useState(false)
+  const [newBomPartSaving, setNewBomPartSaving] = useState(false)
+  const [newBomPart, setNewBomPart] = useState({
+    part_key: '',
+    part_name: '',
+    product_code: '',
+    spec: '',
+    quantity: 1,
+    cost_price: 0,
+  })
+  const [partsReturnModel, setPartsReturnModel] = useState('')
   const [partsMaster, setPartsMaster] = useState<Product[]>([])
   const [lineMasters, setLineMasters] = useState<LineMaster[]>([])
   const [selectedPartKey, setSelectedPartKey] = useState('')
@@ -210,63 +210,133 @@ export default function WorkOrderCostPage() {
       .catch(() => setHeaterModels([]))
   }, [])
 
-  const loadPartsCostList = async () => {
-    setPartsCostLoading(true)
-    setPartsCostError(null)
-    try {
-      const res = await fetch('/api/heater/models/cost?list=1')
-      const json = await res.json()
-      if (!res.ok || json.error) throw new Error(json.error || '製品パーツ原価一覧の取得に失敗しました')
-      setPartsCostRows(Array.isArray(json.rows) ? json.rows : [])
-    } catch (e) {
-      setPartsCostError(e instanceof Error ? e.message : '製品パーツ原価一覧の取得に失敗しました')
-      setPartsCostRows([])
-    } finally {
-      setPartsCostLoading(false)
-    }
-  }
-
-  const loadPartsCostDetail = async (modelCode: string) => {
+  const loadModelBomParts = async (modelCode: string) => {
     if (!modelCode) {
-      setPartsCostDetail(null)
+      setModelBomParts([])
+      setModelBomGrandTotal(0)
       return
     }
     setPartsCostLoading(true)
     setPartsCostError(null)
     try {
-      const res = await fetch(`/api/heater/models/cost?model=${encodeURIComponent(modelCode)}`)
+      const res = await fetch(
+        `/api/heater/bom/cost-breakdown?model=${encodeURIComponent(modelCode)}`
+      )
       const json = await res.json()
-      if (!res.ok || json.error) throw new Error(json.error || '製品パーツ原価の取得に失敗しました')
-      setPartsCostDetail({
-        model: json.model,
-        name: json.name ?? null,
-        bom_total: Number(json.bom_total || 0),
-        assembly_labor_total: Number(json.assembly_labor_total || 0),
-        unit_total: Number(json.unit_total || 0),
-        order_count: Number(json.order_count || 0),
-        qty_total: Number(json.qty_total || 0),
-        bom_part_count: Number(json.bom_part_count || 0),
-      })
+      if (!res.ok || json.error) throw new Error(json.error || '機種パーツ一覧の取得に失敗しました')
+      const sections = Array.isArray(json.sections) ? json.sections : []
+      setModelBomParts(
+        sections.map((s: any) => ({
+          part_key: String(s.part_key || ''),
+          part_name: s.part_name ?? null,
+          product_code: s.product_code ?? null,
+          bom_quantity: Number(s.bom_quantity || 0),
+          unit_cost: Number(s.unit_cost || 0),
+          subtotal: Number(s.subtotal || 0),
+        }))
+      )
+      setModelBomGrandTotal(Number(json.grand_total || 0))
+      setShowNewBomPartForm(sections.length === 0)
     } catch (e) {
-      setPartsCostError(e instanceof Error ? e.message : '製品パーツ原価の取得に失敗しました')
-      setPartsCostDetail(null)
+      setPartsCostError(e instanceof Error ? e.message : '機種パーツ一覧の取得に失敗しました')
+      setModelBomParts([])
+      setModelBomGrandTotal(0)
     } finally {
       setPartsCostLoading(false)
     }
   }
 
-  useEffect(() => {
-    if (mode !== 'parts') return
-    void loadPartsCostList()
-  }, [mode])
+  const handleRegisterBomPart = async () => {
+    if (!selectedHeaterModel) {
+      setPartsCostError('機種を選択してください')
+      return
+    }
+    if (!newBomPart.part_key.trim() || !newBomPart.part_name.trim()) {
+      setPartsCostError('部品キーと品名は必須です')
+      return
+    }
+    setNewBomPartSaving(true)
+    setPartsCostError(null)
+    try {
+      const partKey = newBomPart.part_key.trim()
+      const partRes = await fetch('/api/heater/parts-master', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          part_key: partKey,
+          part_name: newBomPart.part_name.trim(),
+          product_code: newBomPart.product_code.trim() || null,
+          spec: newBomPart.spec.trim() || null,
+          cost_price: Number(newBomPart.cost_price) || 0,
+          shelf_no: null,
+        }),
+      })
+      if (!partRes.ok) {
+        const errJson = await partRes.json().catch(() => ({}))
+        // 既にパーツがある場合は BOM 紐づけのみ続行
+        if (!String(errJson.error || '').includes('既に登録')) {
+          throw new Error(errJson.error || 'パーツ登録に失敗しました')
+        }
+      }
+
+      const bomRes = await fetch('/api/heater/bom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedHeaterModel,
+          part_key: partKey,
+          quantity: Number(newBomPart.quantity) || 1,
+        }),
+      })
+      if (!bomRes.ok) {
+        const errJson = await bomRes.json().catch(() => ({}))
+        throw new Error(errJson.error || 'BOM登録に失敗しました')
+      }
+
+      setNewBomPart({
+        part_key: '',
+        part_name: '',
+        product_code: '',
+        spec: '',
+        quantity: 1,
+        cost_price: 0,
+      })
+      setShowNewBomPartForm(false)
+      await loadModelBomParts(selectedHeaterModel)
+      // パーツマスタも更新
+      const refreshed = await fetch('/api/heater/parts-master')
+      if (refreshed.ok) {
+        const data = await refreshed.json()
+        const mapped = (data || []).map((p: any, i: number) => ({
+          id: p.part_key || p.id || p.product_code || `pm-${i}`,
+          product_code: p.part_key || p.product_code || '',
+          name: p.part_name || p.name || '',
+          cost_price: p.cost_price || 0,
+        }))
+        setPartsMaster(mapped)
+      }
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : '登録に失敗しました')
+    } finally {
+      setNewBomPartSaving(false)
+    }
+  }
+
+  const openPartCostEditor = (partKey: string) => {
+    setPartsReturnModel(selectedHeaterModel)
+    setSelectedPartKey(partKey)
+    setMode('line')
+  }
 
   useEffect(() => {
     if (mode !== 'parts') return
     if (!selectedHeaterModel) {
-      setPartsCostDetail(null)
+      setModelBomParts([])
+      setModelBomGrandTotal(0)
+      setShowNewBomPartForm(false)
       return
     }
-    void loadPartsCostDetail(selectedHeaterModel)
+    void loadModelBomParts(selectedHeaterModel)
   }, [mode, selectedHeaterModel])
 
   useEffect(() => {
@@ -1946,9 +2016,21 @@ export default function WorkOrderCostPage() {
               {mode === 'order'
                 ? 'D指令ごとの材料費・工賃・間接費を編集・保存します'
                 : mode === 'line'
-                  ? 'パーツマスタを参照してL指令単位の原価を編集・保存します'
-                  : '機種BOM×パーツ単価で製品（1台）原価を確認します'}
+                  ? 'パーツ単位で材料費・工賃・間接費を編集・保存します'
+                  : '機種を選ぶと該当パーツが表示されます。パーツをクリックして原価計算できます'}
             </p>
+            {mode === 'line' && partsReturnModel && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('parts')
+                  setSelectedHeaterModel(partsReturnModel)
+                }}
+                className="mt-3 rounded-full border border-emerald-400/50 bg-emerald-950/40 px-4 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/50"
+              >
+                ← 製品パーツ計算（{partsReturnModel}）に戻る
+              </button>
+            )}
           </div>
           <Link href="/">
             <button className="px-6 py-2 rounded-full border border-rose-300/50 text-rose-100 hover:border-rose-200 hover:text-white transition">
@@ -1976,23 +2058,14 @@ export default function WorkOrderCostPage() {
                     ))}
                   </select>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadPartsCostList()
-                    if (selectedHeaterModel) void loadPartsCostDetail(selectedHeaterModel)
-                  }}
-                  disabled={partsCostLoading}
-                  className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
-                >
-                  {partsCostLoading ? '集計中…' : '再集計'}
-                </button>
                 {selectedHeaterModel && (
-                  <Link href={`/heater/models/dr8008?model=${encodeURIComponent(selectedHeaterModel)}`}>
-                    <button type="button" className="rounded-xl border border-violet-400/50 bg-violet-950/50 px-4 py-3 text-sm font-semibold text-violet-100">
-                      明細を開く
-                    </button>
-                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewBomPartForm((v) => !v)}
+                    className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500"
+                  >
+                    {showNewBomPartForm ? '登録フォームを閉じる' : '＋ パーツ新規登録'}
+                  </button>
                 )}
                 {selectedHeaterModel && (
                   <Link href={`/heater/bom?model=${encodeURIComponent(selectedHeaterModel)}`}>
@@ -2009,75 +2082,146 @@ export default function WorkOrderCostPage() {
                 </div>
               )}
 
-              {partsCostDetail && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
-                    <p className="text-xs text-slate-400">機種</p>
-                    <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{partsCostDetail.model}</p>
-                    <p className="text-xs text-slate-400">{partsCostDetail.name || '（品名未設定）'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
-                    <p className="text-xs text-slate-400">BOM原価（1台）</p>
-                    <p className="mt-1 text-xl font-bold text-sky-300">¥{partsCostDetail.bom_total.toLocaleString()}</p>
-                    <p className="text-xs text-slate-500">{partsCostDetail.bom_part_count} パーツ</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
-                    <p className="text-xs text-slate-400">制作工賃（平均）</p>
-                    <p className="mt-1 text-xl font-bold text-emerald-300">¥{partsCostDetail.assembly_labor_total.toLocaleString()}</p>
-                  </div>
-                  <div className="rounded-2xl border border-yellow-500/40 bg-yellow-950/30 p-4">
-                    <p className="text-xs text-yellow-200/80">1台合計</p>
-                    <p className="mt-1 text-2xl font-extrabold text-yellow-300">¥{partsCostDetail.unit_total.toLocaleString()}</p>
-                    <p className="text-xs text-slate-400">指令 {partsCostDetail.order_count} / 台数 {partsCostDetail.qty_total}</p>
-                  </div>
+              {!selectedHeaterModel ? (
+                <div className="rounded-2xl border border-dashed border-slate-600 px-6 py-12 text-center text-slate-400">
+                  機種を選択すると、該当パーツ一覧が表示されます
                 </div>
-              )}
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
+                      <p className="text-xs text-slate-400">機種</p>
+                      <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{selectedHeaterModel}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
+                      <p className="text-xs text-slate-400">パーツ数</p>
+                      <p className="mt-1 text-xl font-bold text-sky-300">{modelBomParts.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-yellow-500/40 bg-yellow-950/30 p-4">
+                      <p className="text-xs text-yellow-200/80">BOM合計（1台）</p>
+                      <p className="mt-1 text-2xl font-extrabold text-yellow-300">¥{modelBomGrandTotal.toLocaleString()}</p>
+                    </div>
+                  </div>
 
-              <div>
-                <h2 className="mb-2 text-sm font-bold text-slate-200">製品パーツ原価一覧</h2>
-                <div className="overflow-x-auto rounded-2xl border border-slate-700">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-slate-950 text-left text-xs text-slate-400">
-                      <tr>
-                        <th className="px-3 py-2">機種コード</th>
-                        <th className="px-3 py-2">品名</th>
-                        <th className="px-3 py-2 text-right">BOM原価</th>
-                        <th className="px-3 py-2 text-right">制作工賃</th>
-                        <th className="px-3 py-2 text-right">1台合計</th>
-                        <th className="px-3 py-2 text-right">パーツ数</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {partsCostLoading && partsCostRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
-                        </tr>
-                      ) : partsCostRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-slate-500">機種がありません</td>
-                        </tr>
-                      ) : (
-                        partsCostRows.map((row) => (
-                          <tr
-                            key={row.model}
-                            onClick={() => setSelectedHeaterModel(row.model)}
-                            className={`cursor-pointer border-t border-slate-800 hover:bg-emerald-950/30 ${
-                              selectedHeaterModel === row.model ? 'bg-emerald-950/40' : ''
-                            }`}
-                          >
-                            <td className="px-3 py-2 font-mono text-emerald-300">{row.model}</td>
-                            <td className="px-3 py-2 text-slate-300">{row.name || '-'}</td>
-                            <td className="px-3 py-2 text-right text-sky-300">¥{row.bom_total.toLocaleString()}</td>
-                            <td className="px-3 py-2 text-right text-emerald-300">¥{row.assembly_labor_total.toLocaleString()}</td>
-                            <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{row.unit_total.toLocaleString()}</td>
-                            <td className="px-3 py-2 text-right text-slate-400">{row.bom_part_count}</td>
+                  {showNewBomPartForm && (
+                    <div className="rounded-2xl border border-emerald-600/40 bg-emerald-950/20 p-5 space-y-4">
+                      <h3 className="text-sm font-bold text-emerald-200">この機種にパーツを新規登録</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">部品キー *</label>
+                          <input
+                            value={newBomPart.part_key}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, part_key: e.target.value })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                            placeholder="例: SGR300-FRAME"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">品名 *</label>
+                          <input
+                            value={newBomPart.part_name}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, part_name: e.target.value })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">1台当たり必要数</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={newBomPart.quantity}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, quantity: parseFloat(e.target.value) || 0 })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">製品コード</label>
+                          <input
+                            value={newBomPart.product_code}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, product_code: e.target.value })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">規格</label>
+                          <input
+                            value={newBomPart.spec}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, spec: e.target.value })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">初期単価 (¥)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={newBomPart.cost_price}
+                            onChange={(e) => setNewBomPart({ ...newBomPart, cost_price: parseFloat(e.target.value) || 0 })}
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={newBomPartSaving}
+                        onClick={() => void handleRegisterBomPart()}
+                        className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {newBomPartSaving ? '登録中…' : 'パーツ＋BOM登録'}
+                      </button>
+                    </div>
+                  )}
+
+                  <div>
+                    <p className="mb-2 text-sm font-bold text-slate-200">
+                      機種パーツ一覧
+                      <span className="ml-2 text-xs font-normal text-slate-400">行をクリックするとL指令形式で原価計算できます</span>
+                    </p>
+                    <div className="overflow-x-auto rounded-2xl border border-slate-700">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-950 text-left text-xs text-slate-400">
+                          <tr>
+                            <th className="px-3 py-2">部品キー</th>
+                            <th className="px-3 py-2">品名</th>
+                            <th className="px-3 py-2 text-right">必要数</th>
+                            <th className="px-3 py-2 text-right">単価</th>
+                            <th className="px-3 py-2 text-right">小計</th>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                        </thead>
+                        <tbody>
+                          {partsCostLoading ? (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
+                            </tr>
+                          ) : modelBomParts.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
+                                この機種にパーツがありません。「＋ パーツ新規登録」から追加してください
+                              </td>
+                            </tr>
+                          ) : (
+                            modelBomParts.map((row) => (
+                              <tr
+                                key={row.part_key}
+                                onClick={() => openPartCostEditor(row.part_key)}
+                                className="cursor-pointer border-t border-slate-800 hover:bg-cyan-950/40"
+                              >
+                                <td className="px-3 py-2 font-mono text-cyan-300">{row.part_key}</td>
+                                <td className="px-3 py-2 text-slate-300">{row.part_name || '-'}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">{row.bom_quantity}</td>
+                                <td className="px-3 py-2 text-right text-sky-300">¥{row.unit_cost.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{row.subtotal.toLocaleString()}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
           <>
