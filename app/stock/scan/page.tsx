@@ -724,7 +724,10 @@ export default function QRScanPage() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-300 mb-2">使用目的</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  使用目的
+                  <span className="ml-2 text-xs font-normal text-gray-500">（省略可・スキャン後にも入力できます）</span>
+                </label>
                 <textarea
                   value={usagePurpose}
                   onChange={(e) => setUsagePurpose(e.target.value)}
@@ -879,6 +882,16 @@ export default function QRScanPage() {
                     }}
                     className="w-full px-4 py-3 bg-slate-800 border-2 border-cyan-400 rounded-lg text-white focus:outline-none focus:border-cyan-300"
                     min="1"
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">使用目的</label>
+                  <textarea
+                    value={usagePurpose}
+                    onChange={(e) => setUsagePurpose(e.target.value)}
+                    placeholder="例: 製造AL指令, 修理対応, 品質確認用"
+                    className="w-full px-4 py-3 bg-slate-800 border-2 border-cyan-400 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-300 resize-none h-20"
                   />
                 </div>
 
@@ -1114,7 +1127,17 @@ export default function QRScanPage() {
                 </div>
               )}
 
-              <div className="flex gap-3 mt-6">
+              <div className="mt-6 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">使用目的</label>
+                <textarea
+                  value={usagePurpose}
+                  onChange={(e) => setUsagePurpose(e.target.value)}
+                  placeholder="例: 製造AL指令, 修理対応, 品質確認用"
+                  className="w-full px-4 py-3 bg-slate-800 border-2 border-cyan-400 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-300 resize-none h-20"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-4">
                 <button
                   onClick={executeAllScannedItems}
                   disabled={isProcessing || scannedItems.filter((i) => i.quantity > 0).length === 0}
