@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { buildLinePartCostUnitMap } from '@/lib/line-part-cost-breakdown'
 
 export const runtime = 'nodejs'
 
@@ -8,17 +9,149 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-type ReportType = 'order' | 'line'
+type ReportType = 'order' | 'line' | 'model'
 
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+async function buildModelCostList() {
+  const { data: models, error: modelsError } = await supabase
+    .from('heater_models')
+    .select('model, name')
+    .order('model')
+
+  if (modelsError) throw modelsError
+
+  let allBom: Array<{ model: string; part_key: string; quantity: number }> = []
+  let from = 0
+  const pageSize = 1000
+  while (true) {
+    const { data, error } = await supabase
+      .from('heater_bom')
+      .select('model, part_key, quantity')
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    allBom = allBom.concat(
+      data.map((row) => ({
+        model: String(row.model || ''),
+        part_key: String(row.part_key || ''),
+        quantity: toNumber(row.quantity),
+      }))
+    )
+    if (data.length < pageSize) break
+    from += pageSize
+  }
+
+  const partKeys = [...new Set(allBom.map((b) => b.part_key).filter(Boolean))]
+  const partsFallbackMap = new Map<
+    string,
+    { cost_price: number | null; material_cost_total: number | null; indirect_cost_total: number | null }
+  >()
+
+  if (partKeys.length > 0) {
+    const { data: partsData, error: partsError } = await supabase
+      .from('heater_parts_master')
+      .select('part_key, cost_price, material_cost_total, indirect_cost_total')
+      .in('part_key', partKeys)
+    if (partsError) throw partsError
+    for (const p of partsData || []) {
+      partsFallbackMap.set(String(p.part_key), {
+        cost_price: p.cost_price ?? null,
+        material_cost_total: p.material_cost_total ?? null,
+        indirect_cost_total: p.indirect_cost_total ?? null,
+      })
+    }
+  }
+
+  const lineCostMap = await buildLinePartCostUnitMap(supabase, partKeys, partsFallbackMap)
+  const nameByModel = new Map((models || []).map((m) => [String(m.model), String(m.name || '').trim()]))
+
+  type Agg = {
+    model: string
+    display_name: string
+    material_cost: number
+    labor_cost: number
+    indirect_cost: number
+    total_cost: number
+    part_count: number
+  }
+  const map = new Map<string, Agg>()
+
+  for (const item of allBom) {
+    if (!item.model || !item.part_key) continue
+    let row = map.get(item.model)
+    if (!row) {
+      const dn = nameByModel.get(item.model) || ''
+      row = {
+        model: item.model,
+        display_name: dn || item.model,
+        material_cost: 0,
+        labor_cost: 0,
+        indirect_cost: 0,
+        total_cost: 0,
+        part_count: 0,
+      }
+      map.set(item.model, row)
+    }
+
+    const qty = item.quantity || 0
+    const unit = lineCostMap.get(item.part_key)
+    const fallback = partsFallbackMap.get(item.part_key)
+    const materialUnit = unit ? Number(unit.material_unit || 0) : Number(fallback?.material_cost_total || 0)
+    const laborUnit = unit ? Number(unit.labor_unit || 0) : 0
+    const indirectUnit = unit ? Number(unit.indirect_unit || 0) : Number(fallback?.indirect_cost_total || 0)
+    const totalUnit = unit
+      ? Number(unit.total_unit || materialUnit + laborUnit + indirectUnit)
+      : Number(fallback?.cost_price || 0)
+
+    row.material_cost += materialUnit * qty
+    row.labor_cost += laborUnit * qty
+    row.indirect_cost += indirectUnit * qty
+    row.total_cost += totalUnit * qty
+    row.part_count += 1
+  }
+
+  for (const m of models || []) {
+    const code = String(m.model || '').trim()
+    if (!code || map.has(code)) continue
+    const dn = String(m.name || '').trim()
+    map.set(code, {
+      model: code,
+      display_name: dn || code,
+      material_cost: 0,
+      labor_cost: 0,
+      indirect_cost: 0,
+      total_cost: 0,
+      part_count: 0,
+    })
+  }
+
+  return Array.from(map.values())
+    .map((row) => ({
+      ...row,
+      material_cost: Math.round(row.material_cost),
+      labor_cost: Math.round(row.labor_cost),
+      indirect_cost: Math.round(row.indirect_cost),
+      total_cost: Math.round(row.total_cost),
+    }))
+    .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true }))
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const reportType = (searchParams.get('type') === 'line' ? 'line' : 'order') as ReportType
+    const typeParam = searchParams.get('type')
+    const reportType = (
+      typeParam === 'line' ? 'line' : typeParam === 'model' ? 'model' : 'order'
+    ) as ReportType
+
+    if (reportType === 'model') {
+      const modelRows = await buildModelCostList()
+      return NextResponse.json({ reportType, rows: modelRows, bomSummary: [] })
+    }
 
     if (reportType === 'line') {
       const { data: items, error } = await supabase
@@ -77,9 +210,8 @@ export async function GET(req: Request) {
         }))
         .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))
 
-      // 機種ごとのBOM合計を計算
       const partKeys = Array.from(grouped.keys())
-      let bomMap = new Map<string, string>()
+      const bomMap = new Map<string, string>()
 
       if (partKeys.length > 0) {
         const { data: bomRows, error: bomError } = await supabase
@@ -91,9 +223,7 @@ export async function GET(req: Request) {
           for (const bom of bomRows) {
             const model = String(bom.model || '').trim()
             const partKey = String(bom.part_key || '').trim()
-            if (model && partKey) {
-              bomMap.set(partKey, model)
-            }
+            if (model && partKey) bomMap.set(partKey, model)
           }
         }
       }
@@ -119,14 +249,10 @@ export async function GET(req: Request) {
           indirect_cost: 0,
           total_cost: 0,
         }
-        
-        if (!current.product_code) {
-          current.product_code = partKey
-        }
-        if (!current.part_name && row.product_name) {
-          current.part_name = row.product_name
-        }
-        
+
+        if (!current.product_code) current.product_code = partKey
+        if (!current.part_name && row.product_name) current.part_name = row.product_name
+
         current.material_cost += row.material_cost
         current.labor_cost += row.labor_cost
         current.indirect_cost += row.indirect_cost
@@ -134,11 +260,11 @@ export async function GET(req: Request) {
         bomSummary.set(model, current)
       }
 
-      const bomSummaryRows = Array.from(bomSummary.values()).sort((a, b) =>
-        a.model.localeCompare(b.model, 'ja-JP')
-      )
-
-      return NextResponse.json({ reportType, rows, bomSummary: bomSummaryRows })
+      return NextResponse.json({
+        reportType,
+        rows,
+        bomSummary: Array.from(bomSummary.values()).sort((a, b) => a.model.localeCompare(b.model, 'ja-JP')),
+      })
     }
 
     const { data: headers, error: headerError } = await supabase
@@ -199,7 +325,6 @@ export async function GET(req: Request) {
       })
       .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))
 
-    // BOMベースのD指令の場合、BOM合計を計算
     const bomSummary = new Map<string, {
       model: string
       product_code: string
@@ -283,12 +408,8 @@ export async function GET(req: Request) {
             totalSum += partInfo.cost_price * qty
           }
 
-          if (!firstProductCode && partInfo?.product_code) {
-            firstProductCode = partInfo.product_code
-          }
-          if (!firstPartName && partInfo?.part_name) {
-            firstPartName = partInfo.part_name
-          }
+          if (!firstProductCode && partInfo?.product_code) firstProductCode = partInfo.product_code
+          if (!firstPartName && partInfo?.part_name) firstPartName = partInfo.part_name
         }
 
         bomSummary.set(bomModel, {
@@ -303,11 +424,11 @@ export async function GET(req: Request) {
       }
     }
 
-    const bomSummaryRows = Array.from(bomSummary.values()).sort((a, b) =>
-      a.model.localeCompare(b.model, 'ja-JP')
-    )
-
-    return NextResponse.json({ reportType, rows, bomSummary: bomSummaryRows })
+    return NextResponse.json({
+      reportType,
+      rows,
+      bomSummary: Array.from(bomSummary.values()).sort((a, b) => a.model.localeCompare(b.model, 'ja-JP')),
+    })
   } catch (error) {
     console.error('print report unexpected error:', error)
     return NextResponse.json({ error: 'failed' }, { status: 500 })

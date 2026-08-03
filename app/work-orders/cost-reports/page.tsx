@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 
-type ReportType = 'order' | 'line'
+type ReportType = 'order' | 'line' | 'model'
 
 type CostReportRow = {
   order_no: string
@@ -27,6 +27,16 @@ type BomSummaryRow = {
   total_cost: number
 }
 
+type ModelReportRow = {
+  model: string
+  display_name: string
+  material_cost: number
+  labor_cost: number
+  indirect_cost: number
+  total_cost: number
+  part_count: number
+}
+
 const currency = (value: number) => `\u00a5${Math.round(value || 0).toLocaleString('ja-JP')}`
 const unitValue = (total: number, quantity: number) => {
   const qty = Number(quantity || 0)
@@ -34,14 +44,30 @@ const unitValue = (total: number, quantity: number) => {
   return Number(total || 0) / qty
 }
 
+function formatCostAsOfJa(d: Date): string {
+  const s = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d)
+  return `${s} 時点の原価`
+}
+
 export default function CostReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('order')
   const [rows, setRows] = useState<CostReportRow[]>([])
+  const [modelRows, setModelRows] = useState<ModelReportRow[]>([])
   const [bomSummary, setBomSummary] = useState<BomSummaryRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [costAsOfLabel, setCostAsOfLabel] = useState<string | null>(null)
 
-  const reportTitle = reportType === 'order' ? 'D指令原価一覧' : 'L指令原価一覧'
+  const reportTitle =
+    reportType === 'order' ? 'D指令原価一覧' : reportType === 'line' ? 'L指令原価一覧' : '機種別原価一覧'
   const firstColumnTitle = reportType === 'order' ? 'D指令番号' : '部品キー'
 
   useEffect(() => {
@@ -55,8 +81,15 @@ export default function CostReportsPage() {
           throw new Error(data?.error || '帳票データの取得に失敗しました')
         }
         const data = await response.json()
-        setRows(Array.isArray(data?.rows) ? data.rows : [])
-        setBomSummary(Array.isArray(data?.bomSummary) ? data.bomSummary : [])
+        if (reportType === 'model') {
+          setModelRows(Array.isArray(data?.rows) ? data.rows : [])
+          setRows([])
+          setBomSummary([])
+        } else {
+          setRows(Array.isArray(data?.rows) ? data.rows : [])
+          setBomSummary(Array.isArray(data?.bomSummary) ? data.bomSummary : [])
+          setModelRows([])
+        }
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : 'Unknown error')
       } finally {
@@ -80,6 +113,25 @@ export default function CostReportsPage() {
     )
   }, [rows])
 
+  const modelTotals = useMemo(() => {
+    return modelRows.reduce(
+      (acc, row) => {
+        acc.material_cost += Number(row.material_cost || 0)
+        acc.labor_cost += Number(row.labor_cost || 0)
+        acc.indirect_cost += Number(row.indirect_cost || 0)
+        acc.total_cost += Number(row.total_cost || 0)
+        return acc
+      },
+      { material_cost: 0, labor_cost: 0, indirect_cost: 0, total_cost: 0 }
+    )
+  }, [modelRows])
+
+  const handlePrint = () => {
+    setCostAsOfLabel(formatCostAsOfJa(new Date()))
+    // ラベル反映後に印刷
+    requestAnimationFrame(() => window.print())
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white px-4 py-8 print:bg-white print:text-black print:p-0">
       <div className="mx-auto max-w-screen-xl print:max-w-none">
@@ -102,7 +154,7 @@ export default function CostReportsPage() {
               ← メニューへ戻る
             </Link>
             <button
-              onClick={() => window.print()}
+              onClick={handlePrint}
               className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
             >
               PDF印刷
@@ -125,12 +177,20 @@ export default function CostReportsPage() {
             >
               L指令原価
             </button>
+            <button
+              onClick={() => setReportType('model')}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${reportType === 'model' ? 'border border-amber-400/50 bg-amber-600 text-white shadow-[0_0_16px_rgba(245,158,11,0.35)]' : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-500 hover:text-white'}`}
+            >
+              機種別一覧
+            </button>
           </div>
         </div>
 
         <div className="mb-4 hidden border-b border-slate-300 pb-2 print:block">
           <h2 className="text-xl font-bold">{reportTitle}</h2>
-          <p className="text-xs text-slate-600">印刷日時: {new Date().toLocaleString('ja-JP')}</p>
+          <p className="text-xs text-slate-600">
+            {costAsOfLabel || `印刷日時: ${new Date().toLocaleString('ja-JP')}`}
+          </p>
         </div>
 
         {error && (
@@ -141,9 +201,96 @@ export default function CostReportsPage() {
 
         {isLoading && <div className="py-10 text-center text-slate-400">読込中...</div>}
 
-        {!isLoading && !error && (
+        {!isLoading && !error && reportType === 'model' && (
+          <div className="overflow-hidden rounded-3xl border-2 border-slate-700 bg-slate-900/80 print:rounded-none print:border print:border-slate-300 print:bg-white">
+            <div className="border-b border-slate-700 bg-slate-800 px-6 py-4 print:hidden">
+              <h2 className="text-xl font-bold text-white">機種別原価一覧</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                BOM構成部品の材料費・工賃・間接費を機種単位で集計します（1台当たり）
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm print:text-xs">
+                <thead className="bg-slate-800 text-slate-300 print:bg-slate-100 print:text-slate-700">
+                  <tr>
+                    <th className="border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">機種名</th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">部品数</th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">材料費</th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">間接費</th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">工賃</th>
+                    <th className="border-b border-slate-700 bg-slate-700 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-300 print:bg-slate-100 print:text-slate-700">
+                      合計
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modelRows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        データがありません。
+                      </td>
+                    </tr>
+                  )}
+                  {modelRows.map((row, idx) => (
+                    <tr
+                      key={row.model}
+                      className={idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'}
+                    >
+                      <td className="border-t border-slate-800 px-4 py-3 print:border-slate-200">
+                        <div className="font-semibold text-white print:text-slate-900">{row.display_name}</div>
+                        {row.display_name !== row.model && (
+                          <div className="mt-0.5 font-mono text-[11px] text-slate-500 print:text-slate-600">
+                            {row.model}
+                          </div>
+                        )}
+                      </td>
+                      <td className="border-t border-slate-800 px-4 py-3 text-right text-slate-300 print:border-slate-200 print:text-slate-800">
+                        {row.part_count.toLocaleString('ja-JP')}
+                      </td>
+                      <td className="border-t border-slate-800 px-4 py-3 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
+                        {currency(row.material_cost)}
+                      </td>
+                      <td className="border-t border-slate-800 px-4 py-3 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
+                        {currency(row.indirect_cost)}
+                      </td>
+                      <td className="border-t border-slate-800 px-4 py-3 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">
+                        {currency(row.labor_cost)}
+                      </td>
+                      <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
+                        {currency(row.total_cost)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gradient-to-r from-amber-950/60 to-yellow-950/60 print:bg-slate-100">
+                  <tr>
+                    <td className="px-4 py-3 font-semibold text-yellow-300 print:text-slate-800">
+                      計（{modelRows.length} 機種）
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">
+                      {modelRows.reduce((s, r) => s + Number(r.part_count || 0), 0).toLocaleString('ja-JP')}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-sky-300 print:text-slate-800">
+                      {currency(modelTotals.material_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-violet-300 print:text-slate-800">
+                      {currency(modelTotals.indirect_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-emerald-300 print:text-slate-800">
+                      {currency(modelTotals.labor_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-2xl font-extrabold text-yellow-300 print:text-slate-900">
+                      {currency(modelTotals.total_cost)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && !error && reportType !== 'model' && (
           <div className="space-y-6">
-            {/* BOM合計サマリ（BOMがある場合） */}
             {bomSummary.length > 0 && (
               <div className="rounded-3xl border-2 border-slate-700 bg-slate-900/80 p-6 print:rounded-none print:border print:border-slate-300 print:bg-white">
                 <h3 className="mb-4 text-lg font-bold text-white print:text-black">
@@ -200,7 +347,6 @@ export default function CostReportsPage() {
               </div>
             )}
 
-            {/* 一覧テーブル */}
             <div className="overflow-hidden rounded-3xl border-2 border-slate-700 bg-slate-900/80 print:rounded-none print:border print:border-slate-300 print:bg-white">
               <div className="border-b border-slate-700 bg-slate-800 px-6 py-4 print:hidden">
                 <h2 className="text-xl font-bold text-white">{reportTitle}</h2>
@@ -208,73 +354,73 @@ export default function CostReportsPage() {
               </div>
 
               <div className="overflow-x-auto">
-              <table className="min-w-full table-fixed text-sm print:text-xs">
-                <thead className="bg-slate-800 text-slate-300 print:bg-slate-100 print:text-slate-700">
-                  <tr>
-                    <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">{firstColumnTitle}</th>
-                    <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">製品名</th>
-                    <th className="w-[200px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">規格</th>
-                    <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">区分</th>
-                    <th className="w-[100px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">数量</th>
-                    <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">材料費</th>
-                    <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">工賃</th>
-                    <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">間接費</th>
-                    <th className="w-[150px] border-b border-slate-700 bg-slate-700 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-300 print:bg-slate-100 print:text-slate-700">原価合計</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && (
+                <table className="min-w-full table-fixed text-sm print:text-xs">
+                  <thead className="bg-slate-800 text-slate-300 print:bg-slate-100 print:text-slate-700">
                     <tr>
-                      <td colSpan={9} className="px-4 py-8 text-center text-slate-500 print:text-slate-500">
-                        データがありません。
-                      </td>
+                      <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">{firstColumnTitle}</th>
+                      <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">製品名</th>
+                      <th className="w-[200px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">規格</th>
+                      <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">区分</th>
+                      <th className="w-[100px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">数量</th>
+                      <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">材料費</th>
+                      <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">工賃</th>
+                      <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">間接費</th>
+                      <th className="w-[150px] border-b border-slate-700 bg-slate-700 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-300 print:bg-slate-100 print:text-slate-700">原価合計</th>
                     </tr>
-                  )}
-                  {rows.map((row, idx) => {
-                    const productionQty = Number(row.quantity || 0)
-                    const unitMaterial = unitValue(row.material_cost, productionQty)
-                    const unitLabor = unitValue(row.labor_cost, productionQty)
-                    const unitIndirect = unitValue(row.indirect_cost, productionQty)
-                    const unitTotal = unitValue(row.total_cost, productionQty)
-                    const baseRowClass = idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="px-4 py-8 text-center text-slate-500 print:text-slate-500">
+                          データがありません。
+                        </td>
+                      </tr>
+                    )}
+                    {rows.map((row, idx) => {
+                      const productionQty = Number(row.quantity || 0)
+                      const unitMaterial = unitValue(row.material_cost, productionQty)
+                      const unitLabor = unitValue(row.labor_cost, productionQty)
+                      const unitIndirect = unitValue(row.indirect_cost, productionQty)
+                      const unitTotal = unitValue(row.total_cost, productionQty)
+                      const baseRowClass = idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'
 
-                    return (
-                      <Fragment key={`${reportType}-${row.order_no}-${row.product_name}-${row.spec}`}>
-                        <tr className={baseRowClass}>
-                          <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top font-semibold text-cyan-300 print:border-slate-200 print:text-slate-800">{row.order_no}</td>
-                          <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-200 print:border-slate-200 print:text-slate-800">{row.product_name || '—'}</td>
-                          <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-300 print:border-slate-200 print:text-slate-700">{row.spec || '—'}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">1個当たり</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-slate-200 print:border-slate-200 print:text-slate-800">1</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">{currency(unitMaterial)}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">{currency(unitLabor)}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">{currency(unitIndirect)}</td>
-                          <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">{currency(unitTotal)}</td>
-                        </tr>
-                        <tr className={baseRowClass}>
-                          <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">制作数量換算</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-slate-200 print:border-slate-200 print:text-slate-800">{productionQty.toLocaleString('ja-JP')}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">{currency(row.material_cost)}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">{currency(row.labor_cost)}</td>
-                          <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">{currency(row.indirect_cost)}</td>
-                          <td className="border-t border-slate-800 bg-yellow-900/20 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">{currency(row.total_cost)}</td>
-                        </tr>
-                      </Fragment>
-                    )
-                  })}
-                </tbody>
-                <tfoot className="bg-gradient-to-r from-amber-950/60 to-yellow-950/60 print:bg-slate-100">
-                  <tr>
-                    <td className="px-4 py-3 font-semibold text-yellow-300 print:text-slate-800" colSpan={4}>合計（制作数量換算）</td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">{rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0).toLocaleString('ja-JP')}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-sky-300 print:text-slate-800">{currency(totals.material_cost)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-300 print:text-slate-800">{currency(totals.labor_cost)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-violet-300 print:text-slate-800">{currency(totals.indirect_cost)}</td>
-                    <td className="px-4 py-3 text-right text-2xl font-extrabold text-yellow-300 print:text-slate-900">{currency(totals.total_cost)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                      return (
+                        <Fragment key={`${reportType}-${row.order_no}-${row.product_name}-${row.spec}`}>
+                          <tr className={baseRowClass}>
+                            <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top font-semibold text-cyan-300 print:border-slate-200 print:text-slate-800">{row.order_no}</td>
+                            <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-200 print:border-slate-200 print:text-slate-800">{row.product_name || '—'}</td>
+                            <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-300 print:border-slate-200 print:text-slate-700">{row.spec || '—'}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">1個当たり</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-slate-200 print:border-slate-200 print:text-slate-800">1</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">{currency(unitMaterial)}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">{currency(unitLabor)}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">{currency(unitIndirect)}</td>
+                            <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">{currency(unitTotal)}</td>
+                          </tr>
+                          <tr className={baseRowClass}>
+                            <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">制作数量換算</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-slate-200 print:border-slate-200 print:text-slate-800">{productionQty.toLocaleString('ja-JP')}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">{currency(row.material_cost)}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">{currency(row.labor_cost)}</td>
+                            <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">{currency(row.indirect_cost)}</td>
+                            <td className="border-t border-slate-800 bg-yellow-900/20 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">{currency(row.total_cost)}</td>
+                          </tr>
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gradient-to-r from-amber-950/60 to-yellow-950/60 print:bg-slate-100">
+                    <tr>
+                      <td className="px-4 py-3 font-semibold text-yellow-300 print:text-slate-800" colSpan={4}>合計（制作数量換算）</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">{rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0).toLocaleString('ja-JP')}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-sky-300 print:text-slate-800">{currency(totals.material_cost)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-300 print:text-slate-800">{currency(totals.labor_cost)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-violet-300 print:text-slate-800">{currency(totals.indirect_cost)}</td>
+                      <td className="px-4 py-3 text-right text-2xl font-extrabold text-yellow-300 print:text-slate-900">{currency(totals.total_cost)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
           </div>
         )}
