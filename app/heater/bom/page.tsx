@@ -112,6 +112,13 @@ export default function BomPage() {
     setFormData((prev) => (prev.model ? prev : { ...prev, model }));
   }, [searchParams]);
 
+  // 既存部品選択時は①の機種フィルターを登録先機種として使う
+  useEffect(() => {
+    if (isEditing) return;
+    if (partInputMode !== 'existing') return;
+    setFormData((prev) => ({ ...prev, model: filterModel }));
+  }, [filterModel, partInputMode, isEditing]);
+
   useEffect(() => {
     const onBeforePrint = () => {
       flushSync(() => {
@@ -161,8 +168,13 @@ export default function BomPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.model || !formData.part_key.trim()) {
-      setError('機種と部品は必須です');
+    const targetModel = partInputMode === 'existing' ? (filterModel || formData.model) : formData.model;
+    if (!targetModel || !formData.part_key.trim()) {
+      setError(
+        partInputMode === 'existing'
+          ? '①で機種を選択し、部品を選んでください'
+          : '機種と部品は必須です'
+      );
       return;
     }
     if (partInputMode === 'new' && !formData.part_name.trim()) {
@@ -198,7 +210,7 @@ export default function BomPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: formData.model,
+          model: targetModel,
           part_key: partKey,
           quantity: Number(formData.quantity) || 0,
         }),
@@ -330,6 +342,58 @@ export default function BomPage() {
   const totalIndirect = normalizedBom.reduce((sum, item) => sum + item.indirect_cost, 0);
   const totalAmount = normalizedBom.reduce((sum, item) => sum + item.total_cost, 0);
   const uniqueParts = new Set(normalizedBom.map((item) => item.part_key)).size;
+
+  /** 部品キー → 使用機種一覧（既存部品プルダウン表示用） */
+  const modelsByPartKey = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const item of bom) {
+      const key = String(item.part_key || '').trim();
+      const model = String(item.model || '').trim();
+      if (!key || !model) continue;
+      const list = map.get(key) || [];
+      if (!list.includes(model)) list.push(model);
+      map.set(key, list);
+    }
+    for (const [key, list] of map) {
+      list.sort((a, b) => a.localeCompare(b, 'ja'));
+      map.set(key, list);
+    }
+    return map;
+  }, [bom]);
+
+  /** 類似機種の部品が上に来るよう並べた選択用リスト */
+  const partsForSelect = useMemo(() => {
+    const filterPrefix = filterModel.includes('-')
+      ? filterModel.split('-')[0]
+      : filterModel.replace(/\d+$/, '') || filterModel;
+
+    const score = (partKey: string) => {
+      const used = modelsByPartKey.get(partKey) || [];
+      if (filterModel && used.includes(filterModel)) return 0;
+      if (filterPrefix && used.some((m) => m === filterPrefix || m.startsWith(filterPrefix))) return 1;
+      if (used.length > 0) return 2;
+      return 3;
+    };
+
+    return [...parts].sort((a, b) => {
+      const sa = score(a.part_key);
+      const sb = score(b.part_key);
+      if (sa !== sb) return sa - sb;
+      return String(a.part_name || a.part_key).localeCompare(String(b.part_name || b.part_key), 'ja');
+    });
+  }, [parts, modelsByPartKey, filterModel]);
+
+  const formatPartOptionLabel = (p: PartsMaster) => {
+    const code = p.product_code || p.part_key;
+    const usedModels = modelsByPartKey.get(p.part_key) || [];
+    const modelLabel =
+      usedModels.length === 0
+        ? '未使用'
+        : usedModels.length <= 4
+          ? usedModels.join(', ')
+          : `${usedModels.slice(0, 3).join(', ')} 他${usedModels.length - 3}`;
+    return `${p.part_name} (${code})（${modelLabel}）`;
+  };
 
   const modelConfigList = useMemo(() => {
     const nameByModel = new Map(models.map((m) => [m.model, m.name?.trim() || '']));
@@ -552,22 +616,33 @@ export default function BomPage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">機種 *</label>
-                <select
-                  value={formData.model}
-                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  disabled={isEditing}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
-                >
-                  <option value="">選択してください</option>
-                  {models.map((m) => (
-                    <option key={m.model} value={m.model}>
-                      {m.model}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {(isEditing || partInputMode === 'new') && (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">機種 *</label>
+                  <select
+                    value={formData.model}
+                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                    disabled={isEditing}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+                  >
+                    <option value="">選択してください</option>
+                    {models.map((m) => (
+                      <option key={m.model} value={m.model}>
+                        {m.model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!isEditing && partInputMode === 'existing' && (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">登録先機種</label>
+                  <div className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-sm text-violet-200">
+                    {filterModel || '①で機種を選択してください'}
+                  </div>
+                </div>
+              )}
 
               {isEditing || partInputMode === 'existing' ? (
                 <div>
@@ -579,9 +654,9 @@ export default function BomPage() {
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
                   >
                     <option value="">選択してください</option>
-                    {parts.map((p) => (
+                    {partsForSelect.map((p) => (
                       <option key={p.part_key} value={p.part_key}>
-                        {p.part_name} ({p.product_code || p.part_key})
+                        {formatPartOptionLabel(p)}
                       </option>
                     ))}
                   </select>
