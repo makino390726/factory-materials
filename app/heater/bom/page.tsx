@@ -363,7 +363,7 @@ export default function BomPage() {
               <span className="text-slate-400 text-sm">構成部品マスタ</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white">部品表(BOM)</h1>
-            <p className="mt-2 text-sm text-slate-400">機種別の構成部品を登録・編集します。原価の確認は「機種標準原価」画面を使います。</p>
+            <p className="mt-2 text-sm text-slate-400">機種別の構成部品を登録・編集します。部品キー／品名をクリックすると原価計算（L指令）へ移動します。</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link href="/masters/import#ec30-bom">
@@ -673,7 +673,9 @@ export default function BomPage() {
               <table className="min-w-full table-fixed text-xs">
                 <thead className="sticky top-0 z-10 bg-slate-800 border-b-2 border-slate-700">
                   <tr>
-                    <th className="w-[72px] min-w-[72px] max-w-[72px] px-2 py-3 text-left font-bold text-slate-300">機種</th>
+                    {!filterModel && (
+                      <th className="w-[72px] min-w-[72px] max-w-[72px] px-2 py-3 text-left font-bold text-slate-300">機種</th>
+                    )}
                     <th className="w-[140px] px-3 py-3 text-left font-bold text-slate-300">部品キー</th>
                     <th className="w-[260px] px-3 py-3 text-left font-bold text-slate-300">部品名</th>
                     <th className="w-[220px] px-3 py-3 text-left font-bold text-slate-300">規格</th>
@@ -683,19 +685,34 @@ export default function BomPage() {
                     <th className="w-[110px] px-2 py-3 text-right font-bold text-slate-300">工賃</th>
                     <th className="w-[110px] px-2 py-3 text-right font-bold text-slate-300">間接費</th>
                     <th className="w-[120px] px-2 py-3 text-right font-bold text-slate-300">合計</th>
-                    <th className="w-[120px] px-2 py-3 text-right font-bold text-slate-300">操作</th>
+                    <th className="w-[160px] px-2 py-3 text-right font-bold text-slate-300">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {normalizedBom.map((item, idx) => (
-                    <tr key={`${item.model}-${item.part_key}-${idx}`} className={idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20'}>
-                      <td className="w-[72px] min-w-[72px] max-w-[72px] px-2 py-2 text-cyan-300 font-semibold align-top">
-                        <span className="block line-clamp-3 break-all text-[11px] leading-tight" title={item.model}>
-                          {item.model}
-                        </span>
+                  {normalizedBom.map((item, idx) => {
+                    const costHref = `/work-orders/cost?mode=line&part_key=${encodeURIComponent(item.part_key)}&return_model=${encodeURIComponent(item.model)}&from=bom`
+                    return (
+                    <tr
+                      key={`${item.model}-${item.part_key}-${idx}`}
+                      className={(idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-800/20') + ' hover:bg-cyan-950/30'}
+                    >
+                      {!filterModel && (
+                        <td className="w-[72px] min-w-[72px] max-w-[72px] px-2 py-2 text-cyan-300 font-semibold align-top">
+                          <span className="block line-clamp-3 break-all text-[11px] leading-tight" title={item.model}>
+                            {item.model}
+                          </span>
+                        </td>
+                      )}
+                      <td className="px-3 py-2 font-mono">
+                        <Link href={costHref} className="text-cyan-300 hover:text-cyan-200 hover:underline">
+                          {item.part_key || '-'}
+                        </Link>
                       </td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{item.part_key || '-'}</td>
-                      <td className="px-3 py-2 text-slate-200">{item.part_name || '-'}</td>
+                      <td className="px-3 py-2">
+                        <Link href={costHref} className="text-slate-200 hover:text-white hover:underline">
+                          {item.part_name || '-'}
+                        </Link>
+                      </td>
                       <td className="px-3 py-2 text-slate-400">{item.spec || '-'}</td>
                       <td className="px-2 py-2 text-right text-slate-200">{item.quantity}</td>
                       <td className="px-2 py-2 text-right text-slate-200">¥{(item.cost_price || 0).toLocaleString('ja-JP')}</td>
@@ -705,6 +722,12 @@ export default function BomPage() {
                       <td className="px-2 py-2 text-right text-yellow-300 font-bold">¥{(item.total_cost || 0).toLocaleString('ja-JP')}</td>
                       <td className="px-2 py-2 text-right">
                         <div className="flex justify-end gap-1">
+                          <Link
+                            href={costHref}
+                            className="px-2 py-1 rounded-md bg-cyan-600 text-white hover:bg-cyan-500 transition text-xs font-medium"
+                          >
+                            原価
+                          </Link>
                           <button
                             onClick={() => handleEdit(item)}
                             className="px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition text-xs font-medium"
@@ -720,11 +743,12 @@ export default function BomPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
                 <tfoot className="border-t-4 border-yellow-500/50 bg-gradient-to-r from-yellow-900/30 to-amber-900/30">
                   <tr>
-                    <td colSpan={6} className="px-3 py-4 text-right font-extrabold text-yellow-300 text-base tracking-widest uppercase">BOM 構成部品 原価総合計</td>
+                    <td colSpan={filterModel ? 5 : 6} className="px-3 py-4 text-right font-extrabold text-yellow-300 text-base tracking-widest uppercase">BOM 構成部品 原価総合計</td>
                     <td className="px-2 py-4 text-right font-bold text-sky-300">¥{totalMaterial.toLocaleString('ja-JP')}</td>
                     <td className="px-2 py-4 text-right font-bold text-emerald-300">¥{totalLabor.toLocaleString('ja-JP')}</td>
                     <td className="px-2 py-4 text-right font-bold text-violet-300">¥{totalIndirect.toLocaleString('ja-JP')}</td>

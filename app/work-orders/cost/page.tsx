@@ -159,6 +159,7 @@ export default function WorkOrderCostPage() {
     cost_price: 0,
   })
   const [partsReturnModel, setPartsReturnModel] = useState('')
+  const [partsReturnFrom, setPartsReturnFrom] = useState<'parts' | 'bom'>('parts')
   const [modelCostImportFile, setModelCostImportFile] = useState<File | null>(null)
   const [modelCostImporting, setModelCostImporting] = useState(false)
   const [modelCostImportResult, setModelCostImportResult] = useState<string | null>(null)
@@ -336,6 +337,7 @@ export default function WorkOrderCostPage() {
 
   const openPartCostEditor = (partKey: string) => {
     setPartsReturnModel(selectedHeaterModel)
+    setPartsReturnFrom('parts')
     setSelectedPartKey(partKey)
     setMode('line')
   }
@@ -428,6 +430,34 @@ export default function WorkOrderCostPage() {
     }
     void loadModelBomParts(selectedHeaterModel)
   }, [mode, selectedHeaterModel])
+
+  useEffect(() => {
+    // URLクエリから L指令原価を直接開く（BOM画面からの遷移など）
+    // useSearchParams は静的生成で落ちるため window から読む
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const modeParam = params.get('mode')
+      const partKey = params.get('part_key')?.trim() || ''
+      const returnModel = params.get('return_model')?.trim() || ''
+      const from = params.get('from')?.trim() || ''
+      if (modeParam === 'line' && partKey) {
+        setMode('line')
+        setSelectedPartKey(partKey)
+        if (returnModel) {
+          setPartsReturnModel(returnModel)
+          setSelectedHeaterModel(returnModel)
+        }
+        if (from === 'bom') {
+          setPartsReturnFrom('bom')
+        }
+      } else if (modeParam === 'parts') {
+        setMode('parts')
+        if (returnModel) setSelectedHeaterModel(returnModel)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     const fetchWorkOrders = async () => {
@@ -2116,16 +2146,25 @@ export default function WorkOrderCostPage() {
                   : '機種を選ぶと該当パーツが表示されます。パーツをクリックして原価計算できます'}
             </p>
             {mode === 'line' && partsReturnModel && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('parts')
-                  setSelectedHeaterModel(partsReturnModel)
-                }}
-                className="mt-3 rounded-full border border-emerald-400/50 bg-emerald-950/40 px-4 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/50"
-              >
-                ← 製品パーツ計算（{partsReturnModel}）に戻る
-              </button>
+              partsReturnFrom === 'bom' ? (
+                <Link
+                  href={`/heater/bom?model=${encodeURIComponent(partsReturnModel)}`}
+                  className="mt-3 inline-flex rounded-full border border-violet-400/50 bg-violet-950/40 px-4 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-900/50"
+                >
+                  ← 部品表BOM（{partsReturnModel}）に戻る
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('parts')
+                    setSelectedHeaterModel(partsReturnModel)
+                  }}
+                  className="mt-3 rounded-full border border-emerald-400/50 bg-emerald-950/40 px-4 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/50"
+                >
+                  ← 製品パーツ計算（{partsReturnModel}）に戻る
+                </button>
+              )
             )}
           </div>
           <Link href="/">
