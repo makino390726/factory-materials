@@ -1,22 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-
-function formatCostAsOfJa(d: Date): string {
-  const s = new Intl.DateTimeFormat('ja-JP', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-  return `${s} 時点の原価`;
-}
 
 interface BomItem {
   model: string;
@@ -79,8 +65,6 @@ export default function BomPage() {
     spec: '',
   });
   const [filterModel, setFilterModel] = useState(initialModel);
-  /** 機種構成一覧の印刷に印字する「時点原価」ラベル（印刷ボタン押下時に確定） */
-  const [modelListCostAsOfLabel, setModelListCostAsOfLabel] = useState<string | null>(null);
 
   const emptyForm = (model = '') => ({
     model,
@@ -118,16 +102,6 @@ export default function BomPage() {
     if (partInputMode !== 'existing') return;
     setFormData((prev) => ({ ...prev, model: filterModel }));
   }, [filterModel, partInputMode, isEditing]);
-
-  useEffect(() => {
-    const onBeforePrint = () => {
-      flushSync(() => {
-        setModelListCostAsOfLabel(formatCostAsOfJa(new Date()));
-      });
-    };
-    window.addEventListener('beforeprint', onBeforePrint);
-    return () => window.removeEventListener('beforeprint', onBeforePrint);
-  }, []);
 
   const fetchBom = async () => {
     setLoading(true);
@@ -301,24 +275,6 @@ export default function BomPage() {
 
   const filteredBom = filterModel ? bom.filter((item) => item.model === filterModel) : bom;
 
-  const normalizedAllBom = useMemo(
-    () =>
-      bom.map((item) => {
-        const materialCost = Number(item.material_cost ?? 0);
-        const laborCost = Number(item.labor_cost ?? 0);
-        const indirectCost = Number(item.indirect_cost ?? 0);
-        const totalCost = Number(item.total_cost ?? materialCost + laborCost + indirectCost);
-        return {
-          ...item,
-          material_cost: materialCost,
-          labor_cost: laborCost,
-          indirect_cost: indirectCost,
-          total_cost: totalCost,
-        };
-      }),
-    [bom]
-  );
-
   const normalizedBom = useMemo(
     () =>
       filteredBom.map((item) => {
@@ -395,107 +351,9 @@ export default function BomPage() {
     return `${p.part_name} (${code})（${modelLabel}）`;
   };
 
-  const modelConfigList = useMemo(() => {
-    const nameByModel = new Map(models.map((m) => [m.model, m.name?.trim() || '']));
-    type Agg = {
-      model: string;
-      displayName: string;
-      material: number;
-      indirect: number;
-      labor: number;
-      total: number;
-    };
-    const map = new Map<string, Agg>();
-    for (const item of normalizedAllBom) {
-      let row = map.get(item.model);
-      if (!row) {
-        const dn = nameByModel.get(item.model);
-        row = {
-          model: item.model,
-          displayName: dn && dn.length > 0 ? dn : item.model,
-          material: 0,
-          indirect: 0,
-          labor: 0,
-          total: 0,
-        };
-        map.set(item.model, row);
-      }
-      row.material += item.material_cost;
-      row.indirect += item.indirect_cost;
-      row.labor += item.labor_cost;
-      row.total += item.total_cost;
-    }
-    for (const m of models) {
-      const code = m.model;
-      if (!map.has(code)) {
-        const dn = m.name?.trim() || '';
-        map.set(code, {
-          model: code,
-          displayName: dn.length > 0 ? dn : code,
-          material: 0,
-          indirect: 0,
-          labor: 0,
-          total: 0,
-        });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) =>
-      a.model.localeCompare(b.model, 'ja', { numeric: true })
-    );
-  }, [normalizedAllBom, models]);
-
-  const modelConfigTotals = useMemo(
-    () =>
-      modelConfigList.reduce(
-        (acc, r) => ({
-          material: acc.material + r.material,
-          indirect: acc.indirect + r.indirect,
-          labor: acc.labor + r.labor,
-          total: acc.total + r.total,
-        }),
-        { material: 0, indirect: 0, labor: 0, total: 0 }
-      ),
-    [modelConfigList]
-  );
-
-  const handlePrintModelConfigList = () => {
-    window.print();
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white px-4 py-8 print:bg-white print:text-black print:min-h-0">
-      <style>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm 10mm;
-          }
-          #bom-model-config-print .bom-model-print-table {
-            table-layout: fixed;
-            width: 100%;
-            font-size: 9px;
-          }
-          #bom-model-config-print .bom-model-print-table colgroup col:first-child {
-            width: 12% !important;
-          }
-          #bom-model-config-print .bom-model-print-table colgroup col:not(:first-child) {
-            width: 22% !important;
-          }
-          #bom-model-config-print .bom-model-print-table .bom-model-col-model {
-            min-width: 0;
-            overflow: hidden;
-            word-break: break-word;
-            padding-left: 3px;
-            padding-right: 3px;
-          }
-          #bom-model-config-print .bom-model-print-table .bom-model-col-num {
-            padding-left: 3px;
-            padding-right: 3px;
-          }
-        }
-      `}</style>
-      <div className="max-w-screen-xl mx-auto space-y-6 print:max-w-none print:mx-0 print:space-y-0">
-        <div className="print:hidden space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white px-4 py-8">
+      <div className="max-w-screen-xl mx-auto space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -802,127 +660,8 @@ export default function BomPage() {
             <p className="text-2xl font-extrabold text-yellow-300">¥{totalAmount.toLocaleString('ja-JP')}</p>
           </div>
         </div>
-        </div>
 
-        {!loading && bom.length > 0 && (
-          <section
-            id="bom-model-config-print"
-            className="bg-slate-800/70 border border-slate-600/50 rounded-2xl p-5 print:rounded-none print:border-2 print:border-black print:bg-white print:text-black print:shadow-none print:break-inside-avoid print:p-3"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-lg font-semibold text-white print:text-black">機種構成一覧</h2>
-                <p className="text-xs text-slate-400 mt-1 print:hidden">
-                  全BOMを機種単位で集計（機種マスタの名称を表示。BOM未登録の機種は 0 円）
-                </p>
-                {modelListCostAsOfLabel ? (
-                  <p className="mt-2 text-sm font-bold text-amber-200 border border-amber-500/40 rounded-lg px-3 py-2 bg-amber-950/40 print:text-black print:border-black print:bg-white print:mt-3">
-                    {modelListCostAsOfLabel}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-slate-500 print:hidden">
-                    「印刷」実行時に、押下した日時を「○○ 時点の原価」として印字します（単価更新後の再印刷の目安にしてください）。
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={handlePrintModelConfigList}
-                className="shrink-0 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 border border-slate-500 text-white text-sm font-semibold print:hidden transition"
-              >
-                印刷
-              </button>
-            </div>
-            <div className="overflow-x-auto rounded-xl border border-slate-700/80 print:border-black print:rounded-md print:overflow-visible">
-              <table className="bom-model-print-table min-w-full text-sm print:text-[10px] table-fixed w-full">
-                <colgroup>
-                  <col style={{ width: '17%' }} />
-                  <col style={{ width: '20.75%' }} />
-                  <col style={{ width: '20.75%' }} />
-                  <col style={{ width: '20.75%' }} />
-                  <col style={{ width: '20.75%' }} />
-                </colgroup>
-                <thead className="bg-slate-900/90 border-b border-slate-600 print:bg-slate-200 print:border-black">
-                  <tr>
-                    <th className="bom-model-col-model px-2 py-2 text-left font-bold text-slate-300 print:text-black">
-                      機種名
-                    </th>
-                    <th className="bom-model-col-num px-2 py-2 text-right font-bold text-slate-300 print:text-black">
-                      材料費
-                    </th>
-                    <th className="bom-model-col-num px-2 py-2 text-right font-bold text-slate-300 print:text-black">
-                      間接費
-                    </th>
-                    <th className="bom-model-col-num px-2 py-2 text-right font-bold text-slate-300 print:text-black">
-                      工賃
-                    </th>
-                    <th className="bom-model-col-num px-2 py-2 text-right font-bold text-slate-300 print:text-black">
-                      合計
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/80 print:divide-slate-400">
-                  {modelConfigList.map((row, idx) => (
-                    <tr
-                      key={row.model}
-                      className={
-                        (idx % 2 === 0 ? 'bg-slate-900/50' : 'bg-slate-800/30') +
-                        ' print:bg-white print:text-black'
-                      }
-                    >
-                      <td className="bom-model-col-model px-2 py-2 align-top print:border-b print:border-slate-300">
-                        <div
-                          className="font-semibold text-white print:text-black line-clamp-2 break-words text-xs sm:text-sm leading-tight"
-                          title={`${row.displayName}${row.displayName !== row.model ? ` (${row.model})` : ''}`}
-                        >
-                          {row.displayName}
-                        </div>
-                        {row.displayName !== row.model && (
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5 print:text-slate-700 truncate" title={row.model}>
-                            {row.model}
-                          </div>
-                        )}
-                      </td>
-                      <td className="bom-model-col-num px-2 py-2 text-right text-sky-300 tabular-nums print:text-black text-xs sm:text-sm">
-                        ¥{Math.round(row.material).toLocaleString('ja-JP')}
-                      </td>
-                      <td className="bom-model-col-num px-2 py-2 text-right text-violet-300 tabular-nums print:text-black text-xs sm:text-sm">
-                        ¥{Math.round(row.indirect).toLocaleString('ja-JP')}
-                      </td>
-                      <td className="bom-model-col-num px-2 py-2 text-right text-emerald-300 tabular-nums print:text-black text-xs sm:text-sm">
-                        ¥{Math.round(row.labor).toLocaleString('ja-JP')}
-                      </td>
-                      <td className="bom-model-col-num px-2 py-2 text-right text-yellow-300 font-bold tabular-nums print:text-black print:font-bold text-xs sm:text-sm">
-                        ¥{Math.round(row.total).toLocaleString('ja-JP')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="border-t-2 border-slate-600 bg-slate-900/80 print:bg-slate-100 print:border-black">
-                  <tr>
-                    <td className="bom-model-col-model px-2 py-2 font-bold text-slate-200 print:text-black text-xs sm:text-sm">
-                      計（{modelConfigList.length} 機種）
-                    </td>
-                    <td className="bom-model-col-num px-2 py-2 text-right font-bold text-sky-300 tabular-nums print:text-black text-xs sm:text-sm">
-                      ¥{Math.round(modelConfigTotals.material).toLocaleString('ja-JP')}
-                    </td>
-                    <td className="bom-model-col-num px-2 py-2 text-right font-bold text-violet-300 tabular-nums print:text-black text-xs sm:text-sm">
-                      ¥{Math.round(modelConfigTotals.indirect).toLocaleString('ja-JP')}
-                    </td>
-                    <td className="bom-model-col-num px-2 py-2 text-right font-bold text-emerald-300 tabular-nums print:text-black text-xs sm:text-sm">
-                      ¥{Math.round(modelConfigTotals.labor).toLocaleString('ja-JP')}
-                    </td>
-                    <td className="bom-model-col-num px-2 py-2 text-right font-extrabold text-yellow-300 tabular-nums print:text-black text-xs sm:text-sm">
-                      ¥{Math.round(modelConfigTotals.total).toLocaleString('ja-JP')}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </section>
-        )}
-
-        <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden print:hidden">
+        <div className="bg-slate-900/80 border-2 border-slate-700 rounded-3xl overflow-hidden">
           {loading ? (
             <div className="p-12 text-center text-slate-400">読み込み中…</div>
           ) : normalizedBom.length === 0 ? (
