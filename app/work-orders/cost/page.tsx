@@ -140,9 +140,13 @@ export default function WorkOrderCostPage() {
       product_code: string | null
       bom_quantity: number
       unit_cost: number
+      material_cost: number
+      labor_cost: number
+      indirect_cost: number
       subtotal: number
     }>
   >([])
+  const [deletingBomPartKey, setDeletingBomPartKey] = useState<string | null>(null)
   const [modelBomGrandTotal, setModelBomGrandTotal] = useState(0)
   const [showNewBomPartForm, setShowNewBomPartForm] = useState(false)
   const [newBomPartSaving, setNewBomPartSaving] = useState(false)
@@ -237,6 +241,9 @@ export default function WorkOrderCostPage() {
           product_code: s.product_code ?? null,
           bom_quantity: Number(s.bom_quantity || 0),
           unit_cost: Number(s.unit_cost || 0),
+          material_cost: Number(s.material_cost || 0),
+          labor_cost: Number(s.labor_cost || 0),
+          indirect_cost: Number(s.indirect_cost || 0),
           subtotal: Number(s.subtotal || 0),
         }))
       )
@@ -331,6 +338,30 @@ export default function WorkOrderCostPage() {
     setPartsReturnModel(selectedHeaterModel)
     setSelectedPartKey(partKey)
     setMode('line')
+  }
+
+  const handleDeleteBomPart = async (partKey: string) => {
+    if (!selectedHeaterModel || !partKey) return
+    if (!confirm(`機種 ${selectedHeaterModel} から部品 ${partKey} を削除しますか？\n（パーツマスタ自体は残ります）`)) {
+      return
+    }
+    setDeletingBomPartKey(partKey)
+    setPartsCostError(null)
+    try {
+      const res = await fetch(
+        `/api/heater/bom?model=${encodeURIComponent(selectedHeaterModel)}&part_key=${encodeURIComponent(partKey)}`,
+        { method: 'DELETE' }
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'BOM削除に失敗しました')
+      }
+      await loadModelBomParts(selectedHeaterModel)
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'BOM削除に失敗しました')
+    } finally {
+      setDeletingBomPartKey(null)
+    }
   }
 
   const handleImportModelCostExcel = async () => {
@@ -2291,19 +2322,23 @@ export default function WorkOrderCostPage() {
                           <tr>
                             <th className="px-3 py-2">部品キー</th>
                             <th className="px-3 py-2">品名</th>
-                            <th className="px-3 py-2 text-right">必要数</th>
+                            <th className="px-3 py-2 text-right">数量</th>
                             <th className="px-3 py-2 text-right">単価</th>
-                            <th className="px-3 py-2 text-right">小計</th>
+                            <th className="px-3 py-2 text-right">材料費</th>
+                            <th className="px-3 py-2 text-right">工賃</th>
+                            <th className="px-3 py-2 text-right">間接費</th>
+                            <th className="px-3 py-2 text-right">合計</th>
+                            <th className="px-3 py-2 text-center">操作</th>
                           </tr>
                         </thead>
                         <tbody>
                           {partsCostLoading ? (
                             <tr>
-                              <td colSpan={5} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
+                              <td colSpan={9} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
                             </tr>
                           ) : modelBomParts.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
+                              <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                                 この機種にパーツがありません。「＋ パーツ新規登録」から追加してください
                               </td>
                             </tr>
@@ -2317,8 +2352,24 @@ export default function WorkOrderCostPage() {
                                 <td className="px-3 py-2 font-mono text-cyan-300">{row.part_key}</td>
                                 <td className="px-3 py-2 text-slate-300">{row.part_name || '-'}</td>
                                 <td className="px-3 py-2 text-right text-slate-300">{row.bom_quantity}</td>
-                                <td className="px-3 py-2 text-right text-sky-300">¥{row.unit_cost.toLocaleString()}</td>
-                                <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{row.subtotal.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-sky-300">¥{Math.round(row.unit_cost).toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.material_cost).toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.labor_cost).toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.indirect_cost).toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{Math.round(row.subtotal).toLocaleString()}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <button
+                                    type="button"
+                                    disabled={deletingBomPartKey === row.part_key}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void handleDeleteBomPart(row.part_key)
+                                    }}
+                                    className="rounded-lg border border-red-500/60 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-300 hover:bg-red-900/50 disabled:opacity-50"
+                                  >
+                                    {deletingBomPartKey === row.part_key ? '削除中…' : '削除'}
+                                  </button>
+                                </td>
                               </tr>
                             ))
                           )}

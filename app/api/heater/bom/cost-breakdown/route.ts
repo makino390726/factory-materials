@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { buildLinePartCostUnitMap } from '@/lib/line-part-cost-breakdown'
 
 export const runtime = 'nodejs'
 
@@ -25,23 +26,12 @@ const supabase = createClient(
  *       part_key: string,
  *       part_name: string | null,
  *       bom_quantity: number,           // BOM での使用数量
- *       unit_cost: number,              // parts_master.cost_price（1個当たり原価）
- *       subtotal: number,               // unit_cost × bom_quantity
- *       cost_items: [                   // 原価明細行（L指令原価）
- *         {
- *           id: string,
- *           product_code: string,
- *           part_name: string,
- *           spec: string,
- *           quantity: number,
- *           unit_price: number,
- *           material_cost: number,
- *           labor_cost: number,
- *           indirect_cost: number,
- *           line_total: number,
- *           cost_type: string,
- *         }
- *       ]
+ *       unit_cost: number,              // 1個当たり原価
+ *       material_cost: number,          // 材料費合計（単価内訳 × 数量）
+ *       labor_cost: number,             // 工賃合計
+ *       indirect_cost: number,          // 間接費合計
+ *       subtotal: number,               // 合計（= total）
+ *       cost_items: [...]
  *     }
  *   ]
  * }
@@ -70,11 +60,24 @@ export async function GET(req: Request) {
     const partKeys = (bomRows || []).map((b: any) => b.part_key as string)
 
     // 2) パーツマスタ取得（原価・品番）
-    let partsMap: Record<string, { part_name: string | null; product_code: string | null; cost_price: number }> = {}
+    let partsMap: Record<
+      string,
+      {
+        part_name: string | null
+        product_code: string | null
+        cost_price: number
+        material_cost_total: number | null
+        indirect_cost_total: number | null
+      }
+    > = {}
+    const partsFallbackMap = new Map<
+      string,
+      { cost_price: number | null; material_cost_total: number | null; indirect_cost_total: number | null }
+    >()
     if (partKeys.length > 0) {
       const { data: partsData, error: partsError } = await supabase
         .from('heater_parts_master')
-        .select('part_key, part_name, product_code, cost_price')
+        .select('part_key, part_name, product_code, cost_price, material_cost_total, indirect_cost_total')
         .in('part_key', partKeys)
 
       if (partsError) {
@@ -87,11 +90,20 @@ export async function GET(req: Request) {
           part_name: p.part_name ?? null,
           product_code: p.product_code ?? null,
           cost_price: Number(p.cost_price || 0),
+          material_cost_total: p.material_cost_total ?? null,
+          indirect_cost_total: p.indirect_cost_total ?? null,
         }
+        partsFallbackMap.set(p.part_key, {
+          cost_price: p.cost_price ?? null,
+          material_cost_total: p.material_cost_total ?? null,
+          indirect_cost_total: p.indirect_cost_total ?? null,
+        })
       }
     }
 
-    // 3) 原価明細取得（各パーツの work_order_cost_items）
+    // 3) 原価内訳（L指令原価）と明細行
+    const lineCostMap = await buildLinePartCostUnitMap(supabase, partKeys, partsFallbackMap)
+
     let costItemsMap: Record<string, any[]> = {}
     if (partKeys.length > 0) {
       const { data: costItems, error: costItemsError } = await supabase
@@ -152,12 +164,27 @@ export async function GET(req: Request) {
     const sections = (bomRows || []).map((bom: any) => {
       const partKey = bom.part_key as string
       const bomQty = Number(bom.quantity || 1)
-      const partInfo = partsMap[partKey] ?? { part_name: null, product_code: null, cost_price: 0 }
+      const partInfo = partsMap[partKey] ?? {
+        part_name: null,
+        product_code: null,
+        cost_price: 0,
+        material_cost_total: null,
+        indirect_cost_total: null,
+      }
       const items = costItemsMap[partKey] ?? []
+      const lineCost = lineCostMap.get(partKey)
 
-      // unit_cost = parts_master.cost_price（L指令原価集計済み値）
-      // cost_items が存在する場合は items の sum でも確認可能だが、parts_master を正値とする
-      const unitCost = partInfo.cost_price
+      const materialUnit = lineCost ? Number(lineCost.material_unit || 0) : Number(partInfo.material_cost_total || 0)
+      const laborUnit = lineCost ? Number(lineCost.labor_unit || 0) : 0
+      const indirectUnit = lineCost ? Number(lineCost.indirect_unit || 0) : Number(partInfo.indirect_cost_total || 0)
+      const totalUnit = lineCost
+        ? Number(lineCost.total_unit || materialUnit + laborUnit + indirectUnit)
+        : Number(partInfo.cost_price || 0)
+
+      const unitCost = totalUnit || Number(partInfo.cost_price || 0)
+      const materialCost = Math.round(materialUnit * bomQty)
+      const laborCost = Math.round(laborUnit * bomQty)
+      const indirectCost = Math.round(indirectUnit * bomQty)
       const subtotal = Math.round(unitCost * bomQty)
       grandTotal += subtotal
 
@@ -167,6 +194,9 @@ export async function GET(req: Request) {
         product_code: partInfo.product_code,
         bom_quantity: bomQty,
         unit_cost: unitCost,
+        material_cost: materialCost,
+        labor_cost: laborCost,
+        indirect_cost: indirectCost,
         subtotal,
         cost_items: items,
       }
