@@ -4,13 +4,15 @@ import { useState } from 'react'
 import Link from 'next/link'
 
 export default function ProductImportPage() {
-  const [importType, setImportType] = useState<'products' | 'stocks' | 'parts-cost' | 'stock-receipt' | 'products-price-update'>('stocks')
+  const [importType, setImportType] = useState<'products' | 'stocks' | 'parts-cost' | 'stock-receipt' | 'stock-issue' | 'products-price-update'>('stocks')
   const [file, setFile] = useState<File | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [progress, setProgress] = useState(0)
   const [progressText, setProgressText] = useState('')
   const [detailedResult, setDetailedResult] = useState<any>(null)
+  const [issueNote, setIssueNote] = useState('セット品一括出庫')
+  const [allowNegativeIssue, setAllowNegativeIssue] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -72,6 +74,36 @@ export default function ProductImportPage() {
           setMessage({
             type: 'success',
             text: `${result.message}\n成功: ${result.successCount}件${result.errorCount > 0 ? ` / エラー: ${result.errorCount}件` : ''}`,
+          })
+          setDetailedResult(result)
+          setFile(null)
+        } else {
+          setMessage({
+            type: 'error',
+            text: result.error || 'インポートに失敗しました',
+          })
+        }
+        setIsLoading(false)
+      } else if (importType === 'stock-issue') {
+        // 出庫データ一括取込
+        if (issueNote.trim()) formData.append('note', issueNote.trim())
+        if (allowNegativeIssue) formData.append('allow_negative', '1')
+
+        const response = await fetch('/api/stock/issue/import', {
+          method: 'POST',
+          body: formData,
+        })
+
+        const result = await response.json()
+
+        if (response.ok) {
+          setMessage({
+            type: 'success',
+            text:
+              `${result.message}\n成功: ${result.successCount}件` +
+              (result.skippedCount ? ` / スキップ: ${result.skippedCount}件` : '') +
+              (result.errorCount > 0 ? ` / エラー: ${result.errorCount}件` : '') +
+              (result.totalIssuedQty != null ? `\n出庫合計数量: ${result.totalIssuedQty}` : ''),
           })
           setDetailedResult(result)
           setFile(null)
@@ -227,7 +259,7 @@ export default function ProductImportPage() {
             <select
               id="importType"
               value={importType}
-              onChange={(e) => setImportType(e.target.value as 'products' | 'stocks' | 'parts-cost' | 'stock-receipt' | 'products-price-update')}
+              onChange={(e) => setImportType(e.target.value as 'products' | 'stocks' | 'parts-cost' | 'stock-receipt' | 'stock-issue' | 'products-price-update')}
               className="w-full px-4 py-2 bg-slate-800 border-2 border-blue-400 rounded-lg text-white focus:outline-none focus:border-blue-300"
             >
               <option value="products">商品マスタ取込</option>
@@ -235,13 +267,38 @@ export default function ProductImportPage() {
               <option value="stocks">在庫マスタ取込</option>
               <option value="parts-cost">パーツマスター原価取込</option>
               <option value="stock-receipt">入庫データ一括取込</option>
+              <option value="stock-issue">出庫データ一括取込</option>
             </select>
           </div>
+
+          {importType === 'stock-issue' && (
+            <div className="space-y-3 rounded-xl border border-rose-500/40 bg-rose-950/20 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-rose-200">使用目的（履歴メモ）</label>
+                <input
+                  type="text"
+                  value={issueNote}
+                  onChange={(e) => setIssueNote(e.target.value)}
+                  placeholder="例: セット品一括出庫 / SGR組立払い出し"
+                  className="w-full rounded-lg border border-rose-400/40 bg-slate-900 px-3 py-2 text-sm text-white focus:border-rose-300 focus:outline-none"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={allowNegativeIssue}
+                  onChange={(e) => setAllowNegativeIssue(e.target.checked)}
+                  className="h-4 w-4 rounded border-rose-400 text-rose-500 focus:ring-rose-400"
+                />
+                在庫不足でも出庫する（マイナス在庫を許可）
+              </label>
+            </div>
+          )}
 
           {/* ファイルアップロード */}
           <div>
             <label className="block text-sm font-medium mb-2">
-              {importType === 'parts-cost' || importType === 'stock-receipt' ? 'CSV/Excelファイルをアップロード' : 'Excelファイルをアップロード'}
+              {importType === 'parts-cost' || importType === 'stock-receipt' || importType === 'stock-issue' ? 'CSV/Excelファイルをアップロード' : 'Excelファイルをアップロード'}
             </label>
             <p className="text-gray-400 mb-2">
               {importType === 'products' 
@@ -252,6 +309,8 @@ export default function ProductImportPage() {
                 ? 'パーツマスター原価のCSV/Excelファイルを選択してください。'
                 : importType === 'stock-receipt'
                 ? '入庫データのExcelファイルを選択してください。'
+                : importType === 'stock-issue'
+                ? '出庫データのExcelファイル（例: セット品インポート用.xlsx）を選択してください。'
                 : '在庫一覧.xlsxファイルを選択してください。'
               }
             </p>
@@ -264,6 +323,8 @@ export default function ProductImportPage() {
                 ? '必須カラム: 商品コード(商品コード/product_code/コード/品番), 原価(原価/cost_price/単価/price)'
                 : importType === 'stock-receipt'
                 ? '必須カラム: 入荷日付、商品コード、商品名、総数（入荷数）、単価。単価がある場合は製品マスタの購入価格・原価も更新し、空欄は既存値を維持します。'
+                : importType === 'stock-issue'
+                ? '必須カラム: 部品コード（または商品コード）、部品名（または商品名）、総計（出庫総数）。総計が0以下の行はスキップします。'
                 : '必須カラム: 商品コード、在庫数、当月在庫単価、在庫金額、棚番。当月在庫単価がある場合は製品マスタの購入価格・原価も更新し、空欄は既存値を維持します。'
               }
             </p>
@@ -273,7 +334,7 @@ export default function ProductImportPage() {
                 ファイルを選択
                 <input
                   type="file"
-                  accept={importType === 'parts-cost' || importType === 'stock-receipt' ? '.csv,.xlsx,.xls' : '.xlsx,.xls'}
+                  accept={importType === 'parts-cost' || importType === 'stock-receipt' || importType === 'stock-issue' ? '.csv,.xlsx,.xls' : '.xlsx,.xls'}
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -318,7 +379,18 @@ export default function ProductImportPage() {
             >
               <p className="whitespace-pre-line">{message.text}</p>
               
-              {/* 詳細エラー表示（パーツマスター原価インポート用） */}
+              {detailedResult?.codeRemappings && detailedResult.codeRemappings.length > 0 && (
+                <div className="mt-4 bg-slate-900/50 p-3 rounded max-h-40 overflow-y-auto">
+                  <p className="text-sm font-semibold mb-2 text-amber-300">コード正規化:</p>
+                  {detailedResult.codeRemappings.map((note: string, index: number) => (
+                    <p key={index} className="text-xs text-amber-100 mb-1">
+                      {note}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* 詳細エラー表示 */}
               {detailedResult?.errors && detailedResult.errors.length > 0 && (
                 <div className="mt-4 bg-slate-900/50 p-3 rounded max-h-60 overflow-y-auto">
                   <p className="text-sm font-semibold mb-2 text-red-300">エラー詳細:</p>
@@ -336,14 +408,16 @@ export default function ProductImportPage() {
           <div className="bg-slate-900/50 p-4 rounded-lg border border-blue-400/20">
             <h3 className="font-semibold mb-2">使用方法</h3>
             <ol className="text-sm text-gray-300 space-y-1 list-decimal list-inside">
-              <li>取込タイプを選択（商品マスタ、製品マスタ単価更新、在庫マスタ、パーツマスター原価またはインポート実行）</li>
-              <li>{importType === 'parts-cost' ? 'CSV/Excelファイル' : 'Excelファイル'}を選択</li>
+              <li>取込タイプを選択（商品マスタ、製品マスタ単価更新、在庫マスタ、パーツ原価、入庫一括、出庫一括）</li>
+              <li>{importType === 'parts-cost' || importType === 'stock-receipt' || importType === 'stock-issue' ? 'CSV/Excelファイル' : 'Excelファイル'}を選択</li>
               <li>「インポート実行」ボタンをクリック</li>
               <li>
                 {importType === 'products-price-update'
                   ? '商品コードで紐づけて購入価格・原価を更新します（単価空欄は既存値維持、無い場合は新規登録）'
-                  : importType === 'parts-cost' 
+                  : importType === 'parts-cost'
                   ? '商品コードで紐づけて原価を更新します（該当なしはスキップ）'
+                  : importType === 'stock-issue'
+                  ? '部品コードで商品を特定し、総計（出庫総数）分を一括払い出しします（在庫不足は行単位でエラー）'
                   : importType === 'stock-receipt' || importType === 'stocks'
                   ? '在庫を更新し、単価列がある場合は製品マスタの購入価格・原価も更新します（空欄は既存値維持）'
                   : '既存の商品コードは更新、新規は追加されます'
