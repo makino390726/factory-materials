@@ -71,17 +71,24 @@ export default function CostReportsPage() {
   const firstColumnTitle = reportType === 'order' ? 'D指令番号' : '部品キー'
 
   useEffect(() => {
+    const controller = new AbortController()
+    const requestedType = reportType
+
     const fetchReport = async () => {
       setIsLoading(true)
       setError(null)
       try {
-        const response = await fetch(`/api/work-order-costs/print-report?type=${reportType}`)
+        const response = await fetch(`/api/work-order-costs/print-report?type=${requestedType}`, {
+          signal: controller.signal,
+        })
         if (!response.ok) {
           const data = await response.json().catch(() => ({}))
           throw new Error(data?.error || '帳票データの取得に失敗しました')
         }
         const data = await response.json()
-        if (reportType === 'model') {
+        if (controller.signal.aborted) return
+
+        if (requestedType === 'model') {
           setModelRows(Array.isArray(data?.rows) ? data.rows : [])
           setRows([])
           setBomSummary([])
@@ -91,13 +98,15 @@ export default function CostReportsPage() {
           setModelRows([])
         }
       } catch (fetchError) {
+        if (controller.signal.aborted) return
         setError(fetchError instanceof Error ? fetchError.message : 'Unknown error')
       } finally {
-        setIsLoading(false)
+        if (!controller.signal.aborted) setIsLoading(false)
       }
     }
 
     fetchReport()
+    return () => controller.abort()
   }, [reportType])
 
   const totals = useMemo(() => {
