@@ -2128,6 +2128,37 @@ export async function listProcessScheduleStSources(
     .filter((row) => row.model.length > 0)
 }
 
+/** 機種に紐づくスケジュール適用指定一覧（指令横断） */
+export async function listProcessScheduleStSourcesByModel(
+  supabase: SupabaseClient,
+  model: string
+): Promise<ProcessScheduleStSource[]> {
+  const modelKey = normalizeScheduleModel(model)
+  if (!modelKey) return []
+
+  const { data, error } = await supabase
+    .from('process_schedule_st_sources')
+    .select('target_type, target_code, model, fiscal_year, spec_key, apply_to_schedule, updated_at')
+    .eq('model', modelKey)
+    .eq('apply_to_schedule', true)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    if (
+      error.code === '42P01' ||
+      error.message?.includes('process_schedule_st_sources') ||
+      error.message?.includes('schema cache')
+    ) {
+      return []
+    }
+    throw formatProcessScheduleStSourcesTableError(error)
+  }
+
+  return (data || [])
+    .map(mapScheduleStSourceRow)
+    .filter((row) => row.model.length > 0)
+}
+
 export async function getProcessScheduleStSource(
   supabase: SupabaseClient,
   targetType: ProcessTargetType,
