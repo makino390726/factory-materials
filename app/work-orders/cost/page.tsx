@@ -62,7 +62,7 @@ const createPartRow = (): PartRow => ({
   product_code: '',
   part_name: '',
   spec: '',
-  quantity: '',
+  quantity: '1',
   unit_price: '',
   material_cost: '0',
   labor_cost: '0',
@@ -435,8 +435,14 @@ export default function WorkOrderCostPage() {
   const openPartCostEditor = (partKey: string) => {
     setPartsReturnModel(selectedHeaterModel)
     setPartsReturnFrom('parts')
-    setSelectedPartKey(partKey)
     setMode('line')
+    // 同一パーツの再クリックでも明細を必ず再読込する
+    if (selectedPartKey === partKey) {
+      setSelectedPartKey('')
+      queueMicrotask(() => setSelectedPartKey(partKey))
+    } else {
+      setSelectedPartKey(partKey)
+    }
   }
 
   const handleDeleteBomPart = async (partKey: string) => {
@@ -516,6 +522,10 @@ export default function WorkOrderCostPage() {
         setSelectedHeaterModel(targetModel)
         await loadModelBomParts(targetModel)
       }
+
+      // 取込後は貼付け画面のキャッシュを捨て、次にパーツクリックしたとき最新明細を読む
+      setSelectedPartKey('')
+      setPartRows([createPartRow()])
 
       const refreshed = await fetch('/api/heater/parts-master')
       if (refreshed.ok) {
@@ -630,87 +640,81 @@ export default function WorkOrderCostPage() {
     void loadPastCosts()
   }, [mode])
 
-  // 選択パーツが変わったら localStorage から復元、なければ partsMaster から1行セット
+  // L指令の貼付け画面: 選択パーツの原価明細を DB から復元
+  // mode も依存に含め、製品パーツ一覧→同一パーツ再クリックでも再読込する
   useEffect(() => {
+    if (mode !== 'line') return
+
+    const ac = new AbortController()
     const restore = async () => {
       if (!selectedPartKey) {
-        console.debug('no selectedPartKey, resetting to empty row')
         setPartRows([createPartRow()])
         return
       }
 
-      console.debug('restore: loading for selectedPartKey=', selectedPartKey)
-
-      // refresh parts from server to get latest
-      let fetched: any[] = []
       try {
-        const res = await fetch('/api/heater/parts-master')
+        const res = await fetch('/api/heater/parts-master', { signal: ac.signal })
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data)) {
-            fetched = data
-            setPartsMaster(data.map((p: any, i: number) => ({ id: p.part_key || p.id || p.product_code || `pm-${i}`, product_code: p.product_code || '', name: p.part_name || p.name || '', cost_price: p.cost_price || 0 })))
+            setPartsMaster(
+              data.map((p: any, i: number) => ({
+                id: p.part_key || p.id || p.product_code || `pm-${i}`,
+                product_code: p.part_key || p.product_code || '',
+                name: p.part_name || p.name || '',
+                cost_price: p.cost_price || 0,
+              }))
+            )
           }
         }
       } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return
         console.error('parts refresh error', err)
       }
 
       try {
-        console.debug('fetching items from DB for part_key:', selectedPartKey)
-        const res = await fetch(`/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}`)
+        const res = await fetch(
+          `/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}`,
+          { signal: ac.signal }
+        )
         if (!res.ok) {
           const errText = await res.text()
-          console.error(`fetch items failed: ${res.status} ${res.statusText}`, errText)
           throw new Error(`fetch items failed (${res.status}): ${errText}`)
         }
-        const items = await res.json() as any[]
-        console.debug('fetched items count:', items.length)
-        
+        const items = (await res.json()) as any[]
+
         if (Array.isArray(items) && items.length > 0) {
-          const restored = items.map((it: any) => ({
-            id: it.id || crypto.randomUUID(),
-            component_name: it.component_name || '',
-            product_code: it.product_code || '',
-            part_name: it.part_name || '',
-            spec: it.spec || '',
-            quantity: String(it.quantity || 0),
-            unit_price: String(it.unit_price || 0),
-            material_cost: String(it.material_cost || 0),
-            labor_cost: String(it.labor_cost || 0),
-            indirect_cost: String(it.indirect_cost || 0),
-            cost_type: it.cost_type || '加',
-          }))
-          console.debug('restored rows:', restored.length)
-          setPartRows(restored)
+          if (ac.signal.aborted) return
+          setPartRows(
+            items.map((it: any) => ({
+              id: it.id || crypto.randomUUID(),
+              component_name: it.component_name || '',
+              product_code: it.product_code || '',
+              part_name: it.part_name || '',
+              spec: it.spec || '',
+              quantity: String(it.quantity ?? 1),
+              unit_price: String(it.unit_price ?? 0),
+              material_cost: String(it.material_cost ?? 0),
+              labor_cost: String(it.labor_cost ?? 0),
+              indirect_cost: String(it.indirect_cost ?? 0),
+              cost_type: it.cost_type || '加',
+            }))
+          )
           return
         }
       } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return
         console.error('DB restore error', err)
       }
 
-      const partsList = fetched.length > 0 ? fetched : partsMaster
-      const p = partsList.find((pp: any) => (pp.part_key || pp.id) === selectedPartKey || String(pp.id) === String(selectedPartKey))
-      if (!p) {
-        setPartRows([createPartRow()])
-        return
-      }
-      setPartRows([{
-        id: crypto.randomUUID(),
-        component_name: '',
-        product_code: p.product_code || '',
-        part_name: p.part_name || p.name || '',
-        spec: p.spec || '',
-        quantity: '0',
-        unit_price: String(p.cost_price || 0),
-        material_cost: '0',
-        labor_cost: '0',
-        indirect_cost: '0',
-        cost_type: '加',
-      }])
+      if (ac.signal.aborted) return
+
+      // 明細未登録時のみ空の編集行（数量は初期1）
+      setPartRows([createPartRow()])
     }
-    restore()
-  }, [selectedPartKey])
+    void restore()
+    return () => ac.abort()
+  }, [selectedPartKey, mode])
 
   // L指令モードの場合は parts master を取得してクライアント側検索に使う
   useEffect(() => {
@@ -1257,8 +1261,12 @@ export default function WorkOrderCostPage() {
         console.log('✓ Found in partsMaster:', { id: partMatch.id, name: partMatch.name, cost_price: partMatch.cost_price })
 
         const isPartKeyInput = String(partMatch.id || '').toLowerCase() === codeLower
+        // product_code に part_key を埋め込んでいるため、商品コード＝パーツキーの部品
+        // （例: ダンボール 82023100）では明細復元後の onBlur で集約上書きしない
+        const looksLikeEmbeddedPartKey =
+          String(partMatch.product_code || '').toLowerCase() === String(partMatch.id || '').toLowerCase()
 
-        if (isPartKeyInput) {
+        if (isPartKeyInput && !looksLikeEmbeddedPartKey) {
           try {
             const summaryRes = await fetch(`/api/work-order-costs/items-summary?part_key=${encodeURIComponent(String(partMatch.id))}`)
             const summaryData = summaryRes.ok ? await summaryRes.json() : []
@@ -1269,6 +1277,10 @@ export default function WorkOrderCostPage() {
             setPartRows((prev) =>
               prev.map((row) => {
                 if (row.id !== rowId) return row
+                // 取込済み明細（単価・材料あり）は保護
+                if (toNumber(row.unit_price) > 0 || toNumber(row.material_cost) > 0) {
+                  return row
+                }
                 return {
                   ...row,
                   product_code: codeTrim,
@@ -1285,10 +1297,18 @@ export default function WorkOrderCostPage() {
           }
         }
 
+        // パーツキー＝商品コードの部品は商品マスタ／明細の単価を優先（上書きで材料を潰さない）
         setPartRows((prev) =>
           prev.map((row) => {
             if (row.id !== rowId) return row
-            const qtyNum = toNumber(row.quantity)
+            if (toNumber(row.unit_price) > 0 || toNumber(row.material_cost) > 0) {
+              return {
+                ...row,
+                product_code: codeTrim,
+                part_name: row.part_name || partMatch.name || '',
+              }
+            }
+            const qtyNum = toNumber(row.quantity) || 1
             const priceNum = Number(partMatch.cost_price || 0)
             const material = Math.round(qtyNum * priceNum)
             const indirect = Math.round((material + toNumber(row.labor_cost)) * (row.cost_type === '加' ? 0.3 : 0.05))
@@ -1296,6 +1316,7 @@ export default function WorkOrderCostPage() {
               ...row,
               product_code: codeTrim,
               part_name: partMatch.name || '',
+              quantity: String(qtyNum),
               unit_price: String(partMatch.cost_price || 0),
               material_cost: String(material),
               indirect_cost: String(indirect),
