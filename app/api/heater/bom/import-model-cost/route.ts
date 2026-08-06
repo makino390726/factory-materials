@@ -9,14 +9,29 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-type NormalizedRow = {
+type CostLineRow = {
+  component_name: string | null
+  product_code: string | null
+  part_name: string
+  spec: string | null
+  quantity: number
+  unit_price: number
+  material_cost: number
+  labor_cost: number
+  indirect_cost: number
+  line_total: number
+}
+
+type PartGroup = {
   model: string
   part_key: string
   part_name: string
-  product_code: string | null
-  spec: string | null
-  quantity: number
-  cost_price: number | null
+  lines: CostLineRow[]
+}
+
+function buildLineOrderNo(partKey: string) {
+  const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+  return `LINE-${partKey}-${timestamp}`
 }
 
 function pickCell(row: Record<string, unknown>, keys: string[]): unknown {
@@ -25,7 +40,6 @@ function pickCell(row: Record<string, unknown>, keys: string[]): unknown {
       return row[key]
     }
   }
-  // case-insensitive / trimmed key match
   const entries = Object.entries(row)
   for (const key of keys) {
     const found = entries.find(([k]) => k.trim().toLowerCase() === key.trim().toLowerCase())
@@ -41,76 +55,139 @@ function toText(value: unknown): string {
   return String(value).trim()
 }
 
-function toNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null
+function toNumber(value: unknown): number {
+  if (value === undefined || value === null || value === '') return 0
   if (typeof value === 'number' && Number.isFinite(value)) return value
   const n = Number(String(value).replace(/,/g, '').trim())
-  return Number.isFinite(n) ? n : null
+  return Number.isFinite(n) ? n : 0
 }
 
-function normalizeRows(
+function normalizeGroups(
   data: Record<string, unknown>[],
   defaultModel: string
-): { rows: NormalizedRow[]; errors: string[] } {
-  const rows: NormalizedRow[] = []
+): { groups: PartGroup[]; errors: string[]; models: string[] } {
+  const groupMap = new Map<string, PartGroup>()
   const errors: string[] = []
+  const modelSet = new Set<string>()
 
   for (let i = 0; i < data.length; i++) {
     const raw = data[i]
     const lineNo = i + 2
-    const model = toText(
-      pickCell(raw, ['機種', '機種コード', 'model', 'Model', '製品機種'])
-    ) || defaultModel
+
+    const model =
+      toText(pickCell(raw, ['機種', '機種コード', 'model', 'Model', '製品機種'])) ||
+      defaultModel
     const partKey = toText(
-      pickCell(raw, ['部品キー', 'part_key', 'パーツキー', '図番', 'drawing', 'Drawing'])
+      pickCell(raw, ['パーツキー', '部品キー', 'part_key', '図番', 'drawing', 'Drawing'])
     )
-    const partName = toText(
+    const partName = toText(pickCell(raw, ['パーツ名', 'part_display_name', 'パーツ']))
+    const componentName =
+      toText(pickCell(raw, ['構成部品名', '構成部品', 'component_name', '構成要素', '備考'])) ||
+      null
+    const productCode =
+      toText(
+        pickCell(raw, [
+          'コード',
+          '製品コード',
+          '商品コード',
+          'product_code',
+          '品番',
+        ])
+      ) || null
+    const itemPartName = toText(
       pickCell(raw, ['品名', '部品名', 'part_name', 'name', '名称'])
     )
-    const productCode = toText(
-      pickCell(raw, ['製品コード', '商品コード', 'product_code', '品番', 'コード'])
-    ) || null
     const spec = toText(pickCell(raw, ['規格', 'spec', '仕様'])) || null
-    const quantity = toNumber(pickCell(raw, ['数量', '必要数', 'quantity', 'qty', '1台当たり必要数']))
-    const costPrice = toNumber(
-      pickCell(raw, ['単価', '原価', '原価単価', 'cost_price', 'unit_cost', '仕入単価'])
+    const quantity = toNumber(
+      pickCell(raw, ['数量', '必要数', 'quantity', 'qty', '1台当たり必要数'])
     )
+    const unitPrice = toNumber(
+      pickCell(raw, ['単価', '原価単価', 'unit_cost', 'unit_price', '仕入単価'])
+    )
+    const materialCost = toNumber(pickCell(raw, ['材料費', 'material_cost', '材料']))
+    const laborCost = toNumber(pickCell(raw, ['工賃', '工費', 'labor_cost', 'labor']))
+    const indirectCost = toNumber(pickCell(raw, ['間接費', 'indirect_cost', '間接']))
+    const totalRaw = pickCell(raw, [
+      '合計',
+      '原価',
+      'cost_price',
+      'total',
+      'total_cost',
+      'line_total',
+    ])
+    const lineTotal =
+      totalRaw === undefined || totalRaw === null || String(totalRaw).trim() === ''
+        ? materialCost + laborCost + indirectCost
+        : toNumber(totalRaw)
 
     if (!model) {
-      errors.push(`${lineNo}行目: 機種がありません（画面で機種選択するか、Excelに機種列を入れてください）`)
+      errors.push(
+        `${lineNo}行目: 機種がありません（画面で機種選択するか、CSVに機種列を入れてください）`
+      )
       continue
     }
     if (!partKey) {
-      errors.push(`${lineNo}行目: 部品キーがありません`)
+      errors.push(`${lineNo}行目: パーツキー（部品キー）がありません`)
       continue
     }
     if (!partName) {
-      errors.push(`${lineNo}行目: 品名がありません（部品キー: ${partKey}）`)
+      errors.push(`${lineNo}行目: パーツ名がありません（パーツキー: ${partKey}）`)
+      continue
+    }
+    if (!itemPartName && !componentName && !productCode && lineTotal === 0) {
+      // 空行スキップ
+      continue
+    }
+    if (!itemPartName) {
+      errors.push(
+        `${lineNo}行目: 品名（部品名）がありません（パーツキー: ${partKey}）`
+      )
       continue
     }
 
-    rows.push({
-      model,
-      part_key: partKey,
-      part_name: partName,
+    modelSet.add(model)
+    const groupKey = `${model}\0${partKey}`
+    let group = groupMap.get(groupKey)
+    if (!group) {
+      group = {
+        model,
+        part_key: partKey,
+        part_name: partName,
+        lines: [],
+      }
+      groupMap.set(groupKey, group)
+    } else if (partName && group.part_name !== partName) {
+      // 同一キーでパーツ名が違う場合は後勝ちで上書き
+      group.part_name = partName
+    }
+
+    group.lines.push({
+      component_name: componentName,
       product_code: productCode,
+      part_name: itemPartName,
       spec,
-      quantity: quantity == null || quantity < 0 ? 1 : quantity,
-      cost_price: costPrice,
+      quantity: quantity > 0 ? quantity : 1,
+      unit_price: unitPrice,
+      material_cost: materialCost,
+      labor_cost: laborCost,
+      indirect_cost: indirectCost,
+      line_total: lineTotal,
     })
   }
 
-  return { rows, errors }
+  return {
+    groups: Array.from(groupMap.values()),
+    errors,
+    models: Array.from(modelSet),
+  }
 }
 
 /**
  * POST /api/heater/bom/import-model-cost
- * form-data:
- *   file: Excel/CSV
- *   model?: 画面で選択中の機種（Excelに機種列がない場合の既定値）
  *
- * Excel想定列:
- *   機種, 部品キー, 品名, 製品コード, 規格, 数量, 単価
+ * 列振り分け:
+ * - パーツ一覧(BOM/パーツマスタ): 機種, パーツキー(部品キー), パーツ名  ※BOM数量は常に1
+ * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃, 間接費, 合計
  */
 export async function POST(req: Request) {
   try {
@@ -129,7 +206,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'シートが見つかりません' }, { status: 400 })
     }
     const worksheet = workbook.Sheets[sheetName]
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Record<string, unknown>[]
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Record<
+      string,
+      unknown
+    >[]
     if (!rawData.length) {
       return NextResponse.json({ error: 'データ行がありません' }, { status: 400 })
     }
@@ -142,8 +222,8 @@ export async function POST(req: Request) {
       return out
     })
 
-    const { rows, errors } = normalizeRows(normalizedData, defaultModel)
-    if (rows.length === 0) {
+    const { groups, errors, models } = normalizeGroups(normalizedData, defaultModel)
+    if (groups.length === 0) {
       return NextResponse.json(
         {
           error: '取込可能な行がありません',
@@ -158,10 +238,25 @@ export async function POST(req: Request) {
     let partsUpdated = 0
     let bomCreated = 0
     let bomUpdated = 0
+    let costItemsImported = 0
     const rowErrors = [...errors]
 
-    // 既存パーツキーを取得
-    const uniquePartKeys = [...new Set(rows.map((r) => r.part_key))]
+    // 機種マスタへ不足分を追加（ドロップダウン表示用）
+    for (const model of models) {
+      const { data: existingModel } = await supabase
+        .from('heater_models')
+        .select('model')
+        .eq('model', model)
+        .maybeSingle()
+      if (!existingModel) {
+        const { error } = await supabase.from('heater_models').insert([{ model, name: model }])
+        if (error && !String(error.message || '').includes('duplicate')) {
+          rowErrors.push(`機種マスタ登録失敗 ${model}: ${error.message}`)
+        }
+      }
+    }
+
+    const uniquePartKeys = [...new Set(groups.map((g) => g.part_key))]
     const existingPartKeys = new Set<string>()
     for (let i = 0; i < uniquePartKeys.length; i += 200) {
       const chunk = uniquePartKeys.slice(i, i + 200)
@@ -173,67 +268,150 @@ export async function POST(req: Request) {
       for (const p of data || []) existingPartKeys.add(String(p.part_key))
     }
 
-    for (const row of rows) {
+    for (const group of groups) {
       try {
-        if (existingPartKeys.has(row.part_key)) {
-          const updatePayload: Record<string, unknown> = {
-            part_name: row.part_name,
-            product_code: row.product_code,
-            spec: row.spec,
-          }
-          if (row.cost_price != null) updatePayload.cost_price = row.cost_price
+        const totalMaterial = group.lines.reduce((s, r) => s + r.material_cost, 0)
+        const totalLabor = group.lines.reduce((s, r) => s + r.labor_cost, 0)
+        const totalIndirect = group.lines.reduce((s, r) => s + r.indirect_cost, 0)
+        const totalCost = group.lines.reduce((s, r) => s + r.line_total, 0)
+
+        // --- パーツ一覧反映（パーツキー / パーツ名、数量は常に1） ---
+        if (existingPartKeys.has(group.part_key)) {
           const { error } = await supabase
             .from('heater_parts_master')
-            .update(updatePayload)
-            .eq('part_key', row.part_key)
+            .update({
+              part_name: group.part_name,
+              cost_price: totalCost,
+              material_cost_total: totalMaterial > 0 ? totalMaterial : null,
+              indirect_cost_total: totalIndirect > 0 ? totalIndirect : null,
+            })
+            .eq('part_key', group.part_key)
           if (error) throw error
           partsUpdated++
         } else {
           const { error } = await supabase.from('heater_parts_master').insert([
             {
-              part_key: row.part_key,
-              part_name: row.part_name,
-              product_code: row.product_code,
-              spec: row.spec,
-              cost_price: row.cost_price ?? 0,
+              part_key: group.part_key,
+              part_name: group.part_name,
+              product_code: null,
+              spec: null,
+              cost_price: totalCost,
+              material_cost_total: totalMaterial > 0 ? totalMaterial : null,
+              indirect_cost_total: totalIndirect > 0 ? totalIndirect : null,
               shelf_no: null,
             },
           ])
           if (error) throw error
-          existingPartKeys.add(row.part_key)
+          existingPartKeys.add(group.part_key)
           partsCreated++
         }
 
         const { data: existingBom, error: bomFindError } = await supabase
           .from('heater_bom')
           .select('model, part_key')
-          .eq('model', row.model)
-          .eq('part_key', row.part_key)
+          .eq('model', group.model)
+          .eq('part_key', group.part_key)
           .maybeSingle()
         if (bomFindError) throw bomFindError
 
         if (existingBom) {
           const { error } = await supabase
             .from('heater_bom')
-            .update({ quantity: row.quantity })
-            .eq('model', row.model)
-            .eq('part_key', row.part_key)
+            .update({ quantity: 1 })
+            .eq('model', group.model)
+            .eq('part_key', group.part_key)
           if (error) throw error
           bomUpdated++
         } else {
           const { error } = await supabase.from('heater_bom').insert([
             {
-              model: row.model,
-              part_key: row.part_key,
-              quantity: row.quantity,
+              model: group.model,
+              part_key: group.part_key,
+              quantity: 1,
             },
           ])
           if (error) throw error
           bomCreated++
         }
+
+        // --- 原価計算欄反映（構成部品・コード・品名・規格・数量・単価・費用） ---
+        const { data: existingCostItems, error: existingCostError } = await supabase
+          .from('work_order_cost_items')
+          .select('id, work_order_cost_id')
+          .eq('master_type', 'ライン原価')
+          .eq('master_id', group.part_key)
+          .limit(1)
+        if (existingCostError) throw existingCostError
+
+        let workOrderCostId = String(existingCostItems?.[0]?.work_order_cost_id || '')
+        const { error: deleteItemsError } = await supabase
+          .from('work_order_cost_items')
+          .delete()
+          .eq('master_type', 'ライン原価')
+          .eq('master_id', group.part_key)
+        if (deleteItemsError) throw deleteItemsError
+
+        if (workOrderCostId) {
+          const { error: headerUpdateError } = await supabase
+            .from('work_order_costs')
+            .update({
+              total_material_cost: totalMaterial,
+              total_labor_cost: totalLabor,
+              total_indirect_cost: totalIndirect,
+              total_cost: totalCost,
+            })
+            .eq('id', workOrderCostId)
+          if (headerUpdateError) throw headerUpdateError
+        } else {
+          const { data: createdHeader, error: headerInsertError } = await supabase
+            .from('work_order_costs')
+            .insert([
+              {
+                order_no: buildLineOrderNo(group.part_key),
+                work_order_id: null,
+                total_material_cost: totalMaterial,
+                total_labor_cost: totalLabor,
+                total_indirect_cost: totalIndirect,
+                total_cost: totalCost,
+                notes: `imported model-cost ${group.model}/${group.part_key}`,
+              },
+            ])
+            .select('id')
+            .single()
+          if (headerInsertError || !createdHeader?.id) {
+            throw new Error(headerInsertError?.message || '原価ヘッダの作成に失敗しました')
+          }
+          workOrderCostId = String(createdHeader.id)
+        }
+
+        const itemsPayload = group.lines.map((row, idx) => ({
+          work_order_cost_id: workOrderCostId,
+          line_no: idx + 1,
+          component_name: row.component_name,
+          product_code: row.product_code,
+          part_name: row.part_name,
+          spec: row.spec,
+          quantity: row.quantity,
+          unit_price: row.unit_price,
+          material_cost: row.material_cost,
+          labor_cost: row.labor_cost,
+          indirect_cost: row.indirect_cost,
+          line_total: row.line_total,
+          cost_type: '加',
+          master_type: 'ライン原価',
+          master_id: group.part_key,
+        }))
+
+        const { error: itemsInsertError } = await supabase
+          .from('work_order_cost_items')
+          .insert(itemsPayload)
+        if (itemsInsertError) throw itemsInsertError
+        costItemsImported += itemsPayload.length
       } catch (e) {
         rowErrors.push(
-          `${row.model}/${row.part_key}: ${e instanceof Error ? e.message : '処理に失敗しました'}`
+          `${group.model}/${group.part_key}: ${
+            e instanceof Error ? e.message : '処理に失敗しました'
+          }`
         )
       }
     }
@@ -242,11 +420,14 @@ export async function POST(req: Request) {
       success: true,
       message: '機種別原価Excel取込が完了しました',
       total_rows: normalizedData.length,
-      imported_rows: rows.length,
+      imported_rows: groups.reduce((s, g) => s + g.lines.length, 0),
+      parts_count: groups.length,
       parts_created: partsCreated,
       parts_updated: partsUpdated,
       bom_created: bomCreated,
       bom_updated: bomUpdated,
+      cost_items_imported: costItemsImported,
+      models,
       error_count: rowErrors.length,
       errors: rowErrors.slice(0, 100),
     })

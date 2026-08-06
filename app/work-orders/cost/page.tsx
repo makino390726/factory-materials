@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
+import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 
 type WorkOrderOption = {
   id: string
@@ -483,21 +484,39 @@ export default function WorkOrderCostPage() {
         throw new Error(json.error || 'Excel取込に失敗しました')
       }
       const msg =
-        `取込完了: ${json.imported_rows}行 / ` +
-        `パーツ新規${json.parts_created}・更新${json.parts_updated} / ` +
+        `取込完了: 明細${json.imported_rows}行 / パーツ${json.parts_count ?? ''}件` +
+        `（新規${json.parts_created}・更新${json.parts_updated}） / ` +
         `BOM新規${json.bom_created}・更新${json.bom_updated}` +
+        (json.cost_items_imported != null ? ` / 原価明細${json.cost_items_imported}行` : '') +
         (json.error_count ? ` / 警告${json.error_count}件` : '')
       setModelCostImportResult(msg)
       if (Array.isArray(json.errors) && json.errors.length > 0) {
         setPartsCostError(json.errors.slice(0, 5).join('\n'))
       }
       setModelCostImportFile(null)
-      if (selectedHeaterModel) {
-        await loadModelBomParts(selectedHeaterModel)
-      } else if (json.imported_rows > 0) {
-        // Excelに機種がある場合、先頭行の機種を選んで一覧更新
-        setPartsCostError(null)
+
+      const importedModels: string[] = Array.isArray(json.models) ? json.models : []
+      const targetModel =
+        selectedHeaterModel ||
+        importedModels[0] ||
+        ''
+
+      // 機種マスタを再読込（CSVの新規機種をドロップダウンへ反映）
+      try {
+        const modelsRes = await fetch('/api/heater/models')
+        if (modelsRes.ok) {
+          const modelsData = await modelsRes.json()
+          setHeaterModels(Array.isArray(modelsData) ? modelsData : [])
+        }
+      } catch {
+        /* ignore */
       }
+
+      if (targetModel) {
+        setSelectedHeaterModel(targetModel)
+        await loadModelBomParts(targetModel)
+      }
+
       const refreshed = await fetch('/api/heater/parts-master')
       if (refreshed.ok) {
         const data = await refreshed.json()
@@ -2355,17 +2374,44 @@ export default function WorkOrderCostPage() {
                   <div>
                     <p className="text-sm font-bold text-indigo-200">Excel自動取込</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      列例: 機種 / 部品キー / 品名 / 製品コード / 規格 / 数量 / 単価
-                      {selectedHeaterModel ? '（機種列が空なら選択中の機種を使用）' : '（機種列は必須）'}
+                      パーツ一覧: 機種 / パーツキー / パーツ名（数量は常に1）
+                      {selectedHeaterModel ? '（機種列が空なら選択中の機種を使用）' : ''}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      原価計算欄: 構成部品名 / 製品コード / 部品名 / 規格 / 数量 / 単価 / 材料費 / 工賃 / 間接費 / 合計（同一パーツキーの複数行＝明細）
                     </p>
                   </div>
-                  <a
-                    href="/samples/model-parts-cost-import-sample.csv"
-                    download="機種別原価取込サンプル.csv"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const header = [
+                        '機種',
+                        '部品キー',
+                        'パーツ名',
+                        '構成部品名',
+                        '製品コード',
+                        '部品名',
+                        '規格',
+                        '数量',
+                        '単価',
+                        '材料費',
+                        '工賃',
+                        '間接費',
+                        '合計',
+                      ]
+                      const rows = [
+                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '', '84008700', '鉄　アングル', 't3×30×30×5.5m', 10.816, 207, 2239, '', 672, 2911],
+                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '', '', '溶接ワイヤー', '1φ', 2, 4, 8, '', 2, 10],
+                        ['SP-60S-3T', 'A3B0760B', '発生機側板パネル', '', '84025500', 'カラー鋼板', 't0.5×914×2060', 2, 2720, 5440, '', 1632, 7072],
+                        ['SP-60S-3T', 'SP-60工費', '工費', '', '', '工賃', '', 1, 4500, 0, 4500, 0, 4500],
+                      ]
+                      const content = [buildCsvRow(header), ...rows.map((r) => buildCsvRow(r))].join('\r\n')
+                      downloadCsv('機種別原価取込サンプル.csv', content)
+                    }}
                     className="rounded-full border border-indigo-400/50 bg-indigo-900/40 px-4 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-800/50"
                   >
                     サンプルCSVをダウンロード
-                  </a>
+                  </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <input

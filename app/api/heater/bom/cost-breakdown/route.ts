@@ -109,7 +109,7 @@ export async function GET(req: Request) {
       const { data: costItems, error: costItemsError } = await supabase
         .from('work_order_cost_items')
         .select(
-          'id, master_id, product_code, part_name, spec, quantity, unit_price, material_cost, labor_cost, indirect_cost, line_total, cost_type'
+          'id, master_id, component_name, product_code, part_name, spec, quantity, unit_price, material_cost, labor_cost, indirect_cost, line_total, cost_type'
         )
         .eq('master_type', 'ライン原価')
         .in('master_id', partKeys)
@@ -125,6 +125,7 @@ export async function GET(req: Request) {
         if (!costItemsMap[key]) costItemsMap[key] = []
         costItemsMap[key].push({
           id: item.id,
+          component_name: item.component_name ?? '',
           product_code: item.product_code ?? '',
           part_name: item.part_name ?? '',
           spec: item.spec ?? '',
