@@ -3,6 +3,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import {
+  inferProductCategory,
+  normalizeProductCategory,
+} from '@/lib/product-category';
 
 interface BomItem {
   model: string;
@@ -22,6 +26,7 @@ interface BomItem {
 interface HeaterModel {
   model: string;
   name: string | null;
+  product_category?: string | null;
 }
 
 interface PartsMaster {
@@ -65,6 +70,10 @@ export default function BomPage() {
     spec: '',
   });
   const [filterModel, setFilterModel] = useState(initialModel);
+  const [copySourceModel, setCopySourceModel] = useState('');
+  const [copyMode, setCopyMode] = useState<'merge' | 'replace'>('merge');
+  const [copying, setCopying] = useState(false);
+  const [copyResult, setCopyResult] = useState<string | null>(null);
 
   const emptyForm = (model = '') => ({
     model,
@@ -137,6 +146,94 @@ export default function BomPage() {
       setParts(data || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  const modelCategoryOf = (m: HeaterModel) =>
+    normalizeProductCategory(
+      m.product_category || inferProductCategory(m.model, m.name)
+    );
+
+  const filterModelMeta = useMemo(
+    () => models.find((m) => m.model === filterModel) || null,
+    [models, filterModel]
+  );
+
+  const filterCategory = useMemo(() => {
+    if (!filterModelMeta) return null;
+    return normalizeProductCategory(
+      filterModelMeta.product_category ||
+        inferProductCategory(filterModelMeta.model, filterModelMeta.name)
+    );
+  }, [filterModelMeta]);
+
+  const sameCategorySourceModels = useMemo(() => {
+    if (!filterModel || !filterCategory) return [];
+    return models.filter((m) => {
+      if (m.model === filterModel) return false;
+      const cat = normalizeProductCategory(
+        m.product_category || inferProductCategory(m.model, m.name)
+      );
+      return cat === filterCategory;
+    });
+  }, [models, filterModel, filterCategory]);
+
+  useEffect(() => {
+    // コピー元候補が変わったら無効な選択をクリア
+    if (
+      copySourceModel &&
+      !sameCategorySourceModels.some((m) => m.model === copySourceModel)
+    ) {
+      setCopySourceModel('');
+    }
+  }, [sameCategorySourceModels, copySourceModel]);
+
+  const handleCopyBom = async () => {
+    if (!filterModel) {
+      setError('①でコピー先機種を選択してください');
+      return;
+    }
+    if (!copySourceModel) {
+      setError('コピー元機種を選択してください');
+      return;
+    }
+    const modeLabel =
+      copyMode === 'replace'
+        ? '先にコピー先のBOMを全削除してから上書き'
+        : '既存パーツは上書き・無いパーツは追加';
+    if (
+      !confirm(
+        `${copySourceModel} のBOMを ${filterModel} へ取込みます。\n` +
+          `カテゴリ: ${filterCategory}\n` +
+          `方式: ${modeLabel}\n\nよろしいですか？`
+      )
+    ) {
+      return;
+    }
+
+    setCopying(true);
+    setError(null);
+    setCopyResult(null);
+    try {
+      const res = await fetch('/api/heater/bom/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_model: copySourceModel,
+          target_model: filterModel,
+          mode: copyMode,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'BOM取込に失敗しました');
+      }
+      setCopyResult(json.message || '取込完了');
+      await fetchBom();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'BOM取込に失敗しました');
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -420,8 +517,78 @@ export default function BomPage() {
             <span>表示行: <span className="text-white font-semibold">{normalizedBom.length}</span></span>
             <span>部品種類: <span className="text-sky-300 font-semibold">{uniqueParts}</span></span>
             <span>合計原価: <span className="text-yellow-300 font-semibold">¥{totalAmount.toLocaleString('ja-JP')}</span></span>
+            {filterCategory && (
+              <span>
+                カテゴリ:{' '}
+                <span className="text-violet-300 font-semibold">{filterCategory}</span>
+              </span>
+            )}
           </div>
         </div>
+
+        {filterModel && (
+          <div className="bg-slate-800/70 border border-cyan-600/40 rounded-2xl p-5 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-cyan-200">
+                ①′ 同カテゴリ機種からBOM取込
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                例: SP-60S-3T → SP-80S-4T。暖房機・たばこ乾燥機など
+                <span className="text-cyan-300">同じカテゴリ</span>
+                で規格違いの機種のみ選択できます。グループ定義も一緒にコピーします。
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-end">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  コピー元機種（→ {filterModel}）
+                </label>
+                <select
+                  value={copySourceModel}
+                  onChange={(e) => setCopySourceModel(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                >
+                  <option value="">選択してください</option>
+                  {sameCategorySourceModels.map((m) => (
+                    <option key={m.model} value={m.model}>
+                      {m.model}
+                      {m.name ? ` — ${m.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {sameCategorySourceModels.length === 0 && (
+                  <p className="mt-1 text-[11px] text-amber-300/90">
+                    同カテゴリ（{filterCategory}）の他機種がありません
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">取込方式</label>
+                <select
+                  value={copyMode}
+                  onChange={(e) =>
+                    setCopyMode(e.target.value as 'merge' | 'replace')
+                  }
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white"
+                >
+                  <option value="merge">追加・上書き（推奨）</option>
+                  <option value="replace">全置換（先に削除）</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                disabled={copying || !copySourceModel}
+                onClick={() => void handleCopyBom()}
+                className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-semibold text-sm"
+              >
+                {copying ? '取込中…' : 'BOM取込'}
+              </button>
+            </div>
+            {copyResult && (
+              <p className="text-sm text-emerald-300">{copyResult}</p>
+            )}
+          </div>
+        )}
 
         <div className="bg-slate-800/70 border border-slate-600/50 rounded-2xl p-5">
           <h2 className="text-lg font-semibold text-white mb-4">② {isEditing ? 'BOMを編集' : '新しいBOMを追加'}</h2>
