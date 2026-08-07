@@ -169,9 +169,15 @@ export async function PUT(req: NextRequest) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
     
     // BOM テーブルを更新
+    const updatePayload: Record<string, unknown> = {}
+    if (body.quantity !== undefined) updatePayload.quantity = body.quantity
+    if (body.part_group !== undefined) updatePayload.part_group = body.part_group
+    if (body.sort_order !== undefined) updatePayload.sort_order = body.sort_order
+    if (body.part_name !== undefined) updatePayload.part_name = body.part_name
+
     const { error: bomError } = await supabase
       .from('heater_bom')
-      .update({ quantity: body.quantity })
+      .update(updatePayload)
       .eq('model', body.model)
       .eq('part_key', body.part_key);
     

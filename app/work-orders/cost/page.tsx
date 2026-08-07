@@ -1,9 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
 import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
+import {
+  type BomGroupDefinition,
+  UNCATEGORIZED_BOM_GROUP,
+} from '@/lib/heater-bom-part-group'
 
 type WorkOrderOption = {
   id: string
@@ -139,6 +143,8 @@ export default function WorkOrderCostPage() {
       part_key: string
       part_name: string | null
       product_code: string | null
+      part_group: string
+      sort_order: number
       bom_quantity: number
       unit_cost: number
       material_cost: number
@@ -147,6 +153,20 @@ export default function WorkOrderCostPage() {
       subtotal: number
     }>
   >([])
+  const [modelBomGroupDefs, setModelBomGroupDefs] = useState<BomGroupDefinition[]>([])
+  const [modelProductCategory, setModelProductCategory] = useState('')
+  const [groupDefsLoading, setGroupDefsLoading] = useState(false)
+  const [newGroupNameInput, setNewGroupNameInput] = useState('')
+  const [groupNameSaving, setGroupNameSaving] = useState<string | null>(null)
+  const [collapsedPartGroups, setCollapsedPartGroups] = useState<Record<string, boolean>>({})
+  const [backfillingGroups, setBackfillingGroups] = useState(false)
+  const [updatingPartGroupKey, setUpdatingPartGroupKey] = useState<string | null>(null)
+  const [groupEditMode, setGroupEditMode] = useState(false)
+  const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false)
+  const [selectedBulkPartKeys, setSelectedBulkPartKeys] = useState<Set<string>>(() => new Set())
+  const [bulkGroupTarget, setBulkGroupTarget] = useState('')
+  const [bulkGroupUpdating, setBulkGroupUpdating] = useState(false)
+  const [editingGroupNames, setEditingGroupNames] = useState<Record<string, string>>({})
   const [deletingBomPartKey, setDeletingBomPartKey] = useState<string | null>(null)
   const [modelBomGrandTotal, setModelBomGrandTotal] = useState(0)
   const [realtimeCostActive, setRealtimeCostActive] = useState(false)
@@ -166,6 +186,7 @@ export default function WorkOrderCostPage() {
     spec: '',
     quantity: 1,
     cost_price: 0,
+    part_group: '',
   })
   const [partsReturnModel, setPartsReturnModel] = useState('')
   const [partsReturnFrom, setPartsReturnFrom] = useState<'parts' | 'bom'>('parts')
@@ -229,6 +250,47 @@ export default function WorkOrderCostPage() {
       .catch(() => setHeaterModels([]))
   }, [])
 
+  const selectableGroupNames = useMemo(() => {
+    const names = modelBomGroupDefs.map((g) => g.group_name)
+    return names.length > 0 ? names : ['発生機上段', '発生機下段', '工費', '梱包']
+  }, [modelBomGroupDefs])
+
+  const loadModelBomGroupDefs = async (modelCode: string) => {
+    if (!modelCode) {
+      setModelBomGroupDefs([])
+      setModelProductCategory('')
+      return
+    }
+    setGroupDefsLoading(true)
+    try {
+      const res = await fetch(
+        `/api/heater/bom/groups?model=${encodeURIComponent(modelCode)}`
+      )
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'グループ定義の取得に失敗しました')
+      }
+      setModelBomGroupDefs(Array.isArray(json.groups) ? json.groups : [])
+      setModelProductCategory(String(json.product_category || ''))
+      setBulkGroupTarget((prev) => {
+        const names = (json.groups || []).map((g: BomGroupDefinition) => g.group_name)
+        if (prev && names.includes(prev)) return prev
+        return names[0] || '発生機上段'
+      })
+      setNewBomPart((prev) => ({
+        ...prev,
+        part_group: prev.part_group && (json.groups || []).some((g: BomGroupDefinition) => g.group_name === prev.part_group)
+          ? prev.part_group
+          : (json.groups?.[0]?.group_name || '発生機上段'),
+      }))
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ定義の取得に失敗しました')
+      setModelBomGroupDefs([])
+    } finally {
+      setGroupDefsLoading(false)
+    }
+  }
+
   const loadModelBomParts = async (modelCode: string) => {
     if (!modelCode) {
       setModelBomParts([])
@@ -242,6 +304,7 @@ export default function WorkOrderCostPage() {
     setRealtimeCostActive(false)
     setRealtimeCostInfo(null)
     try {
+      await loadModelBomGroupDefs(modelCode)
       const res = await fetch(
         `/api/heater/bom/cost-breakdown?model=${encodeURIComponent(modelCode)}`
       )
@@ -253,6 +316,8 @@ export default function WorkOrderCostPage() {
           part_key: String(s.part_key || ''),
           part_name: s.part_name ?? null,
           product_code: s.product_code ?? null,
+          part_group: String(s.part_group || UNCATEGORIZED_BOM_GROUP),
+          sort_order: Number(s.sort_order || 0),
           bom_quantity: Number(s.bom_quantity || 0),
           unit_cost: Number(s.unit_cost || 0),
           material_cost: Number(s.material_cost || 0),
@@ -261,6 +326,9 @@ export default function WorkOrderCostPage() {
           subtotal: Number(s.subtotal || 0),
         }))
       )
+      if (Array.isArray(json.groups) && json.groups.length > 0) {
+        setModelBomGroupDefs(json.groups)
+      }
       setModelBomGrandTotal(Number(json.grand_total || 0))
       setShowNewBomPartForm(sections.length === 0)
     } catch (e) {
@@ -356,6 +424,259 @@ export default function WorkOrderCostPage() {
     return displayModelBomParts.reduce((sum, row) => sum + Number(row.subtotal || 0), 0)
   }, [displayModelBomParts, modelBomGrandTotal, realtimeCostActive, realtimeCostInfo])
 
+  const uncategorizedPartCount = useMemo(
+    () => displayModelBomParts.filter((row) => row.part_group === UNCATEGORIZED_BOM_GROUP).length,
+    [displayModelBomParts]
+  )
+
+  const filteredDisplayModelBomParts = useMemo(() => {
+    if (!showUncategorizedOnly) return displayModelBomParts
+    return displayModelBomParts.filter((row) => row.part_group === UNCATEGORIZED_BOM_GROUP)
+  }, [displayModelBomParts, showUncategorizedOnly])
+
+  const groupedModelBomParts = useMemo(() => {
+    const bucket = new Map<string, typeof filteredDisplayModelBomParts>()
+    for (const row of filteredDisplayModelBomParts) {
+      const groupName = row.part_group || UNCATEGORIZED_BOM_GROUP
+      const list = bucket.get(groupName) ?? []
+      list.push(row)
+      bucket.set(groupName, list)
+    }
+
+    const orderedNames = [
+      ...selectableGroupNames.filter((name) => bucket.has(name)),
+      ...(bucket.has(UNCATEGORIZED_BOM_GROUP) ? [UNCATEGORIZED_BOM_GROUP] : []),
+      ...[...bucket.keys()].filter(
+        (name) => !selectableGroupNames.includes(name) && name !== UNCATEGORIZED_BOM_GROUP
+      ),
+    ]
+
+    return orderedNames.map((name) => {
+      const parts = bucket.get(name) ?? []
+      return {
+        name,
+        parts,
+        subtotal: parts.reduce((sum, row) => sum + Number(row.subtotal || 0), 0),
+        material_total: parts.reduce((sum, row) => sum + Number(row.material_cost || 0), 0),
+        labor_total: parts.reduce((sum, row) => sum + Number(row.labor_cost || 0), 0),
+        indirect_total: parts.reduce((sum, row) => sum + Number(row.indirect_cost || 0), 0),
+      }
+    })
+  }, [filteredDisplayModelBomParts, selectableGroupNames])
+
+  const partGroupOptions = useMemo(
+    () => [...selectableGroupNames, UNCATEGORIZED_BOM_GROUP],
+    [selectableGroupNames]
+  )
+
+  const togglePartGroupCollapsed = (groupName: string) => {
+    setCollapsedPartGroups((prev) => ({
+      ...prev,
+      [groupName]: !prev[groupName],
+    }))
+  }
+
+  const handleBackfillPartGroups = async () => {
+    if (!selectedHeaterModel) {
+      setPartsCostError('機種を選択してください')
+      return
+    }
+    setBackfillingGroups(true)
+    setPartsCostError(null)
+    try {
+      const res = await fetch(
+        `/api/heater/bom/backfill-groups?model=${encodeURIComponent(selectedHeaterModel)}`,
+        { method: 'POST' }
+      )
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'グループ自動設定に失敗しました')
+      }
+      await loadModelBomParts(selectedHeaterModel)
+      setModelCostImportResult(
+        `グループ自動設定: ${json.updated ?? 0}件更新（全${json.total ?? 0}件）`
+      )
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ自動設定に失敗しました')
+    } finally {
+      setBackfillingGroups(false)
+    }
+  }
+
+  const savePartGroup = async (partKey: string, partGroup: string) => {
+    const res = await fetch('/api/heater/bom', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: selectedHeaterModel,
+        part_key: partKey,
+        part_group: partGroup,
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.error) {
+      throw new Error(json.error || 'グループ更新に失敗しました')
+    }
+  }
+
+  const handleUpdatePartGroup = async (partKey: string, partGroup: string) => {
+    if (!selectedHeaterModel || !partKey) return
+    setUpdatingPartGroupKey(partKey)
+    setPartsCostError(null)
+    try {
+      await savePartGroup(partKey, partGroup)
+      setModelBomParts((prev) =>
+        prev.map((row) =>
+          row.part_key === partKey ? { ...row, part_group: partGroup } : row
+        )
+      )
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ更新に失敗しました')
+    } finally {
+      setUpdatingPartGroupKey(null)
+    }
+  }
+
+  const handleBulkUpdatePartGroup = async () => {
+    if (!selectedHeaterModel || selectedBulkPartKeys.size === 0) {
+      setPartsCostError('一括変更するパーツを選択してください')
+      return
+    }
+    setBulkGroupUpdating(true)
+    setPartsCostError(null)
+    try {
+      const keys = [...selectedBulkPartKeys]
+      for (const partKey of keys) {
+        await savePartGroup(partKey, bulkGroupTarget)
+      }
+      setModelBomParts((prev) =>
+        prev.map((row) =>
+          selectedBulkPartKeys.has(row.part_key)
+            ? { ...row, part_group: bulkGroupTarget }
+            : row
+        )
+      )
+      setSelectedBulkPartKeys(new Set())
+      setModelCostImportResult(`${keys.length}件のグループを「${bulkGroupTarget}」に変更しました`)
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : '一括グループ変更に失敗しました')
+    } finally {
+      setBulkGroupUpdating(false)
+    }
+  }
+
+  const toggleBulkPartSelection = (partKey: string) => {
+    setSelectedBulkPartKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(partKey)) next.delete(partKey)
+      else next.add(partKey)
+      return next
+    })
+  }
+
+  const toggleSelectAllVisibleParts = () => {
+    const visibleKeys = filteredDisplayModelBomParts.map((row) => row.part_key)
+    const allSelected = visibleKeys.every((key) => selectedBulkPartKeys.has(key))
+    setSelectedBulkPartKeys((prev) => {
+      const next = new Set(prev)
+      if (allSelected) {
+        visibleKeys.forEach((key) => next.delete(key))
+      } else {
+        visibleKeys.forEach((key) => next.add(key))
+      }
+      return next
+    })
+  }
+
+  const handleAddBomGroupName = async () => {
+    if (!selectedHeaterModel) return
+    const name = newGroupNameInput.trim()
+    if (!name) {
+      setPartsCostError('グループ名を入力してください')
+      return
+    }
+    if (name === UNCATEGORIZED_BOM_GROUP) {
+      setPartsCostError('「未分類」は追加できません')
+      return
+    }
+    setGroupNameSaving('__new__')
+    setPartsCostError(null)
+    try {
+      const res = await fetch('/api/heater/bom/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: selectedHeaterModel, group_name: name }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || 'グループ追加に失敗しました')
+      setNewGroupNameInput('')
+      await loadModelBomGroupDefs(selectedHeaterModel)
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ追加に失敗しました')
+    } finally {
+      setGroupNameSaving(null)
+    }
+  }
+
+  const handleRenameBomGroupName = async (oldName: string) => {
+    if (!selectedHeaterModel) return
+    const newName = String(editingGroupNames[oldName] ?? oldName).trim()
+    if (!newName || newName === oldName) return
+    setGroupNameSaving(oldName)
+    setPartsCostError(null)
+    try {
+      const res = await fetch('/api/heater/bom/groups', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedHeaterModel,
+          old_name: oldName,
+          new_name: newName,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || 'グループ名変更に失敗しました')
+      setEditingGroupNames((prev) => {
+        const next = { ...prev }
+        delete next[oldName]
+        return next
+      })
+      await loadModelBomGroupDefs(selectedHeaterModel)
+      await loadModelBomParts(selectedHeaterModel)
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ名変更に失敗しました')
+    } finally {
+      setGroupNameSaving(null)
+    }
+  }
+
+  const handleDeleteBomGroupName = async (groupName: string) => {
+    if (!selectedHeaterModel) return
+    if (
+      !confirm(
+        `グループ「${groupName}」を削除しますか？\n所属パーツは「未分類」に移動します。`
+      )
+    ) {
+      return
+    }
+    setGroupNameSaving(groupName)
+    setPartsCostError(null)
+    try {
+      const res = await fetch(
+        `/api/heater/bom/groups?model=${encodeURIComponent(selectedHeaterModel)}&group_name=${encodeURIComponent(groupName)}`,
+        { method: 'DELETE' }
+      )
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error || 'グループ削除に失敗しました')
+      await loadModelBomGroupDefs(selectedHeaterModel)
+      await loadModelBomParts(selectedHeaterModel)
+    } catch (e) {
+      setPartsCostError(e instanceof Error ? e.message : 'グループ削除に失敗しました')
+    } finally {
+      setGroupNameSaving(null)
+    }
+  }
+
   const handleRegisterBomPart = async () => {
     if (!selectedHeaterModel) {
       setPartsCostError('機種を選択してください')
@@ -396,6 +717,7 @@ export default function WorkOrderCostPage() {
           model: selectedHeaterModel,
           part_key: partKey,
           quantity: Number(newBomPart.quantity) || 1,
+          part_group: newBomPart.part_group,
         }),
       })
       if (!bomRes.ok) {
@@ -410,6 +732,7 @@ export default function WorkOrderCostPage() {
         spec: '',
         quantity: 1,
         cost_price: 0,
+        part_group: newBomPart.part_group || selectableGroupNames[0] || '',
       })
       setShowNewBomPartForm(false)
       await loadModelBomParts(selectedHeaterModel)
@@ -2395,7 +2718,7 @@ export default function WorkOrderCostPage() {
                   <div>
                     <p className="text-sm font-bold text-indigo-200">Excel自動取込</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      パーツ一覧: 機種 / パーツキー / パーツ名（数量は常に1）
+                      パーツ一覧: 機種 / パーツキー / パーツ名 / グループ（任意・未指定時は自動推定） / BOM数量は常に1
                       {selectedHeaterModel ? '（機種列が空なら選択中の機種を使用）' : ''}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
@@ -2409,6 +2732,7 @@ export default function WorkOrderCostPage() {
                         '機種',
                         '部品キー',
                         'パーツ名',
+                        'グループ',
                         '構成部品名',
                         '製品コード',
                         '部品名',
@@ -2421,10 +2745,10 @@ export default function WorkOrderCostPage() {
                         '合計',
                       ]
                       const rows = [
-                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '', '84008700', '鉄　アングル', 't3×30×30×5.5m', 10.816, 207, 2239, '', 672, 2911],
-                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '', '', '溶接ワイヤー', '1φ', 2, 4, 8, '', 2, 10],
-                        ['SP-60S-3T', 'A3B0760B', '発生機側板パネル', '', '84025500', 'カラー鋼板', 't0.5×914×2060', 2, 2720, 5440, '', 1632, 7072],
-                        ['SP-60S-3T', 'SP-60工費', '工費', '', '', '工賃', '', 1, 4500, 0, 4500, 0, 4500],
+                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '発生機上段', '', '84008700', '鉄　アングル', 't3×30×30×5.5m', 10.816, 207, 2239, '', 672, 2911],
+                        ['SP-60S-3T', 'A3B0758', '発生機上段ユニットアングル', '発生機上段', '', '', '溶接ワイヤー', '1φ', 2, 4, 8, '', 2, 10],
+                        ['SP-60S-3T', 'A3B0760B', '発生機側板パネル', '発生機上段', '', '84025500', 'カラー鋼板', 't0.5×914×2060', 2, 2720, 5440, '', 1632, 7072],
+                        ['SP-60S-3T', 'SP-60工費', '工費', '工費', '', '', '工賃', '', 1, 4500, 0, 4500, 0, 4500],
                       ]
                       const content = [buildCsvRow(header), ...rows.map((r) => buildCsvRow(r))].join('\r\n')
                       downloadCsv('機種別原価取込サンプル.csv', content)
@@ -2509,6 +2833,25 @@ export default function WorkOrderCostPage() {
                           />
                         </div>
                         <div>
+                          <label className="block text-xs text-slate-400 mb-1">グループ</label>
+                          <select
+                            value={newBomPart.part_group}
+                            onChange={(e) =>
+                              setNewBomPart({
+                                ...newBomPart,
+                                part_group: e.target.value,
+                              })
+                            }
+                            className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                          >
+                            {selectableGroupNames.map((label) => (
+                              <option key={label} value={label}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
                           <label className="block text-xs text-slate-400 mb-1">1台当たり必要数</label>
                           <input
                             type="number"
@@ -2559,14 +2902,183 @@ export default function WorkOrderCostPage() {
                   )}
 
                   <div>
-                    <p className="mb-2 text-sm font-bold text-slate-200">
-                      機種パーツ一覧
-                      <span className="ml-2 text-xs font-normal text-slate-400">行をクリックするとL指令形式で原価計算できます</span>
-                    </p>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-200">
+                        機種パーツ一覧
+                        <span className="ml-2 text-xs font-normal text-slate-400">
+                          {groupEditMode
+                            ? 'グループ編集モード（区分変更後に「完了」）'
+                            : '行をクリックするとL指令形式で原価計算できます'}
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={!selectedHeaterModel || modelBomParts.length === 0}
+                          onClick={() => {
+                            setGroupEditMode((prev) => {
+                              const next = !prev
+                              if (!next) {
+                                setSelectedBulkPartKeys(new Set())
+                                setShowUncategorizedOnly(false)
+                              }
+                              return next
+                            })
+                          }}
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                            groupEditMode
+                              ? 'border-emerald-400/70 bg-emerald-900/50 text-emerald-100'
+                              : 'border-slate-500/60 bg-slate-900/60 text-slate-200 hover:bg-slate-800/80'
+                          } disabled:opacity-50`}
+                        >
+                          {groupEditMode ? 'グループ編集 完了' : 'グループ編集'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={backfillingGroups || !selectedHeaterModel || modelBomParts.length === 0}
+                          onClick={() => void handleBackfillPartGroups()}
+                          className="rounded-lg border border-violet-500/60 bg-violet-950/40 px-3 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-900/50 disabled:opacity-50"
+                        >
+                          {backfillingGroups ? 'グループ設定中…' : 'グループ自動設定'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {groupEditMode && (
+                      <div className="mb-3 rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3 space-y-4">
+                        <div>
+                          <p className="text-xs font-bold text-emerald-200 mb-2">
+                            グループ名管理（この機種専用）
+                            {modelProductCategory ? (
+                              <span className="ml-2 font-normal text-slate-400">
+                                カテゴリ: {modelProductCategory}
+                              </span>
+                            ) : null}
+                          </p>
+                          {groupDefsLoading ? (
+                            <p className="text-xs text-slate-400">グループ定義を読み込み中…</p>
+                          ) : (
+                            <ul className="space-y-2">
+                              {modelBomGroupDefs.map((g) => (
+                                <li
+                                  key={g.group_name}
+                                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2"
+                                >
+                                  <input
+                                    value={editingGroupNames[g.group_name] ?? g.group_name}
+                                    onChange={(e) =>
+                                      setEditingGroupNames((prev) => ({
+                                        ...prev,
+                                        [g.group_name]: e.target.value,
+                                      }))
+                                    }
+                                    className="min-w-[10rem] flex-1 rounded-lg border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={groupNameSaving === g.group_name}
+                                    onClick={() => void handleRenameBomGroupName(g.group_name)}
+                                    className="rounded-lg border border-cyan-500/50 bg-cyan-950/40 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900/50 disabled:opacity-50"
+                                  >
+                                    {groupNameSaving === g.group_name ? '保存中…' : '名前変更'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={groupNameSaving === g.group_name}
+                                    onClick={() => void handleDeleteBomGroupName(g.group_name)}
+                                    className="rounded-lg border border-red-500/50 bg-red-950/40 px-2 py-1 text-xs text-red-300 hover:bg-red-900/50 disabled:opacity-50"
+                                  >
+                                    削除
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <input
+                              value={newGroupNameInput}
+                              onChange={(e) => setNewGroupNameInput(e.target.value)}
+                              placeholder="新しいグループ名"
+                              className="min-w-[12rem] rounded-lg border border-slate-600 bg-slate-950 px-3 py-1.5 text-sm text-white"
+                            />
+                            <button
+                              type="button"
+                              disabled={groupNameSaving === '__new__'}
+                              onClick={() => void handleAddBomGroupName()}
+                              className="rounded-lg border border-emerald-500/60 bg-emerald-900/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-50"
+                            >
+                              {groupNameSaving === '__new__' ? '追加中…' : 'グループ追加'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-emerald-500/20 pt-3 space-y-3">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                          <label className="inline-flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={showUncategorizedOnly}
+                              onChange={(e) => setShowUncategorizedOnly(e.target.checked)}
+                              className="accent-emerald-500"
+                            />
+                            未分類のみ表示
+                            {uncategorizedPartCount > 0 && (
+                              <span className="rounded-full bg-amber-900/50 px-2 py-0.5 text-amber-200">
+                                {uncategorizedPartCount}件
+                              </span>
+                            )}
+                          </label>
+                          <span className="text-slate-500">|</span>
+                          <span>各行のグループ列、またはチェック＋一括変更</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={bulkGroupTarget}
+                            onChange={(e) => setBulkGroupTarget(e.target.value)}
+                            className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
+                          >
+                            {selectableGroupNames.map((label) => (
+                              <option key={label} value={label}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={bulkGroupUpdating || selectedBulkPartKeys.size === 0}
+                            onClick={() => void handleBulkUpdatePartGroup()}
+                            className="rounded-lg border border-emerald-500/60 bg-emerald-900/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-50"
+                          >
+                            {bulkGroupUpdating
+                              ? '一括変更中…'
+                              : `選択 ${selectedBulkPartKeys.size} 件を一括変更`}
+                          </button>
+                        </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="overflow-x-auto rounded-2xl border border-slate-700">
                       <table className="min-w-full text-sm">
                         <thead className="bg-slate-950 text-left text-xs text-slate-400">
                           <tr>
+                            {groupEditMode && (
+                              <th className="px-3 py-2 w-10">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    filteredDisplayModelBomParts.length > 0 &&
+                                    filteredDisplayModelBomParts.every((row) =>
+                                      selectedBulkPartKeys.has(row.part_key)
+                                    )
+                                  }
+                                  onChange={toggleSelectAllVisibleParts}
+                                  className="accent-emerald-500"
+                                  title="表示中を全選択"
+                                />
+                              </th>
+                            )}
+                            <th className="px-3 py-2">グループ</th>
                             <th className="px-3 py-2">部品キー</th>
                             <th className="px-3 py-2">品名</th>
                             <th className="px-3 py-2 text-right">数量</th>
@@ -2581,57 +3093,142 @@ export default function WorkOrderCostPage() {
                         <tbody>
                           {partsCostLoading ? (
                             <tr>
-                              <td colSpan={9} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
+                              <td colSpan={groupEditMode ? 11 : 10} className="px-3 py-8 text-center text-slate-500">読み込み中…</td>
                             </tr>
-                          ) : displayModelBomParts.length === 0 ? (
+                          ) : filteredDisplayModelBomParts.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
-                                この機種にパーツがありません。「＋ パーツ新規登録」から追加してください
+                              <td colSpan={groupEditMode ? 11 : 10} className="px-3 py-8 text-center text-slate-500">
+                                {showUncategorizedOnly
+                                  ? '未分類のパーツはありません'
+                                  : 'この機種にパーツがありません。「＋ パーツ新規登録」から追加してください'}
                               </td>
                             </tr>
                           ) : (
-                            displayModelBomParts.map((row) => {
-                              const isRealtimeLaborRow =
-                                realtimeCostActive && isLaborFeePartRow(row)
+                            groupedModelBomParts.map((group) => {
+                              const collapsed = Boolean(collapsedPartGroups[group.name])
                               return (
-                              <tr
-                                key={row.part_key}
-                                onClick={() => openPartCostEditor(row.part_key)}
-                                className={`cursor-pointer border-t border-slate-800 hover:bg-cyan-950/40 ${
-                                  isRealtimeLaborRow ? 'bg-amber-950/30' : ''
-                                }`}
-                              >
-                                <td className="px-3 py-2 font-mono text-cyan-300">{row.part_key}</td>
-                                <td className="px-3 py-2 text-slate-300">
-                                  {row.part_name || '-'}
-                                  {isRealtimeLaborRow && (
-                                    <span className="ml-2 rounded-full border border-amber-400/50 bg-amber-900/40 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
-                                      RT工費
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2 text-right text-slate-300">{row.bom_quantity}</td>
-                                <td className="px-3 py-2 text-right text-sky-300">¥{Math.round(row.unit_cost).toLocaleString()}</td>
-                                <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.material_cost).toLocaleString()}</td>
-                                <td className={`px-3 py-2 text-right ${isRealtimeLaborRow ? 'font-bold text-amber-300' : 'text-slate-300'}`}>
-                                  ¥{Math.round(row.labor_cost).toLocaleString()}
-                                </td>
-                                <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.indirect_cost).toLocaleString()}</td>
-                                <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{Math.round(row.subtotal).toLocaleString()}</td>
-                                <td className="px-3 py-2 text-center">
-                                  <button
-                                    type="button"
-                                    disabled={deletingBomPartKey === row.part_key}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      void handleDeleteBomPart(row.part_key)
-                                    }}
-                                    className="rounded-lg border border-red-500/60 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-300 hover:bg-red-900/50 disabled:opacity-50"
+                                <Fragment key={`group-${group.name}`}>
+                                  <tr
+                                    className="border-t border-slate-700 bg-slate-900/90"
                                   >
-                                    {deletingBomPartKey === row.part_key ? '削除中…' : '削除'}
-                                  </button>
-                                </td>
-                              </tr>
+                                    <td colSpan={groupEditMode ? 11 : 10} className="px-3 py-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => togglePartGroupCollapsed(group.name)}
+                                        className="flex w-full items-center gap-3 text-left"
+                                      >
+                                        <span className="text-slate-400">{collapsed ? '▶' : '▼'}</span>
+                                        <span className="text-sm font-bold text-violet-200">{group.name}</span>
+                                        <span className="text-xs text-slate-400">{group.parts.length}件</span>
+                                        <span className="ml-auto text-xs text-slate-300">
+                                          小計 ¥{Math.round(group.subtotal).toLocaleString()}
+                                          <span className="ml-3 text-slate-500">
+                                            材料 ¥{Math.round(group.material_total).toLocaleString()} /
+                                            工賃 ¥{Math.round(group.labor_total).toLocaleString()} /
+                                            間接 ¥{Math.round(group.indirect_total).toLocaleString()}
+                                          </span>
+                                        </span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {!collapsed &&
+                                    group.parts.map((row) => {
+                                      const isRealtimeLaborRow =
+                                        realtimeCostActive && isLaborFeePartRow(row)
+                                      const isUncategorized = row.part_group === UNCATEGORIZED_BOM_GROUP
+                                      return (
+                                        <tr
+                                          key={row.part_key}
+                                          onClick={
+                                            groupEditMode
+                                              ? undefined
+                                              : () => openPartCostEditor(row.part_key)
+                                          }
+                                          className={`border-t border-slate-800 ${
+                                            groupEditMode
+                                              ? isUncategorized
+                                                ? 'bg-amber-950/20'
+                                                : 'bg-slate-900/20'
+                                              : `cursor-pointer hover:bg-cyan-950/40 ${
+                                                  isRealtimeLaborRow ? 'bg-amber-950/30' : ''
+                                                }`
+                                          }`}
+                                        >
+                                          {groupEditMode && (
+                                            <td
+                                              className="px-3 py-2 text-center"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={selectedBulkPartKeys.has(row.part_key)}
+                                                onChange={() => toggleBulkPartSelection(row.part_key)}
+                                                className="accent-emerald-500"
+                                              />
+                                            </td>
+                                          )}
+                                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                                            <select
+                                              value={row.part_group}
+                                              disabled={updatingPartGroupKey === row.part_key || bulkGroupUpdating}
+                                              onChange={(e) =>
+                                                void handleUpdatePartGroup(row.part_key, e.target.value)
+                                              }
+                                              className={`w-full min-w-[7rem] rounded-lg border px-2 py-1 text-xs text-slate-200 ${
+                                                isUncategorized
+                                                  ? 'border-amber-500/60 bg-amber-950/30'
+                                                  : 'border-slate-600 bg-slate-900'
+                                              }`}
+                                            >
+                                              {partGroupOptions.map((label) => (
+                                                <option key={label} value={label}>
+                                                  {label}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </td>
+                                          <td className="px-3 py-2 font-mono text-cyan-300">{row.part_key}</td>
+                                          <td className="px-3 py-2 text-slate-300">
+                                            {row.part_name || '-'}
+                                            {isRealtimeLaborRow && (
+                                              <span className="ml-2 rounded-full border border-amber-400/50 bg-amber-900/40 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                                                RT工費
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="px-3 py-2 text-right text-slate-300">{row.bom_quantity}</td>
+                                          <td className="px-3 py-2 text-right text-sky-300">¥{Math.round(row.unit_cost).toLocaleString()}</td>
+                                          <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.material_cost).toLocaleString()}</td>
+                                          <td className={`px-3 py-2 text-right ${isRealtimeLaborRow ? 'font-bold text-amber-300' : 'text-slate-300'}`}>
+                                            ¥{Math.round(row.labor_cost).toLocaleString()}
+                                          </td>
+                                          <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.indirect_cost).toLocaleString()}</td>
+                                          <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{Math.round(row.subtotal).toLocaleString()}</td>
+                                          <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                            <div className="flex flex-wrap items-center justify-center gap-1">
+                                              {groupEditMode && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openPartCostEditor(row.part_key)}
+                                                  className="rounded-lg border border-cyan-500/60 bg-cyan-950/40 px-2 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/50"
+                                                >
+                                                  原価
+                                                </button>
+                                              )}
+                                              <button
+                                                type="button"
+                                                disabled={deletingBomPartKey === row.part_key}
+                                                onClick={() => void handleDeleteBomPart(row.part_key)}
+                                                className="rounded-lg border border-red-500/60 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-300 hover:bg-red-900/50 disabled:opacity-50"
+                                              >
+                                                {deletingBomPartKey === row.part_key ? '削除中…' : '削除'}
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                </Fragment>
                               )
                             })
                           )}

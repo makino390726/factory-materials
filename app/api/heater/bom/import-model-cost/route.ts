@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
+import { normalizeBomPartGroup, getDefaultBomGroupsForCategory } from '@/lib/heater-bom-part-group'
+import { inferProductCategory, normalizeProductCategory } from '@/lib/product-category'
 
 export const runtime = 'nodejs'
 
@@ -26,6 +28,8 @@ type PartGroup = {
   model: string
   part_key: string
   part_name: string
+  part_group: string
+  sort_order: number
   lines: CostLineRow[]
 }
 
@@ -64,11 +68,13 @@ function toNumber(value: unknown): number {
 
 function normalizeGroups(
   data: Record<string, unknown>[],
-  defaultModel: string
+  defaultModel: string,
+  allowedGroupsByModel: Map<string, string[]>
 ): { groups: PartGroup[]; errors: string[]; models: string[] } {
   const groupMap = new Map<string, PartGroup>()
   const errors: string[] = []
   const modelSet = new Set<string>()
+  const modelPartOrder = new Map<string, number>()
 
   for (let i = 0; i < data.length; i++) {
     const raw = data[i]
@@ -81,6 +87,9 @@ function normalizeGroups(
       pickCell(raw, ['パーツキー', '部品キー', 'part_key', '図番', 'drawing', 'Drawing'])
     )
     const partName = toText(pickCell(raw, ['パーツ名', 'part_display_name', 'パーツ']))
+    const csvPartGroup = toText(
+      pickCell(raw, ['グループ', 'part_group', 'パーツグループ', '区分', '部品グループ'])
+    )
     const componentName =
       toText(pickCell(raw, ['構成部品名', '構成部品', 'component_name', '構成要素', '備考'])) ||
       null
@@ -149,10 +158,20 @@ function normalizeGroups(
     const groupKey = `${model}\0${partKey}`
     let group = groupMap.get(groupKey)
     if (!group) {
+      const orderKey = model
+      const nextOrder = modelPartOrder.get(orderKey) ?? 0
+      modelPartOrder.set(orderKey, nextOrder + 1)
       group = {
         model,
         part_key: partKey,
         part_name: partName,
+        part_group: normalizeBomPartGroup(
+          csvPartGroup,
+          partKey,
+          partName,
+          allowedGroupsByModel.get(model) || []
+        ),
+        sort_order: nextOrder,
         lines: [],
       }
       groupMap.set(groupKey, group)
@@ -186,7 +205,7 @@ function normalizeGroups(
  * POST /api/heater/bom/import-model-cost
  *
  * 列振り分け:
- * - パーツ一覧(BOM/パーツマスタ): 機種, パーツキー(部品キー), パーツ名  ※BOM数量は常に1
+ * - パーツ一覧(BOM/パーツマスタ): 機種, パーツキー(部品キー), パーツ名, グループ(任意)  ※BOM数量は常に1
  * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃, 間接費, 合計
  */
 export async function POST(req: Request) {
@@ -222,7 +241,57 @@ export async function POST(req: Request) {
       return out
     })
 
-    const { groups, errors, models } = normalizeGroups(normalizedData, defaultModel)
+    const allowedGroupsByModel = new Map<string, string[]>()
+    const groupSeedErrors: string[] = []
+    const modelsInFile = new Set<string>()
+    for (const row of normalizedData) {
+      const m =
+        toText(pickCell(row, ['機種', '機種コード', 'model', 'Model', '製品機種'])) ||
+        defaultModel
+      if (m) modelsInFile.add(m)
+    }
+
+    for (const model of modelsInFile) {
+      const { data: groupRows } = await supabase
+        .from('heater_bom_groups')
+        .select('group_name, sort_order')
+        .eq('model', model)
+        .order('sort_order', { ascending: true })
+      if (groupRows && groupRows.length > 0) {
+        allowedGroupsByModel.set(
+          model,
+          groupRows.map((g) => String(g.group_name))
+        )
+        continue
+      }
+      const { data: modelRow } = await supabase
+        .from('heater_models')
+        .select('name, product_category')
+        .eq('model', model)
+        .maybeSingle()
+      const category = normalizeProductCategory(
+        modelRow?.product_category || inferProductCategory(model, modelRow?.name)
+      )
+      const defaults = getDefaultBomGroupsForCategory(category)
+      allowedGroupsByModel.set(model, defaults.map((g) => g.group_name))
+      const { error: seedError } = await supabase.from('heater_bom_groups').upsert(
+        defaults.map((g) => ({
+          model,
+          group_name: g.group_name,
+          sort_order: g.sort_order,
+        })),
+        { onConflict: 'model,group_name', ignoreDuplicates: true }
+      )
+      if (seedError && !String(seedError.message).includes('heater_bom_groups')) {
+        groupSeedErrors.push(`グループ初期化失敗 ${model}: ${seedError.message}`)
+      }
+    }
+
+    const { groups, errors, models } = normalizeGroups(
+      normalizedData,
+      defaultModel,
+      allowedGroupsByModel
+    )
     if (groups.length === 0) {
       return NextResponse.json(
         {
@@ -239,7 +308,7 @@ export async function POST(req: Request) {
     let bomCreated = 0
     let bomUpdated = 0
     let costItemsImported = 0
-    const rowErrors = [...errors]
+    const rowErrors = [...errors, ...groupSeedErrors]
 
     // 機種マスタへ不足分を追加（ドロップダウン表示用）
     for (const model of models) {
@@ -317,7 +386,11 @@ export async function POST(req: Request) {
         if (existingBom) {
           const { error } = await supabase
             .from('heater_bom')
-            .update({ quantity: 1 })
+            .update({
+              quantity: 1,
+              part_group: group.part_group,
+              sort_order: group.sort_order,
+            })
             .eq('model', group.model)
             .eq('part_key', group.part_key)
           if (error) throw error
@@ -328,6 +401,8 @@ export async function POST(req: Request) {
               model: group.model,
               part_key: group.part_key,
               quantity: 1,
+              part_group: group.part_group,
+              sort_order: group.sort_order,
             },
           ])
           if (error) throw error

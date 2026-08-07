@@ -709,11 +709,18 @@ function ProcessManagementContent() {
               製作開始〜完成入庫の期間で作業グループ別実績を集計し、完成台数で割った1台STを過去ロットと比較して工程進捗を確認します。
             </p>
           </div>
-          <Link href="/">
-            <button className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg border border-slate-600">
-              ← ホーム
-            </button>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/production-value">
+              <button className="px-6 py-2 bg-teal-700 hover:bg-teal-600 text-white font-medium rounded-lg border border-teal-500">
+                生産額集計
+              </button>
+            </Link>
+            <Link href="/">
+              <button className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg border border-slate-600">
+                ← ホーム
+              </button>
+            </Link>
+          </div>
         </div>
 
         <div className="bg-white/95 rounded-2xl border border-indigo-100 p-6 shadow-xl mb-6">

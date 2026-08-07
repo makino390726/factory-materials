@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { buildLinePartCostUnitMap } from '@/lib/line-part-cost-breakdown'
+import {
+  buildGroupSortMap,
+  inferBomPartGroup,
+  sortBomPartRowsWithGroups,
+  UNCATEGORIZED_BOM_GROUP,
+} from '@/lib/heater-bom-part-group'
+import { isMissingColumnError } from '@/lib/supabase-error'
 
 export const runtime = 'nodejs'
 
@@ -46,11 +53,24 @@ export async function GET(req: Request) {
     }
 
     // 1) BOM 取得（model に紐づく全パーツ）
-    const { data: bomRows, error: bomError } = await supabase
+    let bomSelect = 'part_key, part_name, quantity, part_group, sort_order'
+    let { data: bomRows, error: bomError } = await supabase
       .from('heater_bom')
-      .select('part_key, part_name, quantity')
+      .select(bomSelect)
       .eq('model', model)
-      .order('part_key')
+      .order('sort_order', { ascending: true })
+      .order('part_key', { ascending: true })
+
+    if (bomError && isMissingColumnError(bomError, 'part_group')) {
+      bomSelect = 'part_key, part_name, quantity'
+      const fallback = await supabase
+        .from('heater_bom')
+        .select(bomSelect)
+        .eq('model', model)
+        .order('part_key', { ascending: true })
+      bomRows = fallback.data
+      bomError = fallback.error
+    }
 
     if (bomError) {
       console.error('BOM fetch error:', bomError)
@@ -140,15 +160,34 @@ export async function GET(req: Request) {
       }
     }
 
-    // 4) モデルの product_code を取得して現在の製品原価を確認
+    // 4) モデル情報・グループ定義
     let modelProductCode: string | null = null
     let currentCostPrice: number | null = null
 
     const { data: modelRow } = await supabase
       .from('heater_models')
-      .select('product_code')
+      .select('product_code, product_category, name')
       .eq('model', model)
       .maybeSingle()
+
+    const { data: groupRows } = await supabase
+      .from('heater_bom_groups')
+      .select('group_name, sort_order')
+      .eq('model', model)
+      .order('sort_order', { ascending: true })
+      .order('group_name', { ascending: true })
+
+    const modelGroupNames = (groupRows || []).map((g) => String(g.group_name))
+    const groupSortMap = buildGroupSortMap(
+      (groupRows || []).map((g, i) => ({
+        group_name: String(g.group_name),
+        sort_order: Number(g.sort_order ?? i),
+      }))
+    )
+    const inferGroups =
+      modelGroupNames.length > 0
+        ? modelGroupNames
+        : ['発生機上段', '発生機下段', '工費', '梱包']
 
     if (modelRow?.product_code) {
       modelProductCode = modelRow.product_code
@@ -162,7 +201,26 @@ export async function GET(req: Request) {
 
     // 5) セクション（パーツ単位）に集計
     let grandTotal = 0
-    const sections = (bomRows || []).map((bom: any) => {
+    const bomWithGroups = sortBomPartRowsWithGroups(
+      (bomRows || []).map((bom: any) => {
+        const partKey = bom.part_key as string
+        const storedGroup = String(bom.part_group || '').trim()
+        return {
+          ...bom,
+          part_group:
+            storedGroup ||
+            inferBomPartGroup(
+              partKey,
+              bom.part_name ?? partsMap[partKey]?.part_name ?? null,
+              inferGroups
+            ),
+          sort_order: Number(bom.sort_order ?? 0),
+        }
+      }),
+      groupSortMap
+    )
+
+    const sections = bomWithGroups.map((bom: any) => {
       const partKey = bom.part_key as string
       const bomQty = Number(bom.quantity || 1)
       const partInfo = partsMap[partKey] ?? {
@@ -193,6 +251,8 @@ export async function GET(req: Request) {
         part_key: partKey,
         part_name: bom.part_name ?? partInfo.part_name ?? null,
         product_code: partInfo.product_code,
+        part_group: bom.part_group,
+        sort_order: bom.sort_order,
         bom_quantity: bomQty,
         unit_cost: unitCost,
         material_cost: materialCost,
@@ -208,6 +268,10 @@ export async function GET(req: Request) {
       product_code: modelProductCode,
       current_cost_price: currentCostPrice,
       grand_total: grandTotal,
+      groups: (groupRows || []).map((g, i) => ({
+        group_name: String(g.group_name),
+        sort_order: Number(g.sort_order ?? i),
+      })),
       sections,
     })
   } catch (err) {
