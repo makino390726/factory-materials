@@ -89,6 +89,9 @@ export async function GET() {
     )
 
     // BOMデータに部品情報と原価内訳を付与
+    // ※ 原価計算は製品パーツ計算（/api/heater/bom/cost-breakdown）と同一ルールにする
+    //   - quantity が null/0 の場合は 1 として扱う
+    //   - L指令原価の合計が 0 の場合は parts_master.cost_price にフォールバック
     const enrichedData = (bomData || []).map((item) => {
       const partInfo = partsMap.get(item.part_key) || {
         product_code: null,
@@ -99,7 +102,7 @@ export async function GET() {
         indirect_cost_total: null,
       };
 
-      const quantity = Number(item.quantity || 0);
+      const quantity = Number(item.quantity || 1);
       const costPrice = Number(partInfo.cost_price || 0);
       const lineCost = lineCostMap.get(String(item.part_key || ''))
 
@@ -109,14 +112,16 @@ export async function GET() {
       const totalUnit = lineCost
         ? Number(lineCost.total_unit || (materialUnit + laborUnit + indirectUnit))
         : costPrice
+      const unitCost = totalUnit || costPrice
 
       const materialCost = Math.round(materialUnit * quantity)
       const laborCost = Math.round(laborUnit * quantity)
       const indirectCost = Math.round(indirectUnit * quantity)
-      const totalCost = Math.round(totalUnit * quantity)
+      const totalCost = Math.round(unitCost * quantity)
 
       return {
         ...item,
+        quantity,
         product_code: partInfo.product_code,
         part_name: item.part_name || partInfo.part_name,
         spec: partInfo.spec,
