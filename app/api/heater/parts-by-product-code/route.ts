@@ -13,6 +13,11 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(n) ? n : 0
 }
 
+const isSyntheticCostName = (name: string) => {
+  const n = name.trim()
+  return n === '工賃' || n === '材料費' || n === '間接費'
+}
+
 type ModelUsage = {
   model: string
   quantity: number
@@ -30,18 +35,22 @@ type ProductCodeRow = {
 
 /**
  * GET /api/heater/parts-by-product-code
- * BOM を商品コード単位で集約し、数量合計と使用機種一覧を返す。
+ *
+ * L指令原価明細（work_order_cost_items）の商品コード単位で集約し、
+ * BOM経由で使用機種・数量を返す。
+ * ※ パーツマスタ単位ではなく、明細の product_code 単位。
  */
 export async function GET() {
   try {
-    let allBom: Array<{ model: string; part_key: string; part_name: string | null; quantity: number }> = []
+    // 1) BOM: part_key → 使用機種・数量
+    let allBom: Array<{ model: string; part_key: string; quantity: number }> = []
     let from = 0
     const pageSize = 1000
 
     while (true) {
       const { data, error } = await supabase
         .from('heater_bom')
-        .select('model, part_key, part_name, quantity')
+        .select('model, part_key, quantity')
         .range(from, from + pageSize - 1)
 
       if (error) {
@@ -54,7 +63,6 @@ export async function GET() {
         data.map((row) => ({
           model: String(row.model || '').trim(),
           part_key: String(row.part_key || '').trim(),
-          part_name: row.part_name != null ? String(row.part_name) : null,
           quantity: toNumber(row.quantity) || 1,
         }))
       )
@@ -62,33 +70,87 @@ export async function GET() {
       from += pageSize
     }
 
-    const partKeys = [...new Set(allBom.map((b) => b.part_key).filter(Boolean))]
-    const partsMap = new Map<
-      string,
-      { product_code: string; part_name: string; spec: string }
-    >()
+    const bomByPart = new Map<string, Array<{ model: string; quantity: number }>>()
+    for (const bom of allBom) {
+      if (!bom.model || !bom.part_key) continue
+      const list = bomByPart.get(bom.part_key) || []
+      list.push({ model: bom.model, quantity: bom.quantity })
+      bomByPart.set(bom.part_key, list)
+    }
 
-    if (partKeys.length > 0) {
-      const { data: partsData, error: partsError } = await supabase
-        .from('heater_parts_master')
-        .select('part_key, product_code, part_name, spec')
-        .in('part_key', partKeys)
+    // 2) L指令原価明細をページング取得
+    let allItems: Array<{
+      master_id: string
+      product_code: string
+      part_name: string
+      spec: string
+      quantity: number
+    }> = []
+    from = 0
 
-      if (partsError) {
-        console.error('parts-by-product-code parts fetch error:', partsError)
-        return NextResponse.json({ error: partsError.message }, { status: 500 })
+    while (true) {
+      const { data, error } = await supabase
+        .from('work_order_cost_items')
+        .select('master_id, product_code, part_name, spec, quantity')
+        .eq('master_type', 'ライン原価')
+        .range(from, from + pageSize - 1)
+
+      if (error) {
+        console.error('parts-by-product-code cost items fetch error:', error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      if (!data || data.length === 0) break
+
+      allItems = allItems.concat(
+        data.map((row) => ({
+          master_id: String(row.master_id || '').trim(),
+          product_code: String(row.product_code || '').trim(),
+          part_name: String(row.part_name || '').trim(),
+          spec: String(row.spec || '').trim(),
+          quantity: toNumber(row.quantity),
+        }))
+      )
+      if (data.length < pageSize) break
+      from += pageSize
+    }
+
+    // 3) part_key × product_code ごとの明細数量を集約
+    type PartProduct = {
+      quantity: number
+      product_name: string
+      spec: string
+    }
+    const qtyByPartAndCode = new Map<string, Map<string, PartProduct>>()
+
+    for (const item of allItems) {
+      if (!item.master_id) continue
+      if (isSyntheticCostName(item.part_name)) continue
+
+      const productCode = item.product_code || '（商品コード未設定）'
+      // 商品コード未設定かつ名前も無い行はスキップ
+      if (productCode === '（商品コード未設定）' && !item.part_name) continue
+
+      let byCode = qtyByPartAndCode.get(item.master_id)
+      if (!byCode) {
+        byCode = new Map()
+        qtyByPartAndCode.set(item.master_id, byCode)
       }
 
-      for (const p of partsData || []) {
-        partsMap.set(String(p.part_key), {
-          product_code: String(p.product_code || '').trim(),
-          part_name: String(p.part_name || '').trim(),
-          spec: String(p.spec || '').trim(),
+      const prev = byCode.get(productCode)
+      if (!prev) {
+        byCode.set(productCode, {
+          quantity: item.quantity,
+          product_name: item.part_name,
+          spec: item.spec,
         })
+      } else {
+        prev.quantity += item.quantity
+        if (!prev.product_name && item.part_name) prev.product_name = item.part_name
+        if (!prev.spec && item.spec) prev.spec = item.spec
       }
     }
 
-    // product_code -> aggregation
+    // 4) 商品コード単位へ展開（BOM数量 × 明細数量）
     const agg = new Map<
       string,
       {
@@ -100,35 +162,58 @@ export async function GET() {
       }
     >()
 
-    for (const bom of allBom) {
-      if (!bom.model || !bom.part_key) continue
-      const part = partsMap.get(bom.part_key)
-      const productCode = part?.product_code || '（未設定）'
-      const productName = part?.part_name || bom.part_name || bom.part_key
-      const spec = part?.spec || ''
+    for (const [partKey, byCode] of qtyByPartAndCode.entries()) {
+      const models = bomByPart.get(partKey)
+      if (!models || models.length === 0) continue
 
-      let row = agg.get(productCode)
-      if (!row) {
-        row = {
-          product_code: productCode,
-          product_name: productName,
-          spec,
-          partKeys: new Set<string>(),
-          modelQty: new Map<string, number>(),
+      for (const [productCode, info] of byCode.entries()) {
+        let row = agg.get(productCode)
+        if (!row) {
+          row = {
+            product_code: productCode,
+            product_name: info.product_name || productCode,
+            spec: info.spec,
+            partKeys: new Set<string>(),
+            modelQty: new Map<string, number>(),
+          }
+          agg.set(productCode, row)
         }
-        agg.set(productCode, row)
-      }
 
-      if (!row.product_name && productName) row.product_name = productName
-      if (!row.spec && spec) row.spec = spec
-      row.partKeys.add(bom.part_key)
-      row.modelQty.set(bom.model, (row.modelQty.get(bom.model) || 0) + bom.quantity)
+        if (!row.product_name && info.product_name) row.product_name = info.product_name
+        if (!row.spec && info.spec) row.spec = info.spec
+        row.partKeys.add(partKey)
+
+        for (const bom of models) {
+          const addQty = info.quantity * bom.quantity
+          row.modelQty.set(bom.model, (row.modelQty.get(bom.model) || 0) + addQty)
+        }
+      }
+    }
+
+    // 5) products マスタから商品名を補完
+    const codes = Array.from(agg.keys()).filter((c) => c && c !== '（商品コード未設定）')
+    if (codes.length > 0) {
+      const { data: products } = await supabase
+        .from('products')
+        .select('product_code, name')
+        .in('product_code', codes)
+
+      const nameByCode = new Map(
+        (products || []).map((p) => [String(p.product_code || '').trim(), String(p.name || '').trim()])
+      )
+      for (const row of agg.values()) {
+        const masterName = nameByCode.get(row.product_code)
+        if (masterName) row.product_name = masterName
+      }
     }
 
     const rows: ProductCodeRow[] = Array.from(agg.values())
       .map((row) => {
         const models = Array.from(row.modelQty.entries())
-          .map(([model, quantity]) => ({ model, quantity: Math.round(quantity * 1000) / 1000 }))
+          .map(([model, quantity]) => ({
+            model,
+            quantity: Math.round(quantity * 1000) / 1000,
+          }))
           .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true }))
 
         const totalQuantity = models.reduce((s, m) => s + m.quantity, 0)
@@ -144,8 +229,8 @@ export async function GET() {
         }
       })
       .sort((a, b) => {
-        if (a.product_code === '（未設定）') return 1
-        if (b.product_code === '（未設定）') return -1
+        if (a.product_code === '（商品コード未設定）') return 1
+        if (b.product_code === '（商品コード未設定）') return -1
         return a.product_code.localeCompare(b.product_code, 'ja', { numeric: true })
       })
 

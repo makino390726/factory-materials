@@ -93,7 +93,7 @@ export default function PartsUsageByProductCodePage() {
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white">商品コード別 使用機種一覧</h1>
             <p className="mt-2 text-sm text-slate-400">
-              BOM を商品コード単位で集約し、数量合計と使用機種を表示します。
+              L指令原価明細の商品コード単位で集約し、BOM経由の使用機種・数量を表示します（パーツキー単位ではありません）。
             </p>
           </div>
           <div className="flex items-center gap-3">
