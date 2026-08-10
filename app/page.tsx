@@ -305,6 +305,20 @@ export default function Home() {
               </div>
             </Link>
 
+            {/* 商品コード別 使用機種 */}
+            <Link href="/heater/parts-usage">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-teal-600/20 to-cyan-900/20 rounded-2xl border-2 border-teal-400 group-hover:border-teal-300 group-hover:shadow-[0_0_20px_rgba(45,212,191,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-1">
+                  <div className="text-4xl">🔗</div>
+                  <h3 className="text-base font-bold text-teal-300 group-hover:text-teal-200 transition text-center leading-snug">
+                    商品コード別使用機種
+                  </h3>
+                  <p className="text-[10px] text-teal-200/70">部材統一・横断抽出</p>
+                </div>
+              </div>
+            </Link>
+
             {/* 原価帳票印刷 */}
             <Link href="/work-orders/cost-reports">
               <div className="group relative h-32 cursor-pointer">
