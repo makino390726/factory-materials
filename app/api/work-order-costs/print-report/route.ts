@@ -97,20 +97,23 @@ async function buildModelCostList() {
       map.set(item.model, row)
     }
 
-    const qty = item.quantity || 0
+    const qty = item.quantity || 1
     const unit = lineCostMap.get(item.part_key)
     const fallback = partsFallbackMap.get(item.part_key)
+    const costPrice = Number(fallback?.cost_price || 0)
     const materialUnit = unit ? Number(unit.material_unit || 0) : Number(fallback?.material_cost_total || 0)
     const laborUnit = unit ? Number(unit.labor_unit || 0) : 0
     const indirectUnit = unit ? Number(unit.indirect_unit || 0) : Number(fallback?.indirect_cost_total || 0)
     const totalUnit = unit
       ? Number(unit.total_unit || materialUnit + laborUnit + indirectUnit)
-      : Number(fallback?.cost_price || 0)
+      : costPrice
+    // 製品パーツ計算・部品表と同じ: L指令合計が0なら parts_master.cost_price にフォールバック
+    const unitCost = totalUnit || costPrice
 
     row.material_cost += materialUnit * qty
     row.labor_cost += laborUnit * qty
     row.indirect_cost += indirectUnit * qty
-    row.total_cost += totalUnit * qty
+    row.total_cost += unitCost * qty
     row.part_count += 1
   }
 
