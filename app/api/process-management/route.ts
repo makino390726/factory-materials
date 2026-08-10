@@ -7,6 +7,7 @@ import {
   createProductionLot,
   deleteProductionLot,
   getProcessScheduleStSource,
+  listLinkedInstructionsForModel,
   listModelsForProcessTarget,
   listProcessScheduleStSources,
   listProcessTargets,
@@ -26,7 +27,7 @@ const supabase = createClient(
 )
 
 function parseTargetType(value: string | null): ProcessTargetType | null {
-  if (value === 'line' || value === 'instruction') return value
+  if (value === 'line' || value === 'instruction' || value === 'model') return value
   return null
 }
 
@@ -38,6 +39,15 @@ export async function GET(request: NextRequest) {
     if (list === 'targets') {
       const targets = await listProcessTargets(supabase)
       return NextResponse.json({ targets })
+    }
+
+    if (list === 'linked-instructions') {
+      const model = searchParams.get('model')?.trim() || ''
+      if (!model) {
+        return NextResponse.json({ error: 'model が必要です' }, { status: 400 })
+      }
+      const linked = await listLinkedInstructionsForModel(supabase, model)
+      return NextResponse.json({ model, instructions: linked })
     }
 
     if (list === 'fiscal-work-groups') {

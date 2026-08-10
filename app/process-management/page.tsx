@@ -24,12 +24,13 @@ type ProcessRow = {
 }
 
 type ProcessTarget = {
-  target_type: 'line' | 'instruction'
+  target_type: 'line' | 'instruction' | 'model'
   target_code: string
   name: string
   subtitle: string | null
   lot_count?: number
   latest_lot_end?: string | null
+  linked_order_count?: number
 }
 
 type ProductionLotAnalysis = {
@@ -49,7 +50,7 @@ type ProductionLotAnalysis = {
 }
 
 type ProductionLotsResult = {
-  target_type: 'line' | 'instruction'
+  target_type: 'line' | 'instruction' | 'model'
   target_code: string
   target_name: string
   suggested_period_start: string | null
@@ -60,6 +61,13 @@ type ProductionLotsResult = {
     spec_label: string
     summary: FiscalYearWorkGroupSummary
   }>
+  linked_instructions?: Array<{
+    order_no: string
+    product_name: string | null
+    annual_completed_qty: number
+    total_minutes: number
+    avg_st_total: number | null
+  }>
 }
 
 type FiscalYearWorkGroupSummary = {
@@ -67,7 +75,7 @@ type FiscalYearWorkGroupSummary = {
   fiscal_year_label: string
   period_start: string
   period_end: string
-  target_type: 'line' | 'instruction'
+  target_type: 'line' | 'instruction' | 'model'
   target_code: string
   target_name: string
   annual_completed_qty: number
@@ -88,8 +96,16 @@ type FiscalYearWorkGroupSummary = {
     spec_label: string
     summary: FiscalYearWorkGroupSummary
   }>
+  linked_instructions?: Array<{
+    order_no: string
+    product_name: string | null
+    annual_completed_qty: number
+    total_minutes: number
+    avg_st_total: number | null
+  }>
+  st_aggregation_note?: string | null
   schedule_st_source?: {
-    target_type: 'line' | 'instruction'
+    target_type: 'line' | 'instruction' | 'model'
     target_code: string
     model: string
     fiscal_year: number
@@ -98,7 +114,7 @@ type FiscalYearWorkGroupSummary = {
     updated_at: string | null
   } | null
   schedule_st_sources?: Array<{
-    target_type: 'line' | 'instruction'
+    target_type: 'line' | 'instruction' | 'model'
     target_code: string
     model: string
     fiscal_year: number
@@ -258,7 +274,30 @@ function ProcessManagementContent() {
       ? toProcessTargetKey(initialTargetType, initialTargetCode)
       : ''
 
-  const [targetKey, setTargetKey] = useState(initialTargetKey)
+  const initialSelectionMode: 'line' | 'instruction' | 'model' =
+    initialTargetType === 'model'
+      ? 'model'
+      : initialTargetType === 'instruction'
+        ? 'instruction'
+        : 'line'
+
+  const [selectionMode, setSelectionMode] = useState<'line' | 'instruction' | 'model'>(
+    initialSelectionMode
+  )
+  const [modelCode, setModelCode] = useState(
+    initialTargetType === 'model' ? initialTargetCode : ''
+  )
+  const [modelOrderNo, setModelOrderNo] = useState('')
+  const [modelInstructions, setModelInstructions] = useState<
+    Array<{ order_no: string; product_name: string | null; qty: number | null }>
+  >([])
+  const [modelInstructionsLoading, setModelInstructionsLoading] = useState(false)
+
+  const [targetKey, setTargetKey] = useState(
+    initialTargetType === 'model'
+      ? ''
+      : initialTargetKey
+  )
   const [targets, setTargets] = useState<ProcessTarget[]>([])
   const [targetsLoading, setTargetsLoading] = useState(true)
   const [onlyWithLots, setOnlyWithLots] = useState(true)
@@ -297,10 +336,10 @@ function ProcessManagementContent() {
     if (!targetKey) return null
     const [type, ...rest] = targetKey.split(':')
     const code = rest.join(':')
-    if (type !== 'line' && type !== 'instruction') return null
+    if (type !== 'line' && type !== 'instruction' && type !== 'model') return null
     return (
       targets.find((item) => item.target_type === type && item.target_code === code) || {
-        target_type: type as 'line' | 'instruction',
+        target_type: type as 'line' | 'instruction' | 'model',
         target_code: code,
         name: code,
         subtitle: null,
@@ -308,39 +347,141 @@ function ProcessManagementContent() {
     )
   }, [targetKey, targets])
 
-  const filteredTargets = useMemo(() => {
-    if (!onlyWithLots) return targets
-    return targets.filter((item) => (item.lot_count || 0) > 0)
+  const lineTargets = useMemo(() => {
+    const list = targets.filter((item) => item.target_type === 'line')
+    return onlyWithLots ? list.filter((item) => (item.lot_count || 0) > 0) : list
   }, [targets, onlyWithLots])
 
-  const lineTargets = useMemo(
-    () => filteredTargets.filter((item) => item.target_type === 'line'),
-    [filteredTargets]
+  const instructionTargets = useMemo(() => {
+    const list = targets.filter((item) => item.target_type === 'instruction')
+    return onlyWithLots ? list.filter((item) => (item.lot_count || 0) > 0) : list
+  }, [targets, onlyWithLots])
+
+  /** 機種は関連指令があるものを常に表示（入庫有無は指令番号側で絞る） */
+  const modelTargets = useMemo(
+    () => targets.filter((item) => item.target_type === 'model'),
+    [targets]
   )
-  const instructionTargets = useMemo(
-    () => filteredTargets.filter((item) => item.target_type === 'instruction'),
-    [filteredTargets]
-  )
+
+  const instructionLotStats = useMemo(() => {
+    const map = new Map<string, { lot_count: number; latest_lot_end: string | null }>()
+    for (const item of targets) {
+      if (item.target_type !== 'instruction') continue
+      map.set(item.target_code, {
+        lot_count: item.lot_count || 0,
+        latest_lot_end: item.latest_lot_end || null,
+      })
+    }
+    return map
+  }, [targets])
+
+  const filteredModelInstructions = useMemo(() => {
+    if (!onlyWithLots) return modelInstructions
+    return modelInstructions.filter((item) => {
+      const stats = instructionLotStats.get(item.order_no)
+      return (stats?.lot_count || 0) > 0
+    })
+  }, [modelInstructions, onlyWithLots, instructionLotStats])
+
+  const filteredTargets = useMemo(() => {
+    if (selectionMode === 'line') return lineTargets
+    if (selectionMode === 'instruction') return instructionTargets
+    return modelTargets
+  }, [selectionMode, lineTargets, instructionTargets, modelTargets])
 
   const targetsWithLotsCount = useMemo(
     () => targets.filter((item) => (item.lot_count || 0) > 0).length,
     [targets]
   )
 
+  // 機種変更時に関連D指令を取得
   useEffect(() => {
-    if (!targetKey || filteredTargets.length === 0) return
-    const stillVisible = filteredTargets.some(
-      (item) => toProcessTargetKey(item.target_type, item.target_code) === targetKey
-    )
-    if (!stillVisible) {
-      const preferred =
-        filteredTargets.find((item) => item.target_type === 'line' && item.target_code === '909') ||
-        filteredTargets[0]
-      if (preferred) {
-        setTargetKey(toProcessTargetKey(preferred.target_type, preferred.target_code))
+    if (selectionMode !== 'model' || !modelCode.trim()) {
+      setModelInstructions([])
+      return
+    }
+    const controller = new AbortController()
+    const load = async () => {
+      setModelInstructionsLoading(true)
+      try {
+        const res = await fetch(
+          `/api/process-management?list=linked-instructions&model=${encodeURIComponent(modelCode.trim())}`,
+          { signal: controller.signal }
+        )
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || '関連指令の取得に失敗しました')
+        if (controller.signal.aborted) return
+        const list = Array.isArray(data.instructions) ? data.instructions : []
+        setModelInstructions(list)
+        setModelOrderNo((prev) => {
+          if (prev && list.some((item: { order_no: string }) => item.order_no === prev)) {
+            return prev
+          }
+          return list[0]?.order_no || ''
+        })
+        setScheduleApplyModel(modelCode.trim())
+      } catch (e) {
+        if (controller.signal.aborted) return
+        setModelInstructions([])
+        setError(e instanceof Error ? e.message : '関連指令の取得に失敗しました')
+      } finally {
+        if (!controller.signal.aborted) setModelInstructionsLoading(false)
       }
     }
-  }, [filteredTargets, targetKey])
+    void load()
+    return () => controller.abort()
+  }, [selectionMode, modelCode])
+
+  // 入庫実績フィルタで現在の指令が消えた場合は先頭へ
+  useEffect(() => {
+    if (selectionMode !== 'model') return
+    if (!modelOrderNo) return
+    if (filteredModelInstructions.some((item) => item.order_no === modelOrderNo)) return
+    setModelOrderNo(filteredModelInstructions[0]?.order_no || '')
+  }, [selectionMode, modelOrderNo, filteredModelInstructions])
+
+  // 選択モードに応じて targetKey を同期（ロット取得・入庫の実対象）
+  useEffect(() => {
+    if (selectionMode === 'line' || selectionMode === 'instruction') {
+      return
+    }
+    if (modelOrderNo.trim()) {
+      setTargetKey(toProcessTargetKey('instruction', modelOrderNo.trim()))
+    } else {
+      setTargetKey('')
+      setLotsResult(null)
+      setSelectedLotId(null)
+    }
+  }, [selectionMode, modelOrderNo])
+
+  const handleSelectionModeChange = (mode: 'line' | 'instruction' | 'model') => {
+    setSelectionMode(mode)
+    setError(null)
+    setLotsResult(null)
+    setSelectedLotId(null)
+    setFiscalSummary(null)
+    if (mode === 'line') {
+      const preferred =
+        lineTargets.find((item) => item.target_code === '909') || lineTargets[0]
+      setTargetKey(
+        preferred ? toProcessTargetKey('line', preferred.target_code) : ''
+      )
+      setModelCode('')
+      setModelOrderNo('')
+    } else if (mode === 'instruction') {
+      const preferred = instructionTargets[0]
+      setTargetKey(
+        preferred ? toProcessTargetKey('instruction', preferred.target_code) : ''
+      )
+      setModelCode('')
+      setModelOrderNo('')
+    } else {
+      setTargetKey('')
+      const preferred = modelTargets[0]
+      setModelCode(preferred?.target_code || '')
+      setModelOrderNo('')
+    }
+  }
 
   const selectedLot = useMemo(() => {
     if (!lotsResult?.lots.length) return null
@@ -359,7 +500,12 @@ function ProcessManagementContent() {
     )
   }, [fiscalSummary, fiscalSpecKey])
 
-  const targetTypeLabel = selectedTarget?.target_type === 'instruction' ? 'D指令' : 'L指令'
+  const targetTypeLabel =
+    selectionMode === 'model'
+      ? '機種指令'
+      : selectedTarget?.target_type === 'instruction'
+        ? 'D指令'
+        : 'L指令'
 
   useEffect(() => {
     const loadTargets = async () => {
@@ -706,7 +852,7 @@ function ProcessManagementContent() {
               工程管理表
             </h1>
             <p className="text-slate-300 text-sm mt-2">
-              製作開始〜完成入庫の期間で作業グループ別実績を集計し、完成台数で割った1台STを過去ロットと比較して工程進捗を確認します。
+              L指令 / D指令 / 機種指令の3通りから選択。機種指令では入庫対象の指令番号を選び、そのロットの作業グループ別実績を表示します。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -725,9 +871,9 @@ function ProcessManagementContent() {
 
         <div className="bg-white/95 rounded-2xl border border-indigo-100 p-6 shadow-xl mb-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-sm font-medium text-black">対象（L指令 / D指令）</label>
+                <label className="text-sm font-medium text-black">対象の種類</label>
                 <div className="flex gap-2 text-xs">
                   <Link href="/lines" className="text-indigo-600 hover:underline">
                     L指令マスタ
@@ -735,9 +881,36 @@ function ProcessManagementContent() {
                   <Link href="/work-orders" className="text-indigo-600 hover:underline">
                     D指令マスタ
                   </Link>
+                  <Link href="/heater/model-orders" className="text-indigo-600 hover:underline">
+                    機種別制作指令
+                  </Link>
                 </div>
               </div>
-              <label className="mt-1 mb-1 flex items-center gap-2 text-xs text-slate-700">
+
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { id: 'line' as const, label: 'L指令' },
+                    { id: 'instruction' as const, label: 'D指令' },
+                    { id: 'model' as const, label: '機種指令' },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectionModeChange(item.id)}
+                    className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
+                      selectionMode === item.id
+                        ? 'border-indigo-500 bg-indigo-600 text-white'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-700">
                 <input
                   type="checkbox"
                   checked={onlyWithLots}
@@ -746,60 +919,158 @@ function ProcessManagementContent() {
                 />
                 入庫実績ありのみ（{targetsWithLotsCount}件 / 全{targets.length}件）
               </label>
-              <select
-                value={targetKey}
-                onChange={(e) => setTargetKey(e.target.value)}
-                disabled={targetsLoading || filteredTargets.length === 0}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
-              >
-                {targetsLoading ? (
-                  <option value="">読み込み中...</option>
-                ) : filteredTargets.length === 0 ? (
-                  <option value="">
-                    {onlyWithLots
-                      ? '入庫実績のある指令がありません'
-                      : 'L指令・D指令が未登録です'}
-                  </option>
-                ) : (
-                  <>
-                    {lineTargets.length > 0 && (
-                      <optgroup label="L指令">
-                        {lineTargets.map((item) => (
-                          <option
-                            key={toProcessTargetKey(item.target_type, item.target_code)}
-                            value={toProcessTargetKey(item.target_type, item.target_code)}
-                          >
-                            {item.target_code} — {item.name}
-                            {(item.lot_count || 0) > 0
-                              ? `（入庫${item.lot_count}件${
-                                  item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
-                                }）`
-                              : ''}
-                          </option>
-                        ))}
-                      </optgroup>
+
+              {selectionMode === 'line' && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-700">L指令番号</label>
+                  <select
+                    value={targetKey}
+                    onChange={(e) => setTargetKey(e.target.value)}
+                    disabled={targetsLoading || lineTargets.length === 0}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
+                  >
+                    {targetsLoading ? (
+                      <option value="">読み込み中...</option>
+                    ) : lineTargets.length === 0 ? (
+                      <option value="">該当するL指令がありません</option>
+                    ) : (
+                      lineTargets.map((item) => (
+                        <option
+                          key={toProcessTargetKey(item.target_type, item.target_code)}
+                          value={toProcessTargetKey(item.target_type, item.target_code)}
+                        >
+                          {item.target_code} — {item.name}
+                          {(item.lot_count || 0) > 0
+                            ? `（入庫${item.lot_count}件${
+                                item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
+                              }）`
+                            : ''}
+                        </option>
+                      ))
                     )}
-                    {instructionTargets.length > 0 && (
-                      <optgroup label="D指令">
-                        {instructionTargets.map((item) => (
-                          <option
-                            key={toProcessTargetKey(item.target_type, item.target_code)}
-                            value={toProcessTargetKey(item.target_type, item.target_code)}
-                          >
-                            {item.target_code}
-                            {item.subtitle ? ` — ${item.subtitle}` : ''}
-                            {(item.lot_count || 0) > 0
-                              ? `（入庫${item.lot_count}件${
-                                  item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
-                                }）`
-                              : ''}
-                          </option>
-                        ))}
-                      </optgroup>
+                  </select>
+                </div>
+              )}
+
+              {selectionMode === 'instruction' && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-700">D指令番号</label>
+                  <select
+                    value={targetKey}
+                    onChange={(e) => setTargetKey(e.target.value)}
+                    disabled={targetsLoading || instructionTargets.length === 0}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
+                  >
+                    {targetsLoading ? (
+                      <option value="">読み込み中...</option>
+                    ) : instructionTargets.length === 0 ? (
+                      <option value="">該当するD指令がありません</option>
+                    ) : (
+                      instructionTargets.map((item) => (
+                        <option
+                          key={toProcessTargetKey(item.target_type, item.target_code)}
+                          value={toProcessTargetKey(item.target_type, item.target_code)}
+                        >
+                          {item.target_code}
+                          {item.subtitle ? ` — ${item.subtitle}` : ''}
+                          {(item.lot_count || 0) > 0
+                            ? `（入庫${item.lot_count}件${
+                                item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
+                              }）`
+                            : ''}
+                        </option>
+                      ))
                     )}
-                  </>
-                )}
-              </select>
+                  </select>
+                </div>
+              )}
+
+              {selectionMode === 'model' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700">機種</label>
+                    <select
+                      value={modelCode}
+                      onChange={(e) => {
+                        setModelCode(e.target.value)
+                        setModelOrderNo('')
+                      }}
+                      disabled={targetsLoading || modelTargets.length === 0}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
+                    >
+                      {targetsLoading ? (
+                        <option value="">読み込み中...</option>
+                      ) : modelTargets.length === 0 ? (
+                        <option value="">関連D指令のある機種がありません</option>
+                      ) : (
+                        <>
+                          <option value="">機種を選択</option>
+                          {modelTargets.map((item) => (
+                            <option key={item.target_code} value={item.target_code}>
+                              {item.target_code}
+                              {item.name && item.name !== item.target_code
+                                ? ` — ${item.name}`
+                                : ''}
+                              {item.subtitle ? ` / ${item.subtitle}` : ''}
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700">
+                      入庫対象の指令番号（関連D指令）
+                    </label>
+                    <select
+                      value={modelOrderNo}
+                      onChange={(e) => setModelOrderNo(e.target.value)}
+                      disabled={
+                        !modelCode ||
+                        modelInstructionsLoading ||
+                        filteredModelInstructions.length === 0
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-black disabled:bg-slate-100"
+                    >
+                      {modelInstructionsLoading ? (
+                        <option value="">関連指令を読込中...</option>
+                      ) : !modelCode ? (
+                        <option value="">先に機種を選択してください</option>
+                      ) : filteredModelInstructions.length === 0 ? (
+                        <option value="">
+                          {onlyWithLots
+                            ? '入庫実績のある関連指令がありません'
+                            : '関連D指令がありません'}
+                        </option>
+                      ) : (
+                        <>
+                          <option value="">指令番号を選択</option>
+                          {filteredModelInstructions.map((item) => {
+                            const stats = instructionLotStats.get(item.order_no)
+                            return (
+                              <option key={item.order_no} value={item.order_no}>
+                                {item.order_no}
+                                {item.product_name ? ` — ${item.product_name}` : ''}
+                                {item.qty != null ? ` / 数量${item.qty}` : ''}
+                                {(stats?.lot_count || 0) > 0
+                                  ? `（入庫${stats?.lot_count}件${
+                                      stats?.latest_lot_end
+                                        ? ` / 直近${stats.latest_lot_end}`
+                                        : ''
+                                    }）`
+                                  : ''}
+                              </option>
+                            )
+                          })}
+                        </>
+                      )}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      選択した指令番号の入庫ロットについて、各作業グループの作業時間・1台STを表示します。
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium text-black">完成日（入庫日）</label>
@@ -877,11 +1148,26 @@ function ProcessManagementContent() {
             <button
               type="button"
               onClick={handleSaveLot}
-              disabled={isSaving || isLoading || !selectedTarget}
+              disabled={
+                isSaving ||
+                isLoading ||
+                !selectedTarget ||
+                (selectionMode === 'model' && !modelOrderNo)
+              }
               className="rounded-lg bg-violet-600 px-4 py-2 text-white font-semibold hover:bg-violet-500 disabled:opacity-60"
             >
               {isSaving ? '保存中...' : '入庫ロットを登録'}
             </button>
+            {selectionMode === 'model' && !modelOrderNo && (
+              <p className="w-full text-xs text-amber-700">
+                機種指令では「入庫対象の指令番号」を選ぶと、そのロットの作業時間が表示・登録できます。
+              </p>
+            )}
+            {selectionMode === 'model' && modelCode && modelOrderNo && (
+              <p className="w-full text-xs text-teal-700">
+                機種 {modelCode} ／ 入庫対象指令 {modelOrderNo} のロットを表示中
+              </p>
+            )}
           </div>
 
           {progress && (
@@ -918,7 +1204,10 @@ function ProcessManagementContent() {
                 <p className="text-xs text-slate-500">対象</p>
                 <p className="text-sm text-indigo-600 mb-1">{targetTypeLabel}</p>
                 <p className="text-lg font-semibold text-slate-900">
-                  {lotsResult.target_code} {lotsResult.target_name}
+                  {selectionMode === 'model' && modelCode
+                    ? `${modelCode} ／ ${lotsResult.target_code}`
+                    : lotsResult.target_code}{' '}
+                  {lotsResult.target_name}
                 </p>
               </div>
               <div className="rounded-2xl border border-indigo-100 bg-white/90 p-4 shadow">
@@ -1046,8 +1335,10 @@ function ProcessManagementContent() {
                   会計年度 作業グループ別 平均ST（規格別）
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">
-                  {selectedTarget.target_type === 'instruction' ? 'D指令' : 'L指令'}{' '}
-                  {selectedTarget.target_code}（9月1日〜翌年8月31日）
+                  {selectionMode === 'model' && modelCode
+                    ? `機種指令 ${modelCode} ／ 入庫対象 ${selectedTarget.target_code}`
+                    : `${targetTypeLabel} ${selectedTarget.target_code}`}
+                  （9月1日〜翌年8月31日）
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
                   機種を明示して「スケジュールに適用」すると、その機種×指令の年平均STが生産スケジュールと指令標準時間（班別平均STの合計）の根拠になります。

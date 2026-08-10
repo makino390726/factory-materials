@@ -7,8 +7,9 @@ import {
   getFiscalYearFromDate,
 } from '@/lib/fiscal-year'
 import { formatDurationHours } from '@/lib/work-report-aggregation'
+import { groupOrdersByHeaterModel } from '@/lib/heater-model-order-match'
 
-export type ProcessTargetType = 'line' | 'instruction'
+export type ProcessTargetType = 'line' | 'instruction' | 'model'
 
 export type ProcessTarget = {
   target_type: ProcessTargetType
@@ -19,6 +20,17 @@ export type ProcessTarget = {
   lot_count?: number
   /** 直近の入庫日（period_end） */
   latest_lot_end?: string | null
+  /** 機種の場合: 紐づくD指令件数 */
+  linked_order_count?: number
+}
+
+export type LinkedInstructionSummary = {
+  order_no: string
+  product_name: string | null
+  annual_completed_qty: number
+  total_minutes: number
+  /** 班別年平均STの合計（1台あたりリードタイム相当） */
+  avg_st_total: number | null
 }
 
 export type ProcessWorkGroupRow = {
@@ -72,6 +84,8 @@ export type ProductionLotsResult = {
   fiscal_year_summary: FiscalYearWorkGroupSummary | null
   /** 備考（UF/DF）単位の年度平均ST */
   fiscal_year_summaries_by_spec: FiscalYearSpecSummary[]
+  /** 機種対象時: 紐づくD指令一覧 */
+  linked_instructions?: LinkedInstructionSummary[]
 }
 
 export type ProcessAnalysisResult = {
@@ -127,7 +141,7 @@ export function normalizeWorkDate(workDate: string) {
 export function parseProcessTargetKey(key: string): ProcessTarget {
   const [type, ...rest] = key.split(':')
   const code = rest.join(':')
-  if ((type !== 'line' && type !== 'instruction') || !code) {
+  if ((type !== 'line' && type !== 'instruction' && type !== 'model') || !code) {
     throw new Error('対象の指定が不正です')
   }
   return {
@@ -821,6 +835,12 @@ export async function analyzeProcessManagement(
   const date = normalizeWorkDate(workDate)
   const normalizedCode = normalizeTargetCode(targetCode)
 
+  if (targetType === 'model') {
+    throw new Error(
+      '機種単位の日次分析は未対応です。ロット一覧・年間平均STをご確認ください。'
+    )
+  }
+
   let targetName = normalizedCode
   let lineId: string | null = null
 
@@ -1009,6 +1029,10 @@ export type FiscalYearWorkGroupSummary = {
   spec_key?: string
   /** UF合計=DF+UF差分 を適用済みか */
   uf_composed?: boolean
+  /** 機種対象時: 紐づくD指令ごとの年平均ST */
+  linked_instructions?: LinkedInstructionSummary[]
+  /** 機種対象時: 紐づく指令の年平均STを平均した旨 */
+  st_aggregation_note?: string | null
 }
 
 export type FiscalYearSpecSummary = {
@@ -1171,6 +1195,15 @@ export async function aggregateTargetWorkGroupSummaryInFiscalYear(
   }
 
   const normalizedCode = normalizeTargetCode(targetCode)
+
+  if (targetType === 'model') {
+    return aggregateModelWorkGroupSummaryInFiscalYear(
+      supabase,
+      normalizedCode,
+      fiscalYear
+    )
+  }
+
   const { targetName, lineId } = await resolveTargetContext(supabase, targetType, normalizedCode)
   const { start, end } = getFiscalYearDateRange(fiscalYear)
 
@@ -1221,6 +1254,116 @@ export async function aggregateTargetWorkGroupSummaryInFiscalYear(
   }
 }
 
+/** 機種: 紐づくD指令それぞれの年平均STを班ごとに平均 */
+async function aggregateModelWorkGroupSummaryInFiscalYear(
+  supabase: SupabaseClient,
+  modelCode: string,
+  fiscalYear: number
+): Promise<FiscalYearWorkGroupSummary> {
+  const { targetName } = await resolveTargetContext(supabase, 'model', modelCode)
+  const { start, end } = getFiscalYearDateRange(fiscalYear)
+  const linked = await listLinkedInstructionsForModel(supabase, modelCode)
+  const workGroupNames = await fetchWorkGroupNames(supabase)
+
+  if (linked.length === 0) {
+    return {
+      fiscal_year: fiscalYear,
+      fiscal_year_label: formatFiscalYearLabel(fiscalYear),
+      period_start: start,
+      period_end: end,
+      target_type: 'model',
+      target_code: modelCode,
+      target_name: targetName,
+      annual_completed_qty: 0,
+      total_minutes: 0,
+      duration_hours: formatDurationHours(0),
+      rows: [],
+      spec_key: '',
+      linked_instructions: [],
+      st_aggregation_note: '紐づくD指令がありません',
+    }
+  }
+
+  const summaries = await mapPool(linked, 3, async (item) =>
+    aggregateTargetWorkGroupSummaryInFiscalYear(
+      supabase,
+      'instruction',
+      item.order_no,
+      fiscalYear
+    )
+  )
+
+  const stSamples = new Map<string, number[]>()
+  const minutesByGroup = new Map<string, number>()
+  let annualCompletedQty = 0
+  let totalMinutes = 0
+
+  const linkedSummaries: LinkedInstructionSummary[] = summaries.map((summary, index) => {
+    annualCompletedQty += summary.annual_completed_qty
+    totalMinutes += summary.total_minutes
+    for (const row of summary.rows) {
+      minutesByGroup.set(
+        row.work_group_code,
+        (minutesByGroup.get(row.work_group_code) || 0) + row.total_minutes
+      )
+      if (row.avg_st_minutes != null && row.avg_st_minutes > 0) {
+        const list = stSamples.get(row.work_group_code) || []
+        list.push(row.avg_st_minutes)
+        stSamples.set(row.work_group_code, list)
+      }
+    }
+    const avgStTotal = summary.rows
+      .map((r) => r.avg_st_minutes)
+      .filter((v): v is number => v != null && v > 0)
+      .reduce((sum, v) => sum + v, 0)
+    return {
+      order_no: linked[index].order_no,
+      product_name: linked[index].product_name,
+      annual_completed_qty: summary.annual_completed_qty,
+      total_minutes: summary.total_minutes,
+      avg_st_total: avgStTotal > 0 ? roundSt(avgStTotal) : null,
+    }
+  })
+
+  const allCodes = new Set<string>([...minutesByGroup.keys(), ...stSamples.keys()])
+  const rows: FiscalYearWorkGroupRow[] = Array.from(allCodes)
+    .sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }))
+    .map((workGroupCode) => {
+      const samples = stSamples.get(workGroupCode) || []
+      const avgSt =
+        samples.length > 0
+          ? roundSt(samples.reduce((sum, v) => sum + v, 0) / samples.length)
+          : null
+      const groupMinutes = minutesByGroup.get(workGroupCode) || 0
+      return {
+        work_group_code: workGroupCode,
+        work_group_name: workGroupNames.get(workGroupCode) || workGroupCode,
+        total_minutes: groupMinutes,
+        duration_hours: formatDurationHours(groupMinutes),
+        avg_st_minutes: avgSt,
+      }
+    })
+
+  const withSt = linkedSummaries.filter((item) => item.avg_st_total != null).length
+
+  return {
+    fiscal_year: fiscalYear,
+    fiscal_year_label: formatFiscalYearLabel(fiscalYear),
+    period_start: start,
+    period_end: end,
+    target_type: 'model',
+    target_code: modelCode,
+    target_name: targetName,
+    annual_completed_qty: annualCompletedQty,
+    total_minutes: totalMinutes,
+    duration_hours: formatDurationHours(totalMinutes),
+    rows,
+    spec_key: '',
+    linked_instructions: linkedSummaries,
+    st_aggregation_note: `関連D指令 ${linked.length}件のうち年平均STあり ${withSt}件の平均値`,
+  }
+}
+
 /**
  * 会計年度の作業グループ別平均STを備考（UF/DF）単位で算出。
  * 同一製作期間の複数規格ロットは台数比で実績を按分する。
@@ -1236,6 +1379,16 @@ export async function aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
   }
 
   const normalizedCode = normalizeTargetCode(targetCode)
+
+  if (targetType === 'model') {
+    const overall = await aggregateModelWorkGroupSummaryInFiscalYear(
+      supabase,
+      normalizedCode,
+      fiscalYear
+    )
+    return { overall, by_spec: [] }
+  }
+
   const { targetName, lineId } = await resolveTargetContext(supabase, targetType, normalizedCode)
   const { start, end } = getFiscalYearDateRange(fiscalYear)
   const records = await listProductionLotRecords(supabase, targetType, normalizedCode)
@@ -1497,11 +1650,80 @@ export async function resolveTargetContext(
     return { targetName: line.name, lineId: line.id as string }
   }
 
+  if (targetType === 'model') {
+    const { data, error } = await supabase
+      .from('heater_models')
+      .select('model, name')
+      .eq('model', normalizedCode)
+      .maybeSingle()
+    if (error) throw error
+    if (!data) throw new Error(`機種 ${normalizedCode} が見つかりません`)
+    const name = String(data.name || '').trim()
+    return {
+      targetName: name ? `${normalizedCode}（${name}）` : normalizedCode,
+      lineId: null as string | null,
+    }
+  }
+
   const order = await resolveInstruction(supabase, normalizedCode)
   if (!order) throw new Error(`D指令 ${normalizedCode} が見つかりません`)
   let targetName = order.product_name || normalizedCode
   if (order.model) targetName = `${targetName}（${order.model}）`
   return { targetName, lineId: null as string | null }
+}
+
+/** 機種に紐づくD指令一覧（機種別制作指令と同じマッチング） */
+export async function listLinkedInstructionsForModel(
+  supabase: SupabaseClient,
+  modelCode: string
+): Promise<Array<{ order_no: string; product_name: string | null; qty: number | null }>> {
+  const model = normalizeTargetCode(modelCode)
+  const [{ data: models, error: modelError }, { data: orders, error: orderError }] =
+    await Promise.all([
+      supabase.from('heater_models').select('model, name').order('model', { ascending: true }),
+      supabase
+        .from('work_orders')
+        .select('order_no, product_name, model, bom_model, heater_model, qty')
+        .order('order_no', { ascending: true }),
+    ])
+  if (modelError) throw modelError
+  if (orderError) {
+    // heater_model 列が無い場合のフォールバック
+    if (String(orderError.message || '').includes('heater_model')) {
+      const fallback = await supabase
+        .from('work_orders')
+        .select('order_no, product_name, model, bom_model, qty')
+        .order('order_no', { ascending: true })
+      if (fallback.error) throw fallback.error
+      const heaterRefs = (models || []).map((m) => ({
+        model: String(m.model),
+        name: m.name ?? null,
+      }))
+      const { byModel } = groupOrdersByHeaterModel(
+        (fallback.data || []).map((o) => ({ ...o, heater_model: null })),
+        heaterRefs
+      )
+      return (byModel.get(model) || []).map((o) => ({
+        order_no: normalizeTargetCode(String(o.order_no || '')),
+        product_name: o.product_name ?? null,
+        qty: o.qty == null ? null : Number(o.qty),
+      })).filter((o) => o.order_no)
+    }
+    throw orderError
+  }
+
+  const heaterRefs = (models || []).map((m) => ({
+    model: String(m.model),
+    name: m.name ?? null,
+  }))
+  const { byModel } = groupOrdersByHeaterModel(orders || [], heaterRefs)
+  return (byModel.get(model) || [])
+    .map((o) => ({
+      order_no: normalizeTargetCode(String(o.order_no || '')),
+      product_name: o.product_name ?? null,
+      qty: o.qty == null ? null : Number(o.qty),
+    }))
+    .filter((o) => o.order_no)
 }
 
 async function mapPool<T, R>(
@@ -1529,6 +1751,21 @@ export async function listProductionLotRecords(
   targetCode: string
 ): Promise<ProductionLotRecord[]> {
   const normalizedCode = normalizeTargetCode(targetCode)
+
+  if (targetType === 'model') {
+    const linked = await listLinkedInstructionsForModel(supabase, normalizedCode)
+    const batches = await mapPool(linked, 4, async (item) =>
+      listProductionLotRecords(supabase, 'instruction', item.order_no)
+    )
+    return batches
+      .flat()
+      .sort((a, b) => {
+        const end = a.period_end.localeCompare(b.period_end)
+        if (end !== 0) return end
+        return a.period_start.localeCompare(b.period_start)
+      })
+  }
+
   const { data, error } = await supabase
     .from('process_production_lots')
     .select(
@@ -1728,6 +1965,7 @@ export async function analyzeProductionLots(
     lots: analyzed,
     fiscal_year_summary: fiscalYearSummary,
     fiscal_year_summaries_by_spec: fiscalYearSummariesBySpec,
+    linked_instructions: fiscalYearSummary?.linked_instructions,
   }
 }
 
@@ -1909,6 +2147,12 @@ export async function createProductionLot(
   receiptSlipNo?: string | null,
   notes?: string | null
 ) {
+  if (targetType === 'model') {
+    throw new Error(
+      '機種単位では入庫登録できません。関連のD指令を選択して入庫登録してください。'
+    )
+  }
+
   const end = normalizeWorkDate(periodEnd)
   const normalizedCode = normalizeTargetCode(targetCode)
 
@@ -2086,8 +2330,14 @@ function mapScheduleStSourceRow(row: {
   apply_to_schedule?: boolean
   updated_at?: string | null
 }): ProcessScheduleStSource {
+  const targetType: ProcessTargetType =
+    row.target_type === 'instruction'
+      ? 'instruction'
+      : row.target_type === 'model'
+        ? 'model'
+        : 'line'
   return {
-    target_type: row.target_type === 'instruction' ? 'instruction' : 'line',
+    target_type: targetType,
     target_code: String(row.target_code),
     model: normalizeScheduleModel(row.model),
     fiscal_year: Number(row.fiscal_year),
@@ -2354,6 +2604,16 @@ export async function resolveTargetStandardDurationMinutes(
     }
   }
 
+  if (targetType === 'model') {
+    return {
+      minutes: 0,
+      source: 'none',
+      fiscal_year: null,
+      spec_key: '',
+      note: '機種単位の標準時間マスタはありません（関連D指令の平均STを利用）',
+    }
+  }
+
   const { data, error } = await supabase
     .from('work_orders')
     .select('standard_duration_minutes')
@@ -2405,6 +2665,15 @@ export async function syncTargetStandardDurationFromFiscalAverage(
     }
   }
 
+  if (targetType === 'model') {
+    return {
+      updated: false,
+      minutes: resolved.minutes,
+      source: resolved.source,
+      note: '機種単位では指令マスタ標準時間の更新をスキップします',
+    }
+  }
+
   const now = new Date().toISOString()
   if (targetType === 'line') {
     const { error } = await supabase
@@ -2452,7 +2721,7 @@ export async function syncTargetStandardDurationFromFiscalAverage(
   }
 }
 
-/** 指令に紐づく機種候補（D: work_orders / L: heater_models） */
+/** 指令に紐づく機種候補（D: work_orders / L: heater_models / 機種: 自身） */
 export async function listModelsForProcessTarget(
   supabase: SupabaseClient,
   targetType: ProcessTargetType,
@@ -2460,6 +2729,24 @@ export async function listModelsForProcessTarget(
 ): Promise<Array<{ model: string; label: string }>> {
   const normalized = normalizeTargetCode(targetCode)
   const models = new Map<string, string>()
+
+  if (targetType === 'model') {
+    const { data, error } = await supabase
+      .from('heater_models')
+      .select('model, name')
+      .eq('model', normalized)
+      .maybeSingle()
+    if (error) throw error
+    if (data) {
+      const key = normalizeScheduleModel(data.model)
+      if (key) {
+        models.set(key, data.name ? `${key} / ${data.name}` : key)
+      }
+    }
+    return Array.from(models.entries())
+      .map(([model, label]) => ({ model, label }))
+      .sort((a, b) => a.model.localeCompare(b.model, 'ja'))
+  }
 
   if (targetType === 'instruction') {
     const { data, error } = await supabase
@@ -2549,9 +2836,9 @@ export async function listProductionLotStatsByTarget(
   return stats
 }
 
-/** ラインマスタ全件 + D指令マスタ全件 */
+/** ラインマスタ全件 + D指令マスタ全件 + 機種マスタ（関連D指令あり） */
 export async function listProcessTargets(supabase: SupabaseClient): Promise<ProcessTarget[]> {
-  const [linesResult, ordersResult, lotStats] = await Promise.all([
+  const [linesResult, ordersResult, modelsResult, lotStats] = await Promise.all([
     supabase
       .from('lines')
       .select('line_code, name, sort_order')
@@ -2560,13 +2847,31 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
       .order('line_code', { ascending: true }),
     supabase
       .from('work_orders')
-      .select('order_no, product_name, model')
+      .select('order_no, product_name, model, bom_model, heater_model, qty')
       .order('order_no', { ascending: true }),
+    supabase
+      .from('heater_models')
+      .select('model, name')
+      .order('model', { ascending: true }),
     listProductionLotStatsByTarget(supabase),
   ])
 
   if (linesResult.error) throw linesResult.error
-  if (ordersResult.error) throw ordersResult.error
+  if (modelsResult.error) throw modelsResult.error
+
+  let orderRows = ordersResult.data || []
+  if (ordersResult.error) {
+    if (String(ordersResult.error.message || '').includes('heater_model')) {
+      const fallback = await supabase
+        .from('work_orders')
+        .select('order_no, product_name, model, bom_model, qty')
+        .order('order_no', { ascending: true })
+      if (fallback.error) throw fallback.error
+      orderRows = (fallback.data || []).map((o) => ({ ...o, heater_model: null }))
+    } else {
+      throw ordersResult.error
+    }
+  }
 
   const targets: ProcessTarget[] = []
 
@@ -2587,7 +2892,7 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
     string,
     { product_name: string | null; models: Set<string> }
   >()
-  for (const order of ordersResult.data || []) {
+  for (const order of orderRows) {
     const orderNo = normalizeTargetCode(order.order_no || '')
     if (!orderNo) continue
     const current = seenOrders.get(orderNo) || {
@@ -2616,6 +2921,45 @@ export async function listProcessTargets(supabase: SupabaseClient): Promise<Proc
       subtitle: subtitleParts.length > 0 ? subtitleParts.join(' / ') : 'D指令',
       lot_count: stats?.lot_count || 0,
       latest_lot_end: stats?.latest_lot_end || null,
+    })
+  }
+
+  const heaterRefs = (modelsResult.data || []).map((m) => ({
+    model: String(m.model),
+    name: m.name ?? null,
+  }))
+  const { byModel } = groupOrdersByHeaterModel(orderRows, heaterRefs)
+
+  for (const modelRow of modelsResult.data || []) {
+    const model = String(modelRow.model || '').trim()
+    if (!model) continue
+    const linked = byModel.get(model) || []
+    if (linked.length === 0) continue
+
+    let lotCount = 0
+    let latestLotEnd: string | null = null
+    for (const order of linked) {
+      const orderNo = normalizeTargetCode(String(order.order_no || ''))
+      if (!orderNo) continue
+      const stats = lotStats.get(`instruction:${orderNo}`)
+      if (!stats) continue
+      lotCount += stats.lot_count
+      if (
+        stats.latest_lot_end &&
+        (!latestLotEnd || stats.latest_lot_end > latestLotEnd)
+      ) {
+        latestLotEnd = stats.latest_lot_end
+      }
+    }
+
+    targets.push({
+      target_type: 'model',
+      target_code: model,
+      name: String(modelRow.name || model),
+      subtitle: `関連D指令 ${linked.length}件`,
+      lot_count: lotCount,
+      latest_lot_end: latestLotEnd,
+      linked_order_count: linked.length,
     })
   }
 
