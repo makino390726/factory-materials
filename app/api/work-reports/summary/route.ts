@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isDirectWorkType, isIndirectWorkType } from '@/lib/work-report-item-validation'
 
 export const runtime = 'nodejs'
 
@@ -36,25 +37,6 @@ export async function GET(request: NextRequest) {
     const reportList = reports || []
     const reportIds = reportList.map((report) => report.id)
 
-    const isDirectWorkType = (workType: string | null | undefined) => {
-      if (!workType) return false
-      const normalized = workType.trim().toLowerCase()
-
-      // 直・直接 (Japanese) / direct (English)
-      // Also treat common print types (ラベル / label) as "direct" work
-      return (
-        normalized === 'direct' ||
-        normalized === '直' ||
-        normalized === '直接' ||
-        normalized === 'label' ||
-        normalized === 'ラベル' ||
-        normalized.includes('直') ||
-        normalized.includes('direct') ||
-        normalized.includes('ラベル') ||
-        normalized.includes('label')
-      )
-    }
-
     let itemMap = new Map<string, { direct: number; indirect: number }>()
     if (reportIds.length > 0) {
       const { data: items, error: itemError } = await supabase
@@ -69,18 +51,17 @@ export async function GET(request: NextRequest) {
 
       itemMap = new Map()
       for (const item of items || []) {
-        const entry = itemMap.get(item.report_id) || { direct: 0, indirect: 0 }
-        if (isDirectWorkType(item.work_type)) {
-          entry.direct += item.duration_minutes || 0
-        } else {
-          entry.indirect += item.duration_minutes || 0
-        }
-        itemMap.set(item.report_id, entry)
+        const key = String(item.report_id)
+        const entry = itemMap.get(key) || { direct: 0, indirect: 0 }
+        const minutes = Number(item.duration_minutes || 0)
+        if (isDirectWorkType(item.work_type)) entry.direct += minutes
+        else if (isIndirectWorkType(item.work_type)) entry.indirect += minutes
+        itemMap.set(key, entry)
       }
     }
 
     const summary = reportList.map((report) => {
-      const totals = itemMap.get(report.id) || { direct: 0, indirect: 0 }
+      const totals = itemMap.get(String(report.id)) || { direct: 0, indirect: 0 }
       return {
         report_id: report.id,
         work_date: report.work_date,
