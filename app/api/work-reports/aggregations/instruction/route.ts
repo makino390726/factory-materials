@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { fetchByIdChunks, fetchWorkReportsInRange } from '@/lib/work-report-query'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,39 +23,22 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: reports, error } = await supabase
-      .from('work_reports')
-      .select('id')
-      .gte('work_date', from)
-      .lte('work_date', to)
-
-    if (error) {
-      console.error('Supabaseエラー:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    const reportIds = (reports || []).map((report) => report.id)
-
+    const reports = await fetchWorkReportsInRange<{ id: string }>(supabase, from, to, 'id')
+    const reportIds = reports.map((report) => String(report.id))
     if (reportIds.length === 0) {
       return NextResponse.json([])
     }
 
-    const { data: items, error: itemError } = await supabase
-      .from('work_report_items')
-      .select('line_id, instruction_text, duration_minutes')
-      .in('report_id', reportIds)
-
-    if (itemError) {
-      console.error('Supabaseエラー:', itemError)
-      return NextResponse.json({ error: itemError.message }, { status: 500 })
-    }
+    const items = await fetchByIdChunks<{
+      line_id: string | null
+      instruction_text: string | null
+      duration_minutes: number | null
+    }>(supabase, 'work_report_items', 'line_id, instruction_text, duration_minutes', 'report_id', reportIds)
 
     const lineIdSet = new Set<string>()
     const instructionSet = new Set<string>()
-    for (const item of items || []) {
-      if (item.line_id) {
-        lineIdSet.add(item.line_id)
-      }
+    for (const item of items) {
+      if (item.line_id) lineIdSet.add(item.line_id)
       if (item.instruction_text && item.instruction_text.trim()) {
         instructionSet.add(item.instruction_text.trim())
       }
@@ -62,47 +47,34 @@ export async function GET(request: NextRequest) {
     const lineIds = Array.from(lineIdSet)
     const instructionIds = Array.from(instructionSet)
 
-    const { data: lines, error: lineError } = lineIds.length
-      ? await supabase.from('lines').select('id, line_code, name').in('id', lineIds)
-      : { data: [], error: null }
-
-    if (lineError) {
-      console.error('Supabaseエラー:', lineError)
-      return NextResponse.json({ error: lineError.message }, { status: 500 })
-    }
-
-    const { data: orders, error: orderError } = instructionIds.length
-      ? await supabase
-          .from('work_orders')
-          .select('order_no, product_name')
-          .in('order_no', instructionIds)
-      : { data: [], error: null }
-
-    if (orderError) {
-      console.error('Supabaseエラー:', orderError)
-      return NextResponse.json({ error: orderError.message }, { status: 500 })
-    }
-
-    const lineMap = new Map(
-      (lines || []).map((line) => [line.id, { code: line.line_code, name: line.name }])
+    const lines = await fetchByIdChunks<{ id: string; line_code: string; name: string }>(
+      supabase,
+      'lines',
+      'id, line_code, name',
+      'id',
+      lineIds
     )
-    const orderMap = new Map(
-      (orders || []).map((order) => [order.order_no, { name: order.product_name }])
+    const orders = await fetchByIdChunks<{ order_no: string; product_name: string }>(
+      supabase,
+      'work_orders',
+      'order_no, product_name',
+      'order_no',
+      instructionIds
     )
+
+    const lineMap = new Map(lines.map((line) => [line.id, { code: line.line_code, name: line.name }]))
+    const orderMap = new Map(orders.map((order) => [order.order_no, { name: order.product_name }]))
 
     const lineTotals = new Map<string, number>()
     const instructionTotals = new Map<string, number>()
 
-    for (const item of items || []) {
+    for (const item of items) {
       if (item.line_id) {
-        const current = lineTotals.get(item.line_id) || 0
-        lineTotals.set(item.line_id, current + (item.duration_minutes || 0))
+        lineTotals.set(item.line_id, (lineTotals.get(item.line_id) || 0) + (item.duration_minutes || 0))
       }
-
       if (item.instruction_text && item.instruction_text.trim()) {
         const key = item.instruction_text.trim()
-        const current = instructionTotals.get(key) || 0
-        instructionTotals.set(key, current + (item.duration_minutes || 0))
+        instructionTotals.set(key, (instructionTotals.get(key) || 0) + (item.duration_minutes || 0))
       }
     }
 

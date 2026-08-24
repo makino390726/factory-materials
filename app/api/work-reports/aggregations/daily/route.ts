@@ -1,39 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { isDirectWorkType, isIndirectWorkType } from '@/lib/work-report-item-validation'
+import { fetchByIdChunks, fetchWorkReportsInRange } from '@/lib/work-report-query'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-
-type ItemRow = { report_id: string; work_type: string; duration_minutes: number | null }
-
-async function fetchItemsForReports(reportIds: string[]): Promise<ItemRow[]> {
-  const items: ItemRow[] = []
-  const idChunkSize = 100
-  for (let i = 0; i < reportIds.length; i += idChunkSize) {
-    const ids = reportIds.slice(i, i + idChunkSize)
-    let offset = 0
-    const pageSize = 1000
-    while (true) {
-      const { data, error } = await supabase
-        .from('work_report_items')
-        .select('report_id, work_type, duration_minutes')
-        .in('report_id', ids)
-        .order('id', { ascending: true })
-        .range(offset, offset + pageSize - 1)
-      if (error) throw new Error(error.message)
-      const rows = (data || []) as ItemRow[]
-      items.push(...rows)
-      if (rows.length < pageSize) break
-      offset += pageSize
-    }
-  }
-  return items
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,22 +24,24 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: reports, error } = await supabase
-      .from('work_reports')
-      .select('id, work_date')
-      .gte('work_date', from)
-      .lte('work_date', to)
-
-    if (error) {
-      console.error('Supabaseエラー:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    const reportList = reports || []
+    const reportList = await fetchWorkReportsInRange<{ id: string; work_date: string }>(
+      supabase,
+      from,
+      to,
+      'id, work_date'
+    )
     const dateByReportId = new Map(reportList.map((report) => [String(report.id), String(report.work_date)]))
-    const itemsData = reportList.length > 0
-      ? await fetchItemsForReports(reportList.map((report) => String(report.id)))
-      : []
+    const itemsData = await fetchByIdChunks<{
+      report_id: string
+      work_type: string
+      duration_minutes: number | null
+    }>(
+      supabase,
+      'work_report_items',
+      'report_id, work_type, duration_minutes',
+      'report_id',
+      reportList.map((report) => String(report.id))
+    )
 
     const byDate = new Map<string, { work_date: string; direct_minutes: number; indirect_minutes: number }>()
     for (const item of itemsData) {

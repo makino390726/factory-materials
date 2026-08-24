@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { isDirectWorkType, isIndirectWorkType } from '@/lib/work-report-item-validation'
+import { fetchByIdChunks, fetchWorkReportsInRange } from '@/lib/work-report-query'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,42 +24,39 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: reports, error } = await supabase
-      .from('work_reports')
-      .select('id, work_date, work_minutes, staff:staff_id (id, name, department, login_id)')
-      .gte('work_date', from)
-      .lte('work_date', to)
-      .order('work_date', { ascending: true })
-
-    if (error) {
-      console.error('Supabaseエラー:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    type ReportRow = {
+      id: string
+      work_date: string
+      work_minutes: number
+      staff: { id: string; name: string; department?: string | null; login_id: string } | null
     }
+    const reportList = await fetchWorkReportsInRange<ReportRow>(
+      supabase,
+      from,
+      to,
+      'id, work_date, work_minutes, staff:staff_id (id, name, department, login_id)'
+    )
 
-    const reportList = reports || []
-    const reportIds = reportList.map((report) => report.id)
+    const items = await fetchByIdChunks<{
+      report_id: string
+      work_type: string
+      duration_minutes: number | null
+    }>(
+      supabase,
+      'work_report_items',
+      'report_id, work_type, duration_minutes',
+      'report_id',
+      reportList.map((report) => String(report.id))
+    )
 
-    let itemMap = new Map<string, { direct: number; indirect: number }>()
-    if (reportIds.length > 0) {
-      const { data: items, error: itemError } = await supabase
-        .from('work_report_items')
-        .select('report_id, work_type, duration_minutes')
-        .in('report_id', reportIds)
-
-      if (itemError) {
-        console.error('Supabaseエラー:', itemError)
-        return NextResponse.json({ error: itemError.message }, { status: 500 })
-      }
-
-      itemMap = new Map()
-      for (const item of items || []) {
-        const key = String(item.report_id)
-        const entry = itemMap.get(key) || { direct: 0, indirect: 0 }
-        const minutes = Number(item.duration_minutes || 0)
-        if (isDirectWorkType(item.work_type)) entry.direct += minutes
-        else if (isIndirectWorkType(item.work_type)) entry.indirect += minutes
-        itemMap.set(key, entry)
-      }
+    const itemMap = new Map<string, { direct: number; indirect: number }>()
+    for (const item of items) {
+      const key = String(item.report_id)
+      const entry = itemMap.get(key) || { direct: 0, indirect: 0 }
+      const minutes = Number(item.duration_minutes || 0)
+      if (isDirectWorkType(item.work_type)) entry.direct += minutes
+      else if (isIndirectWorkType(item.work_type)) entry.indirect += minutes
+      itemMap.set(key, entry)
     }
 
     const summary = reportList.map((report) => {

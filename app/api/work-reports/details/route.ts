@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { fetchByIdChunks, fetchWorkReportsInRange } from '@/lib/work-report-query'
+
+export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -25,13 +29,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // スタッフ一覧を取得
-    let staffQuery = supabase
+    const { data: staffs, error: staffError } = await supabase
       .from('staffs')
       .select('id, login_id, name, department, work_group_code')
       .order('login_id')
-
-    const { data: staffs, error: staffError } = await staffQuery
 
     if (staffError) {
       console.error('スタッフ取得エラー:', staffError)
@@ -41,81 +42,70 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // 指定されたスタッフまたは全スタッフの日報明細を取得
-    const staffIds = staffId ? [staffId] : (staffs || []).map(s => s.id)
-
-    const { data: reports, error: reportError } = await supabase
-      .from('work_reports')
-      .select(`
-        id,
-        staff_id,
-        work_date,
-        start_time,
-        end_time,
-        break_minutes,
-        work_minutes,
-        is_draft
-      `)
-      .gte('work_date', fromDate)
-      .lte('work_date', toDate)
-      .in('staff_id', staffIds)
-      .order('work_date', { ascending: true })
-
-    if (reportError) {
-      console.error('日報取得エラー:', reportError)
-      return NextResponse.json(
-        { error: '日報の取得に失敗しました' },
-        { status: 500 }
-      )
+    type ReportRow = {
+      id: string
+      staff_id: string
+      work_date: string
+      start_time: string | null
+      end_time: string | null
+      break_minutes: number
+      work_minutes: number | null
+      is_draft: boolean
+    }
+    let reports = await fetchWorkReportsInRange<ReportRow>(
+      supabase,
+      fromDate,
+      toDate,
+      'id, staff_id, work_date, start_time, end_time, break_minutes, work_minutes, is_draft'
+    )
+    if (staffId) {
+      reports = reports.filter((report) => String(report.staff_id) === String(staffId))
     }
 
-    // 日報IDリストを取得
-    const reportIds = (reports || []).map(r => r.id)
+    const items = await fetchByIdChunks<Record<string, unknown> & { report_id: string; line_id?: string | null }>(
+      supabase,
+      'work_report_items',
+      '*',
+      'report_id',
+      reports.map((report) => String(report.id))
+    )
 
-    // 日報明細を取得
-    const { data: items, error: itemsError } = await supabase
-      .from('work_report_items')
-      .select('*')
-      .in('report_id', reportIds)
-      .order('start_time')
+    const { data: lines } = await supabase.from('lines').select('id, line_code, name')
+    const lineMap = new Map((lines || []).map((line) => [line.id, line]))
 
-    if (itemsError) {
-      console.error('明細取得エラー:', itemsError)
-      return NextResponse.json(
-        { error: '明細の取得に失敗しました' },
-        { status: 500 }
-      )
+    const itemsByReport = new Map<string, typeof items>()
+    for (const item of items) {
+      const key = String(item.report_id)
+      const list = itemsByReport.get(key) || []
+      list.push(item)
+      itemsByReport.set(key, list)
     }
 
-    // L指令情報を取得
-    const { data: lines } = await supabase
-      .from('lines')
-      .select('id, line_code, name')
-
-    // スタッフごとにデータをグループ化
-    const staffDetails = (staffs || []).map(staff => {
-      const staffReports = (reports || []).filter(r => r.staff_id === staff.id)
-      const reportsWithItems = staffReports.map(report => {
-        const reportItems = (items || []).filter(i => i.report_id === report.id)
-        const itemsWithLineInfo = reportItems.map(item => {
-          const line = (lines || []).find(l => l.id === item.line_id)
+    const staffDetails = (staffs || [])
+      .map((staff) => {
+        const staffReports = reports.filter((report) => report.staff_id === staff.id)
+        const reportsWithItems = staffReports.map((report) => {
+          const reportItems = itemsByReport.get(String(report.id)) || []
+          const itemsWithLineInfo = reportItems.map((item) => {
+            const line = item.line_id ? lineMap.get(item.line_id) : undefined
+            return {
+              ...item,
+              line_code: line?.line_code,
+              line_name: line?.name,
+            }
+          })
           return {
-            ...item,
-            line_code: line?.line_code,
-            line_name: line?.name,
+            ...report,
+            items: itemsWithLineInfo,
           }
         })
+
         return {
-          ...report,
-          items: itemsWithLineInfo,
+          staff,
+          reports: reportsWithItems,
         }
       })
-
-      return {
-        staff,
-        reports: reportsWithItems,
-      }
-    }).filter(sd => sd.reports.length > 0) // 日報があるスタッフのみ
+      .filter((sd) => sd.reports.length > 0)
 
     return NextResponse.json({
       success: true,

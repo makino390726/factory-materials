@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { fetchByIdChunks, fetchWorkReportsInRange } from '@/lib/work-report-query'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,36 +23,36 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // 期間内の作業日報を取得
-    const { data: reports, error: reportError } = await supabase
-      .from('work_reports')
-      .select('id, work_date, staff_id, staffs(work_group_code)')
-      .gte('work_date', from)
-      .lte('work_date', to)
-
-    if (reportError) {
-      console.error('Supabaseエラー:', reportError)
-      return NextResponse.json({ error: reportError.message }, { status: 500 })
+    type ReportRow = {
+      id: string
+      work_date: string
+      staff_id: string
+      staffs: { work_group_code?: string | null } | null
     }
+    const reports = await fetchWorkReportsInRange<ReportRow>(
+      supabase,
+      from,
+      to,
+      'id, work_date, staff_id, staffs(work_group_code)'
+    )
+    const reportIds = reports.map((report) => String(report.id))
 
-    const reportIds = (reports || []).map((report) => report.id)
-
-    let itemsData: any[] = []
-    if (reportIds.length > 0) {
-      const { data: items, error: itemError } = await supabase
-        .from('work_report_items')
-        .select('report_id, is_support, support_work_group_code, work_type, work_content, duration_minutes')
-        .in('report_id', reportIds)
-
-      if (itemError) {
-        console.error('Supabaseエラー:', itemError)
-        return NextResponse.json({ error: itemError.message }, { status: 500 })
-      }
-
-      itemsData = items || []
+    type ItemRow = {
+      report_id: string
+      is_support?: boolean
+      support_work_group_code?: string | null
+      work_type?: string
+      work_content?: string
+      duration_minutes: number | null
     }
+    const itemsData = await fetchByIdChunks<ItemRow>(
+      supabase,
+      'work_report_items',
+      'report_id, is_support, support_work_group_code, work_type, work_content, duration_minutes',
+      'report_id',
+      reportIds
+    )
 
-    // 作業グループマスターを取得
     const { data: workGroups, error: groupError } = await supabase
       .from('work_group_master')
       .select('work_group_code, work_name')
@@ -64,21 +66,26 @@ export async function GET(request: NextRequest) {
       (workGroups || []).map((group) => [group.work_group_code, group.work_name])
     )
 
-    // 作業グループごとに集計
-    const groupTotals = new Map<string, { 
-      work_group_code: string
-      work_group_name: string
-      total_minutes: number 
-    }>()
+    const groupTotals = new Map<
+      string,
+      { work_group_code: string; work_group_name: string; total_minutes: number }
+    >()
 
-    for (const report of reports || []) {
-      const staffWorkGroupCode = (report.staffs as any)?.work_group_code
-      const reportItems = itemsData.filter((item) => item.report_id === report.id)
+    const itemsByReport = new Map<string, ItemRow[]>()
+    for (const item of itemsData) {
+      const key = String(item.report_id)
+      const list = itemsByReport.get(key) || []
+      list.push(item)
+      itemsByReport.set(key, list)
+    }
+
+    for (const report of reports) {
+      const staffWorkGroupCode = report.staffs?.work_group_code
+      const reportItems = itemsByReport.get(String(report.id)) || []
 
       for (const item of reportItems) {
-        // 実際の作業グループコードを判定（応援フラグを考慮）
-        const actualWorkGroupCode = item.is_support 
-          ? item.support_work_group_code 
+        const actualWorkGroupCode = item.is_support
+          ? item.support_work_group_code
           : staffWorkGroupCode
 
         if (!actualWorkGroupCode) continue
@@ -86,7 +93,7 @@ export async function GET(request: NextRequest) {
         const existing = groupTotals.get(actualWorkGroupCode) || {
           work_group_code: actualWorkGroupCode,
           work_group_name: workGroupMap.get(actualWorkGroupCode) || actualWorkGroupCode,
-          total_minutes: 0
+          total_minutes: 0,
         }
 
         existing.total_minutes += item.duration_minutes || 0
@@ -94,9 +101,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 配列に変換してソート
-    const result = Array.from(groupTotals.values())
-      .sort((a, b) => a.work_group_code.localeCompare(b.work_group_code))
+    const result = Array.from(groupTotals.values()).sort((a, b) =>
+      a.work_group_code.localeCompare(b.work_group_code)
+    )
 
     return NextResponse.json(result)
   } catch (error) {
