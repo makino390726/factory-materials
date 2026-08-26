@@ -17,21 +17,27 @@ type ProductRow = Record<string, unknown> & {
 type StockShelfRow = {
   product_code: string
   shelf_no: string | null
+  stock_qty: number | null
 }
 
 type StockRow = {
   product_code: string
 }
 
-async function fetchStockShelfMap() {
+type StockInfo = {
+  shelf_no: string | null
+  stock_qty: number
+}
+
+async function fetchStockMap() {
   const PAGE_SIZE = 1000
-  const stockShelfMap = new Map<string, string | null>()
+  const stockMap = new Map<string, StockInfo>()
   let from = 0
 
   while (true) {
     const { data, error } = await supabase
       .from('stocks')
-      .select('product_code, shelf_no')
+      .select('product_code, shelf_no, stock_qty')
       .order('product_code', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
 
@@ -41,8 +47,11 @@ async function fetchStockShelfMap() {
 
     const rows = (data || []) as StockShelfRow[]
     for (const row of rows) {
-      if (!stockShelfMap.has(row.product_code)) {
-        stockShelfMap.set(row.product_code, row.shelf_no || null)
+      if (!stockMap.has(row.product_code)) {
+        stockMap.set(row.product_code, {
+          shelf_no: row.shelf_no || null,
+          stock_qty: Number(row.stock_qty) || 0,
+        })
       }
     }
 
@@ -50,7 +59,7 @@ async function fetchStockShelfMap() {
     from += PAGE_SIZE
   }
 
-  return stockShelfMap
+  return stockMap
 }
 
 async function syncStockShelf(
@@ -161,11 +170,15 @@ export async function GET() {
       from += PAGE_SIZE
     }
 
-    const stockShelfMap = await fetchStockShelfMap()
-    const mergedData = allData.map((product) => ({
-      ...product,
-      shelf_no: stockShelfMap.get(product.product_code) ?? product.shelf_no ?? null,
-    }))
+    const stockMap = await fetchStockMap()
+    const mergedData = allData.map((product) => {
+      const stock = stockMap.get(product.product_code)
+      return {
+        ...product,
+        shelf_no: stock?.shelf_no ?? product.shelf_no ?? null,
+        stock_qty: stock?.stock_qty ?? 0,
+      }
+    })
 
     return NextResponse.json(mergedData)
   } catch (error) {

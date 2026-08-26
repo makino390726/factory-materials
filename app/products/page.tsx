@@ -11,6 +11,7 @@ interface Product {
   purchase_price?: number
   cost_price?: number
   shelf_no?: string | null
+  stock_qty?: number
 }
 
 export default function ProductsPage() {
@@ -18,7 +19,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<'code' | 'name' | 'price'>('code')
+  const [sortBy, setSortBy] = useState<'code' | 'name' | 'price' | 'stock'>('code')
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
@@ -28,7 +29,9 @@ export default function ProductsPage() {
     barcode: '',
     purchase_price: '',
     cost_price: '',
+    stock_qty: '',
   })
+  const [originalStockQty, setOriginalStockQty] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 50
@@ -104,12 +107,36 @@ export default function ProductsPage() {
     }
   }
 
+  const applyStockAdjust = async (productCode: string, nextQty: number) => {
+    const res = await fetch('/api/stock/movement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_code: productCode,
+        type: 'count',
+        actual_quantity: nextQty,
+        note: '製品マスタから在庫修正',
+        input_method: 'manual',
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.error || '在庫の更新に失敗しました')
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
     try {
+      const stockInput = formData.stock_qty.trim()
+      const nextStockQty = stockInput === '' ? null : Number(stockInput)
+      if (nextStockQty !== null && (!Number.isFinite(nextStockQty) || nextStockQty < 0)) {
+        throw new Error('在庫数は0以上の数値で入力してください')
+      }
+
       const payload = {
         ...(editingId && { id: editingId }),
         product_code: formData.product_code,
@@ -131,15 +158,22 @@ export default function ProductsPage() {
         throw new Error(errorData.error || '保存に失敗しました')
       }
 
+      let stockAdjusted = false
+      const prevQty = originalStockQty ?? 0
+      if (nextStockQty !== null && nextStockQty !== prevQty) {
+        await applyStockAdjust(formData.product_code, nextStockQty)
+        stockAdjusted = true
+      }
+
       await fetchProducts()
       setShowModal(false)
       resetForm()
-      
-      // 棚番の同期状況をメッセージに反映
+
       const baseMessage = editingId ? '製品を更新しました' : '製品を登録しました'
-      const syncMessage = formData.shelf_no ? '棚番を products と stocks に同期しました' : ''
-      const fullMessage = syncMessage ? `${baseMessage}\n\n✓ ${syncMessage}` : baseMessage
-      alert(fullMessage)
+      const messages = [baseMessage]
+      if (formData.shelf_no) messages.push('✓ 棚番を products と stocks に同期しました')
+      if (stockAdjusted) messages.push(`✓ 在庫数を ${prevQty} → ${nextStockQty} に修正しました`)
+      alert(messages.join('\n'))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -148,7 +182,9 @@ export default function ProductsPage() {
   }
 
   const handleEdit = (product: Product) => {
+    const qty = product.stock_qty ?? 0
     setEditingId(product.id)
+    setOriginalStockQty(qty)
     setFormData({
       product_code: product.product_code,
       name: product.name,
@@ -156,6 +192,7 @@ export default function ProductsPage() {
       barcode: product.barcode || '',
       purchase_price: product.purchase_price?.toString() || '',
       cost_price: product.cost_price?.toString() || '',
+      stock_qty: String(qty),
     })
     setShowModal(true)
   }
@@ -184,6 +221,7 @@ export default function ProductsPage() {
 
   const resetForm = () => {
     setEditingId(null)
+    setOriginalStockQty(null)
     setFormData({
       product_code: '',
       name: '',
@@ -191,6 +229,7 @@ export default function ProductsPage() {
       barcode: '',
       purchase_price: '',
       cost_price: '',
+      stock_qty: '0',
     })
     setError(null)
   }
@@ -357,6 +396,7 @@ export default function ProductsPage() {
     if (sortBy === 'code') return a.product_code.localeCompare(b.product_code)
     if (sortBy === 'name') return a.name.localeCompare(b.name)
     if (sortBy === 'price') return (b.cost_price || 0) - (a.cost_price || 0)
+    if (sortBy === 'stock') return (b.stock_qty || 0) - (a.stock_qty || 0)
     return 0
   })
 
@@ -450,6 +490,7 @@ export default function ProductsPage() {
                 <option value="code">商品コード順</option>
                 <option value="name">製品名順</option>
                 <option value="price">原価順</option>
+                <option value="stock">在庫数順</option>
               </select>
             </div>
           </div>
@@ -496,6 +537,7 @@ export default function ProductsPage() {
                     <th className="px-6 py-4 text-left font-bold text-yellow-300">商品コード</th>
                     <th className="px-6 py-4 text-left font-bold text-yellow-300">製品名</th>
                     <th className="px-6 py-4 text-left font-bold text-yellow-300">棚番</th>
+                    <th className="px-6 py-4 text-right font-bold text-yellow-300">現在庫</th>
                     <th className="px-6 py-4 text-left font-bold text-yellow-300">バーコード</th>
                     <th className="px-6 py-4 text-right font-bold text-yellow-300">購入単価</th>
                     <th className="px-6 py-4 text-right font-bold text-yellow-300">原価</th>
@@ -519,6 +561,19 @@ export default function ProductsPage() {
                       <td className="px-6 py-4 text-yellow-200 font-semibold font-mono">{product.product_code}</td>
                       <td className="px-6 py-4 text-slate-200">{product.name}</td>
                       <td className="px-6 py-4 text-slate-300 font-mono">{product.shelf_no || '-'}</td>
+                      <td className="px-6 py-4 text-right">
+                        <span
+                          className={`inline-block min-w-[3rem] px-2 py-0.5 rounded font-mono font-semibold ${
+                            (product.stock_qty ?? 0) === 0
+                              ? 'bg-red-900/50 text-red-300 border border-red-500/60'
+                              : (product.stock_qty ?? 0) <= 10
+                                ? 'bg-orange-900/50 text-orange-300 border border-orange-500/60'
+                                : 'bg-cyan-900/40 text-cyan-200 border border-cyan-500/40'
+                          }`}
+                        >
+                          {product.stock_qty ?? 0}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 text-slate-400 text-xs font-mono">{product.barcode || '-'}</td>
                       <td className="px-6 py-4 text-right text-slate-300">
                         {product.purchase_price ? `¥${product.purchase_price.toLocaleString('ja-JP')}` : '-'}
@@ -1018,6 +1073,24 @@ export default function ProductsPage() {
                     placeholder="0"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-yellow-300 mb-2">現在庫数</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.stock_qty}
+                  onChange={(e) => setFormData({ ...formData, stock_qty: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-800 border-2 border-cyan-400/40 rounded-lg text-cyan-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  placeholder="0"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  {editingId
+                    ? `変更すると棚卸（在庫修正）として記録されます（現在: ${originalStockQty ?? 0}）`
+                    : '登録時に在庫を設定できます（未入力は0）'}
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4">
