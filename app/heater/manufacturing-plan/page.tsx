@@ -9,12 +9,19 @@ import {
   normalizeProductCategory,
   type ProductCategory,
 } from '@/lib/product-category';
+import {
+  formatFiscalYearLabel,
+  getCurrentFiscalYear,
+  getFiscalYearDateRange,
+} from '@/lib/fiscal-year';
 
 interface ManufacturingPlanItem {
   model: string;
   modelName: string | null;
   quantity: number;
   productCategory: ProductCategory;
+  /** 見積・年度計画の営業計画台数（参考。製造台数とは独立） */
+  salesQty: number | null;
 }
 
 interface AggregatedItem {
@@ -43,6 +50,9 @@ interface SavedPlan {
 }
 
 type CategoryFilter = 'すべて' | ProductCategory;
+type SalesQtyMode = 'qty' | 'highQty';
+
+const SKIP_SALES_MACHINE_CODES = new Set(['lump', 'other', 'その他']);
 
 interface BomDetail {
   model: string;
@@ -110,11 +120,14 @@ export default function ManufacturingPlanPage() {
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const [planName, setPlanName] = useState('');
-  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear().toString());
+  const [fiscalYear, setFiscalYear] = useState(() => String(getCurrentFiscalYear()));
   const [planPeriod, setPlanPeriod] = useState('');
   const [planCategory, setPlanCategory] = useState<ProductCategory>(DEFAULT_PRODUCT_CATEGORY);
   const [notes, setNotes] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [salesQtyMode, setSalesQtyMode] = useState<SalesQtyMode>('qty');
+  const [importingSales, setImportingSales] = useState(false);
+  const [salesImportInfo, setSalesImportInfo] = useState<string | null>(null);
 
   useEffect(() => {
     fetchModels();
@@ -143,6 +156,7 @@ export default function ManufacturingPlanPage() {
           modelName: m.name,
           quantity: 0,
           productCategory: m.product_category,
+          salesQty: null,
         }))
       );
     } catch (err) {
@@ -194,13 +208,15 @@ export default function ManufacturingPlanPage() {
 
   const buildPlanItemsFromModels = (
     modelList: { model: string; name: string | null; product_category: ProductCategory }[],
-    detailsMap?: Map<string, number>
+    detailsMap?: Map<string, number>,
+    salesMap?: Map<string, number>
   ): ManufacturingPlanItem[] =>
     modelList.map((m) => ({
       model: m.model,
       modelName: m.name,
       quantity: detailsMap?.get(m.model) ?? 0,
       productCategory: m.product_category,
+      salesQty: salesMap?.has(m.model) ? (salesMap.get(m.model) ?? null) : null,
     }));
 
   const resolvePrimaryCategory = (items: ManufacturingPlanItem[]): ProductCategory => {
@@ -283,7 +299,13 @@ export default function ManufacturingPlanPage() {
         }
       }
 
-      const nextPlans = buildPlanItemsFromModels(modelList, detailsMap);
+      const prevSalesByModel = new Map(
+        plans.filter((p) => p.salesQty != null).map((p) => [p.model, p.salesQty as number])
+      );
+      const nextPlans = buildPlanItemsFromModels(modelList, detailsMap).map((p) => ({
+        ...p,
+        salesQty: prevSalesByModel.has(p.model) ? prevSalesByModel.get(p.model)! : null,
+      }));
       setPlans(nextPlans);
       await fetchManufacturingPlan(nextPlans);
     } catch (err) {
@@ -381,8 +403,9 @@ export default function ManufacturingPlanPage() {
       if (currentPlanId === planId) {
         setCurrentPlanId(null);
         setPlanName('');
-        setPlans(plans.map(p => ({ ...p, quantity: 0 })));
+        setPlans(plans.map((p) => ({ ...p, quantity: 0, salesQty: null })));
         setResponse(null);
+        setSalesImportInfo(null);
       }
       alert('削除しました');
     } catch (err) {
@@ -393,20 +416,147 @@ export default function ManufacturingPlanPage() {
   const newPlan = () => {
     setCurrentPlanId(null);
     setPlanName('');
-    setFiscalYear(new Date().getFullYear().toString());
+    setFiscalYear(String(getCurrentFiscalYear()));
     setPlanPeriod('');
     setPlanCategory(
       categoryFilter === 'すべて' ? DEFAULT_PRODUCT_CATEGORY : categoryFilter
     );
     setNotes('');
-    setPlans(plans.map(p => ({ ...p, quantity: 0 })));
+    setPlans(plans.map((p) => ({ ...p, quantity: 0, salesQty: null })));
     setResponse(null);
+    setSalesImportInfo(null);
   };
 
   const handleQuantityChange = (model: string, quantity: number) => {
     setPlans(
       plans.map((p) => (p.model === model ? { ...p, quantity: Math.max(0, quantity) } : p))
     );
+  };
+
+  const importSalesQuantities = async () => {
+    const fy = Number(fiscalYear);
+    if (!Number.isFinite(fy)) {
+      setError('年度を正しく入力してください');
+      return;
+    }
+
+    const hasExistingQty = plans.some((p) => p.quantity > 0);
+    if (hasExistingQty) {
+      const ok = confirm(
+        '現在入力中の製造台数があります。営業計画台数で上書きしますか？\n（営業台数の参考表示も更新されます）'
+      );
+      if (!ok) return;
+    }
+
+    setImportingSales(true);
+    setError(null);
+    setSalesImportInfo(null);
+    try {
+      const res = await fetch(
+        `/api/heater/manufacturing-plan/sales-qty?fiscalYear=${encodeURIComponent(String(fy))}`
+      );
+      const data = await res.json();
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || '営業計画台数の取得に失敗しました');
+      }
+
+      const rows: Array<{
+        machine_code: string;
+        machine_name: string;
+        qty: number;
+        highQty: number;
+      }> = Array.isArray(data.rows) ? data.rows : [];
+
+      let modelList = [...models];
+      const known = new Set(modelList.map((m) => m.model));
+      const qtyByModel = new Map<string, number>();
+      const skippedLabels: string[] = [];
+
+      for (const row of rows) {
+        const code = String(row.machine_code || '').trim();
+        if (!code) continue;
+        const value = salesQtyMode === 'highQty' ? Number(row.highQty) || 0 : Number(row.qty) || 0;
+        if (value <= 0) continue;
+
+        if (SKIP_SALES_MACHINE_CODES.has(code)) {
+          skippedLabels.push(`${row.machine_name || code}（${value}台）`);
+          continue;
+        }
+
+        if (!known.has(code)) {
+          const inferred = normalizeProductCategory(
+            inferProductCategory(code, row.machine_name)
+          );
+          modelList.push({
+            model: code,
+            name: row.machine_name || null,
+            product_category: inferred,
+          });
+          known.add(code);
+        }
+
+        qtyByModel.set(code, (qtyByModel.get(code) || 0) + value);
+      }
+
+      if (modelList.length !== models.length) {
+        setModels(modelList);
+      }
+
+      const nextPlans: ManufacturingPlanItem[] = modelList.map((m) => {
+        const sales = qtyByModel.has(m.model) ? qtyByModel.get(m.model)! : null;
+        return {
+          model: m.model,
+          modelName: m.name,
+          productCategory: m.product_category,
+          quantity: sales ?? 0,
+          salesQty: sales,
+        };
+      });
+
+      const counts = new Map<ProductCategory, number>();
+      for (const item of nextPlans) {
+        if ((item.salesQty || 0) <= 0) continue;
+        counts.set(
+          item.productCategory,
+          (counts.get(item.productCategory) || 0) + (item.salesQty || 0)
+        );
+      }
+      let best: ProductCategory | null = null;
+      let bestQty = -1;
+      for (const [cat, qty] of counts) {
+        if (qty > bestQty) {
+          best = cat;
+          bestQty = qty;
+        }
+      }
+      if (best) {
+        setCategoryFilter(best);
+        setPlanCategory(best);
+      }
+
+      setPlans(nextPlans);
+      setResponse(null);
+
+      const importedCount = nextPlans.filter((p) => (p.salesQty || 0) > 0).length;
+      const totalSales = nextPlans.reduce((sum, p) => sum + (p.salesQty || 0), 0);
+      const range = getFiscalYearDateRange(fy);
+      const modeLabel = salesQtyMode === 'highQty' ? '●のみ' : '全確度';
+      const skipNote =
+        skippedLabels.length > 0
+          ? ` ／ 「その他」等 ${skippedLabels.length}件は除外（${skippedLabels.slice(0, 3).join('、')}${skippedLabels.length > 3 ? '…' : ''}）`
+          : '';
+      setSalesImportInfo(
+        `${formatFiscalYearLabel(fy)}（${range.start}〜${range.end}）の営業計画を取込ました（${modeLabel} / ${importedCount}機種 / 合計${totalSales}台）。製造台数は在庫を見ながら調整してください。${skipNote}`
+      );
+
+      if (importedCount === 0) {
+        setError('該当年度の営業計画台数（工場機種）がありません');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '営業計画の取込に失敗しました');
+    } finally {
+      setImportingSales(false);
+    }
   };
 
   const calculateGrandTotal = () => {
@@ -607,18 +757,87 @@ export default function ManufacturingPlanPage() {
               );
             })}
           </div>
+
+          <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+            <div className="mb-2 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-indigo-800">取込年度</label>
+                <input
+                  type="number"
+                  min="2000"
+                  max="2100"
+                  value={fiscalYear}
+                  onChange={(e) => setFiscalYear(e.target.value)}
+                  className="w-28 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-indigo-800">台数の対象</label>
+                <select
+                  value={salesQtyMode}
+                  onChange={(e) => setSalesQtyMode(e.target.value as SalesQtyMode)}
+                  className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  <option value="qty">全確度（●▲□）</option>
+                  <option value="highQty">●のみ（確度高）</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={importSalesQuantities}
+                disabled={importingSales}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-slate-400"
+              >
+                {importingSales ? '取込中...' : '営業計画台数を取込'}
+              </button>
+            </div>
+            <p className="text-xs text-indigo-900/80">
+              見積システムの年度計画（個人シート）を機種別に集計し、製造台数の初期値にします。
+              製造台数は工場側で在庫・能力を見て調整し、営業台数は参考表示のまま残ります。
+            </p>
+            {salesImportInfo && (
+              <p className="mt-2 text-sm font-medium text-indigo-900">{salesImportInfo}</p>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {visiblePlans.length === 0 ? (
               <div className="col-span-full rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500">
                 このカテゴリの機種がありません。機種マスタで製品カテゴリを指定して登録してください。
               </div>
             ) : (
-              visiblePlans.map((plan) => (
+              visiblePlans.map((plan) => {
+                const sales = plan.salesQty;
+                const diff =
+                  sales != null ? plan.quantity - sales : null;
+                return (
                 <div key={plan.model} className="border border-slate-300 rounded-lg p-4 bg-slate-50">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     {plan.model} {plan.modelName && `(${plan.modelName})`}
                   </label>
                   <p className="mb-2 text-xs text-slate-500">{plan.productCategory}</p>
+                  {sales != null && (
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-800">
+                        営業 {sales}台
+                      </span>
+                      <span className="rounded bg-slate-200 px-2 py-0.5 font-semibold text-slate-800">
+                        製造 {plan.quantity}台
+                      </span>
+                      {diff !== 0 && (
+                        <span
+                          className={`rounded px-2 py-0.5 font-semibold ${
+                            (diff || 0) > 0
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          差 {(diff || 0) > 0 ? '+' : ''}
+                          {diff}台
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <input
                     type="number"
                     min="0"
@@ -627,9 +846,10 @@ export default function ManufacturingPlanPage() {
                     className="w-full px-3 py-2 border-2 border-slate-400 rounded-lg bg-white text-black font-bold text-xl text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     placeholder="0"
                   />
-                  <span className="text-sm font-semibold text-slate-800 mt-1 block">台</span>
+                  <span className="text-sm font-semibold text-slate-800 mt-1 block">製造台数（台）</span>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
           <button
