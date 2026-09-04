@@ -116,18 +116,8 @@ function normalizeGroups(
     const materialCost = toNumber(pickCell(raw, ['材料費', 'material_cost', '材料']))
     const laborCost = toNumber(pickCell(raw, ['工賃', '工費', 'labor_cost', 'labor']))
     const indirectCost = toNumber(pickCell(raw, ['間接費', 'indirect_cost', '間接']))
-    const totalRaw = pickCell(raw, [
-      '合計',
-      '原価',
-      'cost_price',
-      'total',
-      'total_cost',
-      'line_total',
-    ])
-    const lineTotal =
-      totalRaw === undefined || totalRaw === null || String(totalRaw).trim() === ''
-        ? materialCost + laborCost + indirectCost
-        : toNumber(totalRaw)
+    // 合計欄は欠落・古い値のことがあるため、常にシステムで再計算する
+    const lineTotal = materialCost + laborCost + indirectCost
 
     if (!model) {
       errors.push(
@@ -206,7 +196,8 @@ function normalizeGroups(
  *
  * 列振り分け:
  * - パーツ一覧(BOM/パーツマスタ): 機種, パーツキー(部品キー), パーツ名, グループ(任意)  ※BOM数量は常に1
- * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃, 間接費, 合計
+ * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃, 間接費
+ * - 行合計は CSV の合計列を使わず、材料費+工賃+間接費で常に再計算する
  */
 export async function POST(req: Request) {
   try {
