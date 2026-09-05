@@ -42,6 +42,7 @@ export default function HeaterModelsPage() {
   const [productPage, setProductPage] = useState(1);
   const productsPerPage = 10;
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
+  const [backfillingCategories, setBackfillingCategories] = useState(false);
   const [childOrders, setChildOrders] = useState<
     Record<
       string,
@@ -207,6 +208,31 @@ export default function HeaterModelsPage() {
     }
   };
 
+  const handleBackfillCategories = async () => {
+    if (
+      !confirm(
+        'カテゴリ未設定の機種へ、機種コードから推定したカテゴリを書き込みます。よろしいですか？'
+      )
+    ) {
+      return;
+    }
+    setBackfillingCategories(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/heater/models/backfill-categories', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'カテゴリ補完に失敗しました');
+      alert(
+        `${data.message || '完了'}\n更新: ${data.updated ?? 0}件 / スキップ: ${data.skipped ?? 0}件`
+      );
+      await fetchModels();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'カテゴリ補完に失敗しました');
+    } finally {
+      setBackfillingCategories(false);
+    }
+  };
+
   const handleDelete = async (model: string) => {
     if (!confirm(`機種 ${model} を削除しますか？`)) return;
     try {
@@ -240,6 +266,14 @@ export default function HeaterModelsPage() {
             機種マスタ
           </h1>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleBackfillCategories}
+              disabled={backfillingCategories}
+              className="px-4 py-2 bg-amber-700 hover:bg-amber-600 disabled:bg-slate-600 text-white font-medium rounded-lg transition border border-amber-500"
+            >
+              {backfillingCategories ? '補完中…' : 'カテゴリ未設定を自動補完'}
+            </button>
             <Link href="/heater/model-orders">
               <button className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-medium rounded-lg transition border border-cyan-500">
                 機種別制作指令

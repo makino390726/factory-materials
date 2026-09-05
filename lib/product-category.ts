@@ -33,12 +33,22 @@ export function isHeaterProductCategory(value: unknown): boolean {
 
 /** 機種名・コードからカテゴリを推定（既存データの初期分類用） */
 export function inferProductCategory(model: string, name?: string | null): ProductCategory {
-  const text = `${model} ${name || ''}`
-  if (/たばこ|タバコ|煙草|葉たばこ|葉タバコ/.test(text)) return 'たばこ乾燥機'
-  if (/食品乾燥|食品用乾燥|フードドライ|食品ドライ/.test(text)) return '食品乾燥機'
-  if (/光合成|促成装置|促進装置|CO2発生|炭酸ガス/.test(text)) return '光合成促進装置'
-  if (/作業器機|作業機器|作業機/.test(text)) return '作業器機'
-  if (/温風|暖房|ヒータ|ヒーター/.test(text)) return '暖房機'
+  const code = String(model || '').trim()
+  const text = `${code} ${name || ''}`
+
+  if (/たばこ|タバコ|煙草|葉たばこ|葉タバコ|CVD|バルク乾燥/.test(text)) return 'たばこ乾燥機'
+  if (/食品乾燥|食品用乾燥|フードドライ|食品ドライ|干し?芋|^SP-?\d/i.test(text)) return '食品乾燥機'
+  if (/光合成|促成装置|促進装置|CO2発生|炭酸ガス|^SGR/i.test(text)) return '光合成促進装置'
+  if (/作業器機|作業機器|作業機|サンローダ|移植機|土寄|散布/.test(text)) return '作業器機'
+  // 暖房機: 200L-DF / SK-400L-UF / 500LT など
+  if (
+    /温風|暖房|ヒータ|ヒーター/.test(text) ||
+    /\d+L(-DF|-UF)?$/i.test(code) ||
+    /^SK-?\d+L/i.test(code) ||
+    /\d+LT(-DF)?$/i.test(code)
+  ) {
+    return '暖房機'
+  }
   if (/乾燥機|ドライヤ|ドライヤー/.test(text)) return 'その他'
   return DEFAULT_PRODUCT_CATEGORY
 }

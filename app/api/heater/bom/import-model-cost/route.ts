@@ -301,17 +301,36 @@ export async function POST(req: Request) {
     let costItemsImported = 0
     const rowErrors = [...errors, ...groupSeedErrors]
 
-    // 機種マスタへ不足分を追加（ドロップダウン表示用）
+    // 機種マスタへ不足分を追加（ドロップダウン表示用）。カテゴリも推定して登録／補完する
     for (const model of models) {
+      const inferredCategory = inferProductCategory(model, model)
       const { data: existingModel } = await supabase
         .from('heater_models')
-        .select('model')
+        .select('model, name, product_category')
         .eq('model', model)
         .maybeSingle()
       if (!existingModel) {
-        const { error } = await supabase.from('heater_models').insert([{ model, name: model }])
+        const { error } = await supabase.from('heater_models').insert([
+          {
+            model,
+            name: model,
+            product_category: inferredCategory,
+          },
+        ])
         if (error && !String(error.message || '').includes('duplicate')) {
           rowErrors.push(`機種マスタ登録失敗 ${model}: ${error.message}`)
+        }
+        continue
+      }
+
+      const currentCategory = String(existingModel.product_category || '').trim()
+      if (!currentCategory) {
+        const { error } = await supabase
+          .from('heater_models')
+          .update({ product_category: inferredCategory })
+          .eq('model', model)
+        if (error && !String(error.message || '').includes('product_category')) {
+          rowErrors.push(`機種カテゴリ補完失敗 ${model}: ${error.message}`)
         }
       }
     }
