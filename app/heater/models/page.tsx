@@ -234,12 +234,30 @@ export default function HeaterModelsPage() {
   };
 
   const handleDelete = async (model: string) => {
-    if (!confirm(`機種 ${model} を削除しますか？`)) return;
+    if (
+      !confirm(
+        `機種「${model}」を削除しますか？\n\n` +
+          `削除されるもの:\n` +
+          `・機種マスタ\n` +
+          `・この機種のBOM・グループ\n` +
+          `・この機種専用パーツの原価明細・パーツマスタ\n\n` +
+          `残るもの:\n` +
+          `・他機種と共用のパーツ／原価`
+      )
+    ) {
+      return;
+    }
     try {
       const res = await fetch(`/api/heater/models?model=${encodeURIComponent(model)}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Failed to delete model');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '機種の削除に失敗しました');
+      const msg =
+        `削除完了: ${model}\n` +
+        `BOM部品 ${data.bom_parts ?? 0} / 専用パーツ削除 ${data.parts_deleted ?? 0} / ` +
+        `共用パーツ保持 ${data.shared_parts_kept ?? 0} / 原価明細 ${data.cost_items_deleted ?? 0}`;
+      alert(msg);
       await fetchModels();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -537,8 +555,9 @@ export default function HeaterModelsPage() {
                         <button
                           onClick={() => handleDelete(model.model)}
                           className="rounded border border-rose-500/40 bg-rose-950/50 px-3 py-1 text-xs font-medium text-rose-100 transition-colors hover:bg-rose-900/60"
+                          title="機種・BOM・専用パーツ原価を削除（共用パーツは残す）"
                         >
-                          削除
+                          一括削除
                         </button>
                       </td>
                     </tr>
