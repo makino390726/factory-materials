@@ -75,7 +75,7 @@ export default function PartsListPage() {
   };
 
   const handleRecalculate = async () => {
-    if (!confirm('全パーツの原価（合計）を材料費+間接費で再計算しますか？')) {
+    if (!confirm('全パーツの原価を再計算しますか？\n（明細合計→ヘッダ→パーツマスタ。工賃の不正表示も合わせて修正します）')) {
       return;
     }
     
@@ -94,7 +94,13 @@ export default function PartsListPage() {
       
       const result = await res.json();
       
-      let message = `原価再計算が完了しました。\n対象: ${result.totalParts}件\n更新: ${result.updatedCount}件`;
+      let message = `原価再計算が完了しました。\n対象: ${result.totalParts}件\nパーツ更新: ${result.updatedCount}件`;
+      if (result.lineTotalUpdated != null) {
+        message += `\n明細合計更新: ${result.lineTotalUpdated}件`;
+      }
+      if (result.headersUpdated != null) {
+        message += `\nヘッダ更新: ${result.headersUpdated}件`;
+      }
       
       if (result.skippedCount && result.skippedCount > 0) {
         message += `\n保持: ${result.skippedCount}件（L指令原価データなし）`;

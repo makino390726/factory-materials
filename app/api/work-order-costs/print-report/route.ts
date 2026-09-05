@@ -52,17 +52,20 @@ async function buildModelCostList() {
   >()
 
   if (partKeys.length > 0) {
-    const { data: partsData, error: partsError } = await supabase
-      .from('heater_parts_master')
-      .select('part_key, cost_price, material_cost_total, indirect_cost_total')
-      .in('part_key', partKeys)
-    if (partsError) throw partsError
-    for (const p of partsData || []) {
-      partsFallbackMap.set(String(p.part_key), {
-        cost_price: p.cost_price ?? null,
-        material_cost_total: p.material_cost_total ?? null,
-        indirect_cost_total: p.indirect_cost_total ?? null,
-      })
+    for (let i = 0; i < partKeys.length; i += 150) {
+      const chunk = partKeys.slice(i, i + 150)
+      const { data: partsData, error: partsError } = await supabase
+        .from('heater_parts_master')
+        .select('part_key, cost_price, material_cost_total, indirect_cost_total')
+        .in('part_key', chunk)
+      if (partsError) throw partsError
+      for (const p of partsData || []) {
+        partsFallbackMap.set(String(p.part_key), {
+          cost_price: p.cost_price ?? null,
+          material_cost_total: p.material_cost_total ?? null,
+          indirect_cost_total: p.indirect_cost_total ?? null,
+        })
+      }
     }
   }
 

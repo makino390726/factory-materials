@@ -36,6 +36,27 @@ function emptyUnit(): PartCostUnit {
   return { material_unit: 0, labor_unit: 0, indirect_unit: 0, total_unit: 0 }
 }
 
+const IN_QUERY_CHUNK = 150
+
+function chunkArray<T>(values: T[], size: number): T[][] {
+  if (values.length === 0) return []
+  const chunks: T[][] = []
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size))
+  }
+  return chunks
+}
+
+/** ヘッダ合計と明細合計が同じなら二重計上しない。片方だけある／差がある場合は合算 */
+function combineHeaderAndItemTotal(headerValue: number, itemValue: number): number {
+  const header = Math.max(0, Number(headerValue) || 0)
+  const item = Math.max(0, Number(itemValue) || 0)
+  if (item <= 0) return header
+  if (header <= 0) return item
+  if (Math.abs(header - item) < 1) return item
+  return header + item
+}
+
 function buildUnitFromHeaderAndItems(
   header: CostHeaderRow,
   items: CostItemRow[]
@@ -43,15 +64,32 @@ function buildUnitFromHeaderAndItems(
   const itemLabor = items.reduce((sum, row) => sum + Number(row.labor_cost || 0), 0)
   const itemIndirect = items.reduce((sum, row) => sum + Number(row.indirect_cost || 0), 0)
   const itemMaterial = items.reduce((sum, row) => sum + Number(row.material_cost || 0), 0)
+  const itemLineTotal = items.reduce((sum, row) => sum + Number(row.line_total || 0), 0)
 
-  const materialUnit = Number(header.total_material_cost ?? itemMaterial)
-  const laborUnit = Number(header.total_labor_cost || 0) + itemLabor
-  const indirectUnit = Number(header.total_indirect_cost || 0) + itemIndirect
-  const totalUnit = Number(
-    header.total_cost || materialUnit + laborUnit + indirectUnit
+  const materialUnit = combineHeaderAndItemTotal(
+    Number(header.total_material_cost || 0),
+    itemMaterial
+  )
+  const laborUnit = combineHeaderAndItemTotal(Number(header.total_labor_cost || 0), itemLabor)
+  const indirectUnit = combineHeaderAndItemTotal(
+    Number(header.total_indirect_cost || 0),
+    itemIndirect
   )
 
-  return { material_unit: materialUnit, labor_unit: laborUnit, indirect_unit: indirectUnit, total_unit: totalUnit }
+  const fromParts = materialUnit + laborUnit + indirectUnit
+  const headerTotal = Number(header.total_cost || 0)
+  // ヘッダ合計が部品合計と一致／近い場合はヘッダを採用。大きく乖離する古いヘッダは部品側を優先
+  const totalUnit =
+    headerTotal > 0 && (fromParts <= 0 || Math.abs(headerTotal - fromParts) < 1)
+      ? headerTotal
+      : fromParts || headerTotal || itemLineTotal
+
+  return {
+    material_unit: materialUnit,
+    labor_unit: laborUnit,
+    indirect_unit: indirectUnit,
+    total_unit: totalUnit,
+  }
 }
 
 function buildUnitFromItemsOnly(items: CostItemRow[]): PartCostUnit {
@@ -72,12 +110,20 @@ function buildUnitFromPartsMaster(part: PartsMasterFallback): PartCostUnit {
   const costPrice = Number(part.cost_price || 0)
   const materialUnit = Number(part.material_cost_total || 0)
   const indirectUnit = Number(part.indirect_cost_total || 0)
-  const laborUnit = Math.max(0, costPrice - materialUnit - indirectUnit)
-
+  // 残差を工賃に回さない（L指令未取得時に工賃が膨れる主因だった）
+  if (materialUnit > 0 || indirectUnit > 0) {
+    const known = materialUnit + indirectUnit
+    return {
+      material_unit: materialUnit,
+      labor_unit: 0,
+      indirect_unit: indirectUnit,
+      total_unit: costPrice > 0 ? costPrice : known,
+    }
+  }
   return {
-    material_unit: materialUnit || (laborUnit === 0 && indirectUnit === 0 ? costPrice : 0),
-    labor_unit: laborUnit,
-    indirect_unit: indirectUnit,
+    material_unit: costPrice,
+    labor_unit: 0,
+    indirect_unit: 0,
     total_unit: costPrice,
   }
 }
@@ -227,37 +273,39 @@ export async function buildMasterCostUnitMap(
   if (uniqueSpecs.size === 0) return result
 
   const masterIds = [...new Set([...uniqueSpecs.values()].map((spec) => spec.master_id))]
-  const { data: items, error: itemsError } = await supabase
-    .from('work_order_cost_items')
-    .select(
-      'master_id, master_type, material_cost, labor_cost, indirect_cost, line_total, work_order_cost_id'
-    )
-    .in('master_id', masterIds)
-    .in('master_type', ['指令原価', 'ライン原価'])
-
-  if (itemsError) throw itemsError
-
   type ExtendedCostItemRow = CostItemRow & { master_type: string }
   const itemsByMaster = new Map<string, ExtendedCostItemRow[]>()
   const headerIds = new Set<string>()
 
-  for (const row of (items || []) as ExtendedCostItemRow[]) {
-    const key = masterCostMapKey(String(row.master_id || ''), String(row.master_type || ''))
-    if (!uniqueSpecs.has(key)) continue
-    const list = itemsByMaster.get(key) || []
-    list.push(row)
-    itemsByMaster.set(key, list)
-    if (row.work_order_cost_id) headerIds.add(row.work_order_cost_id)
+  for (const idChunk of chunkArray(masterIds, IN_QUERY_CHUNK)) {
+    const { data: items, error: itemsError } = await supabase
+      .from('work_order_cost_items')
+      .select(
+        'master_id, master_type, material_cost, labor_cost, indirect_cost, line_total, work_order_cost_id'
+      )
+      .in('master_id', idChunk)
+      .in('master_type', ['指令原価', 'ライン原価'])
+
+    if (itemsError) throw itemsError
+
+    for (const row of (items || []) as ExtendedCostItemRow[]) {
+      const key = masterCostMapKey(String(row.master_id || ''), String(row.master_type || ''))
+      if (!uniqueSpecs.has(key)) continue
+      const list = itemsByMaster.get(key) || []
+      list.push(row)
+      itemsByMaster.set(key, list)
+      if (row.work_order_cost_id) headerIds.add(row.work_order_cost_id)
+    }
   }
 
   const headersById = new Map<string, CostHeaderRow>()
-  if (headerIds.size > 0) {
+  for (const idChunk of chunkArray([...headerIds], IN_QUERY_CHUNK)) {
     const { data: headers, error: headerError } = await supabase
       .from('work_order_costs')
       .select(
         'id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
       )
-      .in('id', [...headerIds])
+      .in('id', idChunk)
 
     if (headerError) throw headerError
 
@@ -308,36 +356,38 @@ export async function buildLinePartCostUnitMap(
   const uniqueKeys = [...new Set(partKeys.map((key) => key.trim()).filter(Boolean))]
   if (uniqueKeys.length === 0) return result
 
-  const { data: items, error: itemsError } = await supabase
-    .from('work_order_cost_items')
-    .select(
-      'master_id, material_cost, labor_cost, indirect_cost, line_total, work_order_cost_id'
-    )
-    .eq('master_type', 'ライン原価')
-    .in('master_id', uniqueKeys)
-
-  if (itemsError) throw itemsError
-
   const itemsByPart = new Map<string, CostItemRow[]>()
   const headerIds = new Set<string>()
 
-  for (const row of (items || []) as CostItemRow[]) {
-    const key = String(row.master_id || '').trim()
-    if (!key) continue
-    const list = itemsByPart.get(key) || []
-    list.push(row)
-    itemsByPart.set(key, list)
-    if (row.work_order_cost_id) headerIds.add(row.work_order_cost_id)
+  for (const keyChunk of chunkArray(uniqueKeys, IN_QUERY_CHUNK)) {
+    const { data: items, error: itemsError } = await supabase
+      .from('work_order_cost_items')
+      .select(
+        'master_id, material_cost, labor_cost, indirect_cost, line_total, work_order_cost_id'
+      )
+      .eq('master_type', 'ライン原価')
+      .in('master_id', keyChunk)
+
+    if (itemsError) throw itemsError
+
+    for (const row of (items || []) as CostItemRow[]) {
+      const key = String(row.master_id || '').trim()
+      if (!key) continue
+      const list = itemsByPart.get(key) || []
+      list.push(row)
+      itemsByPart.set(key, list)
+      if (row.work_order_cost_id) headerIds.add(row.work_order_cost_id)
+    }
   }
 
   const headersById = new Map<string, CostHeaderRow>()
-  if (headerIds.size > 0) {
+  for (const idChunk of chunkArray([...headerIds], IN_QUERY_CHUNK)) {
     const { data: headers, error: headerError } = await supabase
       .from('work_order_costs')
       .select(
         'id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
       )
-      .in('id', [...headerIds])
+      .in('id', idChunk)
 
     if (headerError) throw headerError
 
