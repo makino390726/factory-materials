@@ -7,7 +7,7 @@ type AuthGuardProps = {
   children: React.ReactNode
 }
 
-const PUBLIC_PATHS = new Set(['/login', '/work-orders/cost', '/manufacturing-plan-allocation'])
+const PUBLIC_PATHS = new Set(['/login', '/work-orders/cost', '/manufacturing-plan-allocation', '/heater/drawing-cost'])
 
 export default function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter()

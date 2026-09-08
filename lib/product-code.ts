@@ -2,10 +2,16 @@
 export function canonicalizeProductCode(code: string): string {
   const trimmed = String(code || '').trim()
   if (!trimmed) return ''
-  if (/^\d+$/.test(trimmed) && trimmed.startsWith('00') && trimmed.length > 2) {
+  if (hasExcludedLeading00(trimmed)) {
     return trimmed.slice(2)
   }
   return trimmed
+}
+
+/** 先頭00の数値コードは照合対象外（0084004300 など） */
+export function hasExcludedLeading00(code: string): boolean {
+  const trimmed = String(code || '').trim()
+  return /^\d+$/.test(trimmed) && trimmed.startsWith('00') && trimmed.length > 2
 }
 
 /** Excel 等から読み込んだ商品コードを文字列に正規化 */

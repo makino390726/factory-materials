@@ -397,6 +397,20 @@ export default function Home() {
                 </div>
               </div>
             </Link>
+
+            {/* 図面原価（展開算出） */}
+            <Link href="/heater/drawing-cost">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 to-orange-900/20 rounded-2xl border-2 border-amber-300 group-hover:border-amber-200 group-hover:shadow-[0_0_20px_rgba(252,211,77,0.5)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-1">
+                  <div className="text-4xl">📐</div>
+                  <h3 className="text-base font-bold text-amber-200 group-hover:text-amber-100 transition">
+                    図面原価
+                  </h3>
+                  <p className="text-[10px] text-amber-100/70">展開数量・材質照合</p>
+                </div>
+              </div>
+            </Link>
           </div>
         </div>
 

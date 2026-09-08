@@ -21,21 +21,29 @@ export async function GET(req: Request) {
 
     const trimmed = query.trim()
     console.debug('products.search called', { query: trimmed })
-    // Allow single-character alphanumeric queries for product_code searches,
-    // otherwise require at least 2 characters for name searches.
     const isCodeLike = /^[A-Za-z0-9]+$/.test(trimmed)
     if (trimmed.length < 2 && !isCodeLike) {
       return NextResponse.json([])
     }
 
-    const searchTerm = `%${trimmed}%`
+    const safe = trimmed.replace(/[%_,()]/g, ' ').replace(/\s+/g, ' ').trim()
+    const tokens = safe.split(' ').filter((t) => t.length >= 1).slice(0, 6)
+    const orNameCode = tokens
+      .flatMap((t) => [`name.ilike.%${t}%`, `product_code.ilike.%${t}%`])
+      .join(',')
+    const orWithSpec = tokens
+      .flatMap((t) => [`name.ilike.%${t}%`, `spec.ilike.%${t}%`, `product_code.ilike.%${t}%`])
+      .join(',')
 
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, product_code, name, cost_price')
-      .or(`name.ilike.${searchTerm},product_code.ilike.${searchTerm}`)
-      .limit(20)
-      .order('name', { ascending: true })
+    const trySelect = async (select: string, filter: string) =>
+      supabase.from('products').select(select).or(filter).limit(60).order('name', { ascending: true })
+
+    let { data, error } = await trySelect('id, product_code, name, spec, cost_price', orWithSpec)
+    if (error) {
+      const fallback = await trySelect('id, product_code, name, cost_price', orNameCode)
+      data = (fallback.data || []).map((r) => ({ ...r, spec: null }))
+      error = fallback.error
+    }
 
     if (error) {
       console.error('検索エラー:', error)

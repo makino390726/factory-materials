@@ -192,6 +192,19 @@ export default function MastersImportPage() {
 
         <Ec2PdfBomImportSection />
         <Ec30BomImportSection />
+        <section className="w-full max-w-6xl mt-10 rounded-2xl border border-amber-500/30 bg-slate-900/70 p-6 text-slate-100">
+          <h2 className="text-2xl font-bold text-amber-300 mb-2">EC25 図番管理表＋全図面 → 展開原価</h2>
+          <p className="text-sm text-slate-400 mb-4">
+            表紙の品名＝機種名、型式＝型式。図面番号をパーツキー、部品名をパーツ名とし、材質を製品マスタ（品名・規格・単価）と照合。
+            板金は図面から展開数量を算出します。
+          </p>
+          <Link
+            href="/heater/drawing-cost"
+            className="inline-flex px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 font-semibold"
+          >
+            図面原価画面を開く
+          </Link>
+        </section>
         <div className="w-full max-w-4xl mt-6">
           <ShinseiWorkReportImportSection />
         </div>
