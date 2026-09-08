@@ -38,7 +38,7 @@ async function fetchAllProducts(): Promise<ProductCostRow[]> {
         .order('product_code', { ascending: true })
         .range(from, from + PAGE - 1)
       if (error) return { rows: [] as ProductCostRow[], error }
-      const rows = (data || []) as ProductCostRow[]
+      const rows = ((data ?? []) as unknown as ProductCostRow[])
       all.push(...rows)
       if (rows.length < PAGE) break
       from += PAGE
@@ -505,7 +505,7 @@ export async function POST(req: Request) {
 
       if (coverJson) {
         try {
-          coverFromForm = JSON.parse(coverJson) as typeof coverFromForm
+          coverFromForm = JSON.parse(coverJson) as Partial<Ec25CoverMeta>
         } catch {
           return NextResponse.json({ error: 'cover_json が不正です' }, { status: 400 })
         }
@@ -573,7 +573,7 @@ export async function POST(req: Request) {
       apply = !!body.apply
       if (body.work_order) workOrder = body.work_order as Ec25WorkOrderDraft
       if (body.cover) {
-        coverFromForm = body.cover as typeof coverFromForm
+        coverFromForm = body.cover as Partial<Ec25CoverMeta>
       }
       if (Array.isArray(body.rows)) rowsOverride = body.rows as Ec25AnalyzeRow[]
       if (Array.isArray(body.parts)) partsOverride = body.parts as Ec25ParsedPart[]

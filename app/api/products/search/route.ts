@@ -38,11 +38,22 @@ export async function GET(req: Request) {
     const trySelect = async (select: string, filter: string) =>
       supabase.from('products').select(select).or(filter).limit(60).order('name', { ascending: true })
 
-    let { data, error } = await trySelect('id, product_code, name, spec, cost_price', orWithSpec)
-    if (error) {
+    type ProductHit = {
+      id?: string
+      product_code?: string
+      name?: string
+      spec?: string | null
+      cost_price?: number | null
+    }
+    const first = await trySelect('id, product_code, name, spec, cost_price', orWithSpec)
+    let data: ProductHit[] = []
+    let error = first.error
+    if (!error) {
+      data = (first.data ?? []) as unknown as ProductHit[]
+    } else {
       const fallback = await trySelect('id, product_code, name, cost_price', orNameCode)
-      data = (fallback.data || []).map((r) => ({ ...r, spec: null }))
       error = fallback.error
+      data = ((fallback.data ?? []) as unknown as ProductHit[]).map((r) => ({ ...r, spec: null }))
     }
 
     if (error) {

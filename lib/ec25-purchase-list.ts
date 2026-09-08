@@ -335,29 +335,28 @@ export function partsFromPurchaseOcr(index: DorderIndexPayload): Ec25ParsedPart[
 export function dorderExtractFromUnknown(raw: unknown): DorderAiExtract {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const partsRaw = Array.isArray(obj.parts) ? obj.parts : []
-  const parts: DorderAiPart[] = partsRaw
-    .map((row) => {
-      if (!row || typeof row !== 'object') return null
-      const r = row as Record<string, unknown>
-      const name = cellText(r.part_name || r.category)
-      if (!name) return null
-      const source =
-        r.source === 'drawing' ? 'drawing' : r.source === 'quote' ? 'quote' : r.source === 'detail' ? 'detail' : 'purchased'
-      return {
-        part_key: cellText(r.part_key),
-        part_name: name,
-        material: cellText(r.material),
-        qty: Number(r.qty) || 1,
-        unit: cellText(r.unit) || '個',
-        unit_price: parsePrice(r.unit_price),
-        supplier: cellText(r.supplier),
-        category: cellText(r.category),
-        note: cellText(r.note),
-        source,
-        page: Number(r.page) || undefined,
-      } satisfies DorderAiPart
+  const parts: DorderAiPart[] = []
+  for (const row of partsRaw) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as Record<string, unknown>
+    const name = cellText(r.part_name || r.category)
+    if (!name) continue
+    const source =
+      r.source === 'drawing' ? 'drawing' : r.source === 'quote' ? 'quote' : r.source === 'detail' ? 'detail' : 'purchased'
+    parts.push({
+      part_key: cellText(r.part_key),
+      part_name: name,
+      material: cellText(r.material),
+      qty: Number(r.qty) || 1,
+      unit: cellText(r.unit) || '個',
+      unit_price: parsePrice(r.unit_price),
+      supplier: cellText(r.supplier),
+      category: cellText(r.category),
+      note: cellText(r.note),
+      source,
+      page: Number(r.page) || undefined,
     })
-    .filter((x): x is DorderAiPart => Boolean(x))
+  }
   return {
     order_no: cellText(obj.order_no),
     product_name: cellText(obj.product_name),
