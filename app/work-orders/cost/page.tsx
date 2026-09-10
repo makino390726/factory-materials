@@ -171,10 +171,37 @@ export default function WorkOrderCostPage() {
   const [modelBomGrandTotal, setModelBomGrandTotal] = useState(0)
   const [realtimeCostActive, setRealtimeCostActive] = useState(false)
   const [realtimeCostLoading, setRealtimeCostLoading] = useState(false)
+  const [realtimeCostCandidates, setRealtimeCostCandidates] = useState<
+    Array<{
+      id: string
+      target_type: string
+      target_code: string
+      target_name: string
+      fiscal_year_label: string
+      st_minutes: number
+      labor_cost: number
+      indirect_cost: number
+      annual_completed_qty: number
+      formula: string
+      relation: string
+      relation_label: string
+      applied_label: string
+      note: string | null
+      work_groups: Array<{ work_group_code: string; work_group_name: string; avg_st_minutes: number }>
+    }>
+  >([])
+  const [selectedRealtimeCostId, setSelectedRealtimeCostId] = useState<string | null>(null)
+  const [realtimeCostSaving, setRealtimeCostSaving] = useState(false)
+  const [realtimeCostPersisted, setRealtimeCostPersisted] = useState(false)
   const [realtimeCostInfo, setRealtimeCostInfo] = useState<{
     st_minutes: number
     labor_cost: number
+    indirect_cost: number
     formula: string
+    fiscal_year_label: string | null
+    note: string | null
+    applied_label: string | null
+    work_groups: Array<{ work_group_code: string; work_group_name: string; avg_st_minutes: number }>
     sources: Array<{ target_type: string; target_code: string; minutes: number; note: string | null }>
   } | null>(null)
   const [showNewBomPartForm, setShowNewBomPartForm] = useState(false)
@@ -297,12 +324,18 @@ export default function WorkOrderCostPage() {
       setModelBomGrandTotal(0)
       setRealtimeCostActive(false)
       setRealtimeCostInfo(null)
+      setRealtimeCostCandidates([])
+      setSelectedRealtimeCostId(null)
+      setRealtimeCostPersisted(false)
       return
     }
     setPartsCostLoading(true)
     setPartsCostError(null)
     setRealtimeCostActive(false)
     setRealtimeCostInfo(null)
+    setRealtimeCostCandidates([])
+    setSelectedRealtimeCostId(null)
+    setRealtimeCostPersisted(false)
     try {
       await loadModelBomGroupDefs(modelCode)
       const res = await fetch(
@@ -331,6 +364,17 @@ export default function WorkOrderCostPage() {
       }
       setModelBomGrandTotal(Number(json.grand_total || 0))
       setShowNewBomPartForm(sections.length === 0)
+      try {
+        const savedRes = await fetch(
+          `/api/heater/models/realtime-cost?model=${encodeURIComponent(modelCode)}&saved=1`
+        )
+        const savedJson = await savedRes.json()
+        if (savedRes.ok && savedJson?.saved) {
+          applySavedRealtimeCost(savedJson.saved)
+        }
+      } catch {
+        // 帳票用の保存値がなくても BOM 表示は継続
+      }
     } catch (e) {
       setPartsCostError(e instanceof Error ? e.message : '機種パーツ一覧の取得に失敗しました')
       setModelBomParts([])
@@ -357,16 +401,103 @@ export default function WorkOrderCostPage() {
     )
   }
 
-  const handleApplyRealtimeCost = async () => {
+  const applySavedRealtimeCost = (saved: {
+    st_minutes?: number
+    labor_cost?: number
+    indirect_cost?: number
+    formula?: string | null
+    fiscal_year_label?: string | null
+    note?: string | null
+    applied_label?: string | null
+    target_type?: string | null
+    target_code?: string | null
+  }) => {
+    setRealtimeCostInfo({
+      st_minutes: Number(saved.st_minutes || 0),
+      labor_cost: Number(saved.labor_cost || 0),
+      indirect_cost: Number(saved.indirect_cost || 0),
+      formula: String(saved.formula || ''),
+      fiscal_year_label: saved.fiscal_year_label || null,
+      note: saved.note || null,
+      applied_label: saved.applied_label || null,
+      work_groups: [],
+      sources: [
+        {
+          target_type: String(saved.target_type || ''),
+          target_code: String(saved.target_code || ''),
+          minutes: Number(saved.st_minutes || 0),
+          note: saved.note || null,
+        },
+      ],
+    })
+    setRealtimeCostActive(true)
+    setRealtimeCostPersisted(true)
+  }
+
+  const applyRealtimeCostCandidate = async (candidate: (typeof realtimeCostCandidates)[number]) => {
     if (!selectedHeaterModel) {
       setPartsCostError('機種を選択してください')
       return
     }
-    const laborRows = modelBomParts.filter(isLaborFeePartRow)
-    if (laborRows.length === 0) {
+    setSelectedRealtimeCostId(candidate.id)
+    setRealtimeCostInfo({
+      st_minutes: Number(candidate.st_minutes || 0),
+      labor_cost: Number(candidate.labor_cost || 0),
+      indirect_cost: Number(candidate.indirect_cost || 0),
+      formula: String(candidate.formula || ''),
+      fiscal_year_label: candidate.fiscal_year_label || null,
+      note: candidate.note,
+      applied_label: candidate.applied_label || null,
+      work_groups: Array.isArray(candidate.work_groups) ? candidate.work_groups : [],
+      sources: [
+        {
+          target_type: candidate.target_type,
+          target_code: candidate.target_code,
+          minutes: Number(candidate.st_minutes || 0),
+          note: candidate.note,
+        },
+      ],
+    })
+    setRealtimeCostActive(true)
+    setRealtimeCostSaving(true)
+    setPartsCostError(null)
+    try {
+      const res = await fetch('/api/heater/models/realtime-cost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedHeaterModel,
+          st_minutes: candidate.st_minutes,
+          labor_cost: candidate.labor_cost,
+          indirect_cost: candidate.indirect_cost,
+          applied_label: candidate.applied_label,
+          formula: candidate.formula,
+          fiscal_year_label: candidate.fiscal_year_label,
+          target_type: candidate.target_type,
+          target_code: candidate.target_code,
+          note: candidate.note,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'リアルタイム原価の保存に失敗しました')
+      }
+      setRealtimeCostPersisted(true)
+    } catch (e) {
+      setRealtimeCostPersisted(false)
       setPartsCostError(
-        '機種パーツ一覧に「工費」「工賃」の名称／コードの行がありません。表示差し替えのみのため、行の追加や保存は行いません。'
+        e instanceof Error
+          ? `${e.message}（画面には反映していますが、原価帳票にはまだ保存されていません）`
+          : 'リアルタイム原価の保存に失敗しました'
       )
+    } finally {
+      setRealtimeCostSaving(false)
+    }
+  }
+
+  const handleApplyRealtimeCost = async () => {
+    if (!selectedHeaterModel) {
+      setPartsCostError('機種を選択してください')
       return
     }
 
@@ -378,19 +509,33 @@ export default function WorkOrderCostPage() {
       )
       const json = await res.json()
       if (!res.ok || json.error) {
-        throw new Error(json.error || 'リアルタイム原価の算出に失敗しました')
+        throw new Error(json.error || '平均STがある工程の取得に失敗しました')
       }
-      setRealtimeCostInfo({
-        st_minutes: Number(json.st_minutes || 0),
-        labor_cost: Number(json.labor_cost || 0),
-        formula: String(json.formula || ''),
-        sources: Array.isArray(json.sources) ? json.sources : [],
-      })
-      setRealtimeCostActive(true)
+      const candidates = Array.isArray(json.candidates) ? json.candidates : []
+      setRealtimeCostCandidates(candidates)
+      if (json.saved) {
+        applySavedRealtimeCost(json.saved)
+        const match = candidates.find(
+          (c) =>
+            c.target_type === json.saved.target_type &&
+            c.target_code === json.saved.target_code &&
+            Number(c.st_minutes || 0) === Number(json.saved.st_minutes || 0)
+        )
+        setSelectedRealtimeCostId(match?.id || null)
+      } else {
+        setSelectedRealtimeCostId(null)
+        setRealtimeCostActive(false)
+        setRealtimeCostInfo(null)
+        setRealtimeCostPersisted(false)
+      }
+      if (candidates.length === 0 && !json.saved) {
+        throw new Error('平均STがある工程管理対象がありません')
+      }
     } catch (e) {
       setRealtimeCostActive(false)
       setRealtimeCostInfo(null)
-      setPartsCostError(e instanceof Error ? e.message : 'リアルタイム原価の算出に失敗しました')
+      setRealtimeCostCandidates([])
+      setPartsCostError(e instanceof Error ? e.message : '平均STがある工程の取得に失敗しました')
     } finally {
       setRealtimeCostLoading(false)
     }
@@ -399,20 +544,27 @@ export default function WorkOrderCostPage() {
   const clearRealtimeCost = () => {
     setRealtimeCostActive(false)
     setRealtimeCostInfo(null)
+    setSelectedRealtimeCostId(null)
   }
 
   const displayModelBomParts = useMemo(() => {
     if (!realtimeCostActive || !realtimeCostInfo) return modelBomParts
     const labor = Number(realtimeCostInfo.labor_cost || 0)
+    const laborIndirect = Number(realtimeCostInfo.indirect_cost || 0)
+    const firstLaborKey = modelBomParts.find(isLaborFeePartRow)?.part_key
+    if (!firstLaborKey) return modelBomParts
     return modelBomParts.map((row) => {
       if (!isLaborFeePartRow(row)) return row
       const material = Number(row.material_cost || 0)
-      const indirect = Number(row.indirect_cost || 0)
-      const subtotal = material + labor + indirect
+      const isPrimary = row.part_key === firstLaborKey
+      const nextLabor = isPrimary ? labor : 0
+      const nextIndirect = isPrimary ? laborIndirect : 0
+      const subtotal = material + nextLabor + nextIndirect
       const qty = Number(row.bom_quantity || 0)
       return {
         ...row,
-        labor_cost: labor,
+        labor_cost: nextLabor,
+        indirect_cost: nextIndirect,
         subtotal,
         unit_cost: qty > 0 ? subtotal / qty : subtotal,
       }
@@ -421,8 +573,14 @@ export default function WorkOrderCostPage() {
 
   const displayModelBomGrandTotal = useMemo(() => {
     if (!realtimeCostActive || !realtimeCostInfo) return modelBomGrandTotal
-    return displayModelBomParts.reduce((sum, row) => sum + Number(row.subtotal || 0), 0)
-  }, [displayModelBomParts, modelBomGrandTotal, realtimeCostActive, realtimeCostInfo])
+    const labor = Number(realtimeCostInfo.labor_cost || 0)
+    const laborIndirect = Number(realtimeCostInfo.indirect_cost || 0)
+    const hasLaborRow = modelBomParts.some(isLaborFeePartRow)
+    if (hasLaborRow) {
+      return displayModelBomParts.reduce((sum, row) => sum + Number(row.subtotal || 0), 0)
+    }
+    return Number(modelBomGrandTotal || 0) + labor + laborIndirect
+  }, [displayModelBomParts, modelBomGrandTotal, modelBomParts, realtimeCostActive, realtimeCostInfo])
 
   const uncategorizedPartCount = useMemo(
     () => displayModelBomParts.filter((row) => row.part_group === UNCATEGORIZED_BOM_GROUP).length,
@@ -2671,11 +2829,12 @@ export default function WorkOrderCostPage() {
                 {selectedHeaterModel && (
                   <button
                     type="button"
-                    disabled={realtimeCostLoading || partsCostLoading || modelBomParts.length === 0}
+                    disabled={realtimeCostLoading || partsCostLoading}
                     onClick={() => void handleApplyRealtimeCost()}
                     className="rounded-xl bg-amber-600 px-5 py-3 text-sm font-bold text-white hover:bg-amber-500 disabled:opacity-50"
+                    title="工程管理表で平均STがある対象を一覧し、選んだ1件を機種工費に適用します"
                   >
-                    {realtimeCostLoading ? '算出中…' : 'リアルタイム原価'}
+                    {realtimeCostLoading ? '平均STを検索中…' : 'リアルタイム原価'}
                   </button>
                 )}
                 {realtimeCostActive && (
@@ -2683,32 +2842,124 @@ export default function WorkOrderCostPage() {
                     type="button"
                     onClick={clearRealtimeCost}
                     className="rounded-xl border border-slate-500 bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-200 hover:border-slate-400"
+                    title="この画面の表示だけ現行BOMに戻します。原価帳票への適用は残ります"
                   >
                     元の原価表示に戻す
                   </button>
                 )}
               </div>
 
-              {realtimeCostActive && realtimeCostInfo && (
-                <div className="rounded-2xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
-                  <p className="font-bold text-amber-200">リアルタイム原価（表示のみ・未保存）</p>
-                  <p className="mt-1 text-xs text-amber-100/90">
-                    適用ST {realtimeCostInfo.st_minutes.toLocaleString('ja-JP')} 分 → 工費 ¥
-                    {realtimeCostInfo.labor_cost.toLocaleString('ja-JP')}
-                    {realtimeCostInfo.formula ? `（${realtimeCostInfo.formula}）` : ''}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    機種パーツ一覧の「工費／工賃」行のみ差し替えます。DBの原価は変更しません。正式反映はパーツの工費を編集して保存してください。
-                  </p>
-                  {realtimeCostInfo.sources.length > 0 && (
-                    <ul className="mt-2 space-y-0.5 text-xs text-amber-100/80">
-                      {realtimeCostInfo.sources.map((s, idx) => (
-                        <li key={`${s.target_type}-${s.target_code}-${idx}`}>
-                          {s.target_type === 'line' ? 'L' : 'D'}:{s.target_code} / {s.minutes}分
-                          {s.note ? `（${s.note}）` : ''}
-                        </li>
-                      ))}
-                    </ul>
+              {realtimeCostCandidates.length > 0 && (
+                <div className="rounded-2xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100 space-y-3">
+                  <div>
+                    <p className="font-bold text-amber-200">平均STがある工程から選択</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      機種・関連D指令・ロット実績がある対象のうち、年平均STがあるものだけを表示します。行の「適用」で機種工費に反映し、原価帳票の機種別一覧にも保存されます。
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-amber-500/20">
+                    <table className="min-w-full text-left text-xs">
+                      <thead className="bg-amber-950/60 text-amber-100/80">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">区分</th>
+                          <th className="px-3 py-2 font-semibold">対象</th>
+                          <th className="px-3 py-2 font-semibold">関係</th>
+                          <th className="px-3 py-2 font-semibold text-right">年度</th>
+                          <th className="px-3 py-2 font-semibold text-right">1台ST</th>
+                          <th className="px-3 py-2 font-semibold text-right">完成台数</th>
+                          <th className="px-3 py-2 font-semibold text-right">機種工費</th>
+                          <th className="px-3 py-2 font-semibold text-right">間接費</th>
+                          <th className="px-3 py-2 font-semibold text-center">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {realtimeCostCandidates.map((candidate) => {
+                          const selected = selectedRealtimeCostId === candidate.id
+                          const typeLabel =
+                            candidate.target_type === 'model'
+                              ? '機種'
+                              : candidate.target_type === 'line'
+                                ? 'L指令'
+                                : 'D指令'
+                          return (
+                            <tr
+                              key={candidate.id}
+                              className={`border-t border-amber-500/10 ${
+                                selected ? 'bg-amber-900/40' : 'bg-slate-950/30'
+                              }`}
+                            >
+                              <td className="px-3 py-2 whitespace-nowrap">{typeLabel}</td>
+                              <td className="px-3 py-2">
+                                <p className="font-semibold text-amber-50">{candidate.target_code}</p>
+                                <p className="text-slate-400">{candidate.target_name}</p>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-amber-100/80">
+                                {candidate.relation_label}
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap">
+                                {candidate.fiscal_year_label}
+                              </td>
+                              <td className="px-3 py-2 text-right font-bold text-sky-200 whitespace-nowrap">
+                                {candidate.st_minutes.toLocaleString('ja-JP')}分
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap">
+                                {candidate.annual_completed_qty.toLocaleString('ja-JP')}
+                              </td>
+                              <td className="px-3 py-2 text-right font-bold text-amber-300 whitespace-nowrap">
+                                ¥{Math.round(candidate.labor_cost).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-2 text-right text-orange-200 whitespace-nowrap">
+                                ¥{Math.round(candidate.indirect_cost).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => void applyRealtimeCostCandidate(candidate)}
+                                  disabled={realtimeCostSaving}
+                                  className={`rounded-lg px-3 py-1 text-xs font-bold disabled:opacity-50 ${
+                                    selected
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'border border-amber-400/60 bg-amber-900/50 text-amber-100 hover:bg-amber-800/70'
+                                  }`}
+                                >
+                                  {selected
+                                    ? realtimeCostSaving
+                                      ? '保存中…'
+                                      : realtimeCostPersisted
+                                        ? '適用済'
+                                        : '適用中'
+                                    : '適用'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {realtimeCostActive && realtimeCostInfo && (
+                    <div className="rounded-xl border border-amber-400/30 bg-slate-950/40 px-3 py-2">
+                      <p className="font-bold text-amber-200">
+                        適用中：{realtimeCostInfo.applied_label || '工程管理表の年間平均'}
+                        {realtimeCostPersisted ? '（原価帳票に反映）' : ''}
+                      </p>
+                      <p className="mt-1 text-xs text-amber-100/90">
+                        {realtimeCostInfo.fiscal_year_label ? `${realtimeCostInfo.fiscal_year_label} ` : ''}
+                        1台当たり制作時間 {realtimeCostInfo.st_minutes.toLocaleString('ja-JP')} 分
+                        {realtimeCostInfo.formula ? ` → 工費 ${realtimeCostInfo.formula}` : ''}
+                        {' ／ 工費間接費 = 工費 × 30%'}
+                      </p>
+                      {realtimeCostInfo.work_groups.length > 0 && (
+                        <ul className="mt-1 space-y-0.5 text-xs text-amber-100/80">
+                          {realtimeCostInfo.work_groups.map((g) => (
+                            <li key={g.work_group_code}>
+                              {g.work_group_name || g.work_group_code}：
+                              {g.avg_st_minutes.toLocaleString('ja-JP')} 分/台
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -2794,7 +3045,7 @@ export default function WorkOrderCostPage() {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className={`grid grid-cols-2 gap-3 ${realtimeCostActive ? 'md:grid-cols-3 xl:grid-cols-6' : 'md:grid-cols-3'}`}>
                     <div className="rounded-2xl border border-slate-600 bg-slate-950/60 p-4">
                       <p className="text-xs text-slate-400">機種</p>
                       <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{selectedHeaterModel}</p>
@@ -2803,9 +3054,32 @@ export default function WorkOrderCostPage() {
                       <p className="text-xs text-slate-400">パーツ数</p>
                       <p className="mt-1 text-xl font-bold text-sky-300">{displayModelBomParts.length}</p>
                     </div>
+                    {realtimeCostActive && realtimeCostInfo && (
+                      <>
+                        <div className="rounded-2xl border border-sky-500/40 bg-sky-950/30 p-4">
+                          <p className="text-xs text-sky-200/80">1台当たり制作時間</p>
+                          <p className="mt-1 text-xl font-bold text-sky-200">
+                            {realtimeCostInfo.st_minutes.toLocaleString('ja-JP')}
+                            <span className="ml-1 text-sm font-semibold text-sky-300/80">分</span>
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-amber-500/50 bg-amber-950/40 p-4">
+                          <p className="text-xs text-amber-200/80">機種工費</p>
+                          <p className="mt-1 text-2xl font-extrabold text-amber-300">
+                            ¥{Math.round(realtimeCostInfo.labor_cost).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-orange-500/40 bg-orange-950/30 p-4">
+                          <p className="text-xs text-orange-200/80">工費間接費（30%）</p>
+                          <p className="mt-1 text-xl font-bold text-orange-200">
+                            ¥{Math.round(realtimeCostInfo.indirect_cost).toLocaleString()}
+                          </p>
+                        </div>
+                      </>
+                    )}
                     <div className="rounded-2xl border border-yellow-500/40 bg-yellow-950/30 p-4">
                       <p className="text-xs text-yellow-200/80">
-                        BOM合計（1台）{realtimeCostActive ? '・リアルタイム' : ''}
+                        BOM合計（1台）{realtimeCostActive ? '・機種工費込' : ''}
                       </p>
                       <p className="mt-1 text-2xl font-extrabold text-yellow-300">¥{Math.round(displayModelBomGrandTotal).toLocaleString()}</p>
                     </div>
@@ -3202,7 +3476,7 @@ export default function WorkOrderCostPage() {
                                           <td className={`px-3 py-2 text-right ${isRealtimeLaborRow ? 'font-bold text-amber-300' : 'text-slate-300'}`}>
                                             ¥{Math.round(row.labor_cost).toLocaleString()}
                                           </td>
-                                          <td className="px-3 py-2 text-right text-slate-300">¥{Math.round(row.indirect_cost).toLocaleString()}</td>
+                                          <td className={`px-3 py-2 text-right ${isRealtimeLaborRow ? 'font-bold text-orange-200' : 'text-slate-300'}`}>¥{Math.round(row.indirect_cost).toLocaleString()}</td>
                                           <td className="px-3 py-2 text-right font-bold text-yellow-300">¥{Math.round(row.subtotal).toLocaleString()}</td>
                                           <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex flex-wrap items-center justify-center gap-1">

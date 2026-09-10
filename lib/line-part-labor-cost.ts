@@ -8,6 +8,8 @@ import { resolveTargetStandardDurationMinutes } from '@/lib/process-management'
 
 export const UNIT_LABOR_COST = 17810
 export const UNIT_MINUTES = 480
+/** 機種工費に対する間接費率（工費 × 30%） */
+export const LABOR_INDIRECT_RATE = 0.3
 
 export type LinePartAssignmentRow = {
   id: string
@@ -52,6 +54,12 @@ export type LaborRecalcResult = LaborRecalcPreview & {
 export function calcLaborCostFromMinutes(minutes: number): number {
   if (!Number.isFinite(minutes) || minutes <= 0) return 0
   return Math.round((minutes / UNIT_MINUTES) * UNIT_LABOR_COST)
+}
+
+/** 機種工費の間接費 = 工費 × 30% */
+export function calcLaborIndirectFromLabor(laborCost: number): number {
+  if (!Number.isFinite(laborCost) || laborCost <= 0) return 0
+  return Math.round(laborCost * LABOR_INDIRECT_RATE)
 }
 
 export function resolveLineDurationMinutes(line: LineRow): number {

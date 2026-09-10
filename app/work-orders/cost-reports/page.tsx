@@ -35,6 +35,13 @@ type ModelReportRow = {
   indirect_cost: number
   total_cost: number
   part_count: number
+  realtime_applied?: boolean
+  realtime_label?: string | null
+  realtime_st_minutes?: number | null
+  realtime_material_cost?: number | null
+  realtime_labor_cost?: number | null
+  realtime_indirect_cost?: number | null
+  realtime_total_cost?: number | null
 }
 
 const currency = (value: number) => `\u00a5${Math.round(value || 0).toLocaleString('ja-JP')}`
@@ -135,6 +142,25 @@ export default function CostReportsPage() {
     )
   }, [modelRows])
 
+  const realtimeModelTotals = useMemo(() => {
+    return modelRows.reduce(
+      (acc, row) => {
+        const applied = Boolean(row.realtime_applied)
+        acc.material_cost += Number(
+          applied ? row.realtime_material_cost ?? row.material_cost : row.material_cost || 0
+        )
+        acc.labor_cost += Number(applied ? row.realtime_labor_cost ?? row.labor_cost : row.labor_cost || 0)
+        acc.indirect_cost += Number(
+          applied ? row.realtime_indirect_cost ?? row.indirect_cost : row.indirect_cost || 0
+        )
+        acc.total_cost += Number(applied ? row.realtime_total_cost ?? row.total_cost : row.total_cost || 0)
+        if (applied) acc.applied_count += 1
+        return acc
+      },
+      { material_cost: 0, labor_cost: 0, indirect_cost: 0, total_cost: 0, applied_count: 0 }
+    )
+  }, [modelRows])
+
   const handlePrint = () => {
     setCostAsOfLabel(formatCostAsOfJa(new Date()))
     // ラベル反映後に印刷
@@ -199,6 +225,7 @@ export default function CostReportsPage() {
           <h2 className="text-xl font-bold">{reportTitle}</h2>
           <p className="text-xs text-slate-600">
             {costAsOfLabel || `印刷日時: ${new Date().toLocaleString('ja-JP')}`}
+            {reportType === 'model' ? ' ／ 各機種 現行BOM・リアルタイム 2段' : ''}
           </p>
         </div>
 
@@ -215,7 +242,7 @@ export default function CostReportsPage() {
             <div className="border-b border-slate-700 bg-slate-800 px-6 py-4 print:hidden">
               <h2 className="text-xl font-bold text-white">機種別原価一覧</h2>
               <p className="mt-1 text-xs text-slate-400">
-                BOM構成部品の材料費・工賃・間接費を機種単位で集計します（1台当たり）
+                各機種を2段で表示します。上段は現行BOM、下段は製品パーツ計算で適用したリアルタイム原価です（1台当たり）。
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -223,6 +250,7 @@ export default function CostReportsPage() {
                 <thead className="bg-slate-800 text-slate-300 print:bg-slate-100 print:text-slate-700">
                   <tr>
                     <th className="border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">機種名</th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">区分</th>
                     <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">部品数</th>
                     <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">材料費</th>
                     <th className="border-b border-slate-700 px-4 py-3 text-right print:border-slate-300">間接費</th>
@@ -235,47 +263,84 @@ export default function CostReportsPage() {
                 <tbody>
                   {modelRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                         データがありません。
                       </td>
                     </tr>
                   )}
-                  {modelRows.map((row, idx) => (
-                    <tr
-                      key={row.model}
-                      className={idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'}
-                    >
-                      <td className="border-t border-slate-800 px-4 py-3 print:border-slate-200">
-                        <div className="font-semibold text-white print:text-slate-900">{row.display_name}</div>
-                        {row.display_name !== row.model && (
-                          <div className="mt-0.5 font-mono text-[11px] text-slate-500 print:text-slate-600">
-                            {row.model}
-                          </div>
-                        )}
-                      </td>
-                      <td className="border-t border-slate-800 px-4 py-3 text-right text-slate-300 print:border-slate-200 print:text-slate-800">
-                        {row.part_count.toLocaleString('ja-JP')}
-                      </td>
-                      <td className="border-t border-slate-800 px-4 py-3 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
-                        {currency(row.material_cost)}
-                      </td>
-                      <td className="border-t border-slate-800 px-4 py-3 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
-                        {currency(row.indirect_cost)}
-                      </td>
-                      <td className="border-t border-slate-800 px-4 py-3 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">
-                        {currency(row.labor_cost)}
-                      </td>
-                      <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
-                        {currency(row.total_cost)}
-                      </td>
-                    </tr>
-                  ))}
+                  {modelRows.map((row, idx) => {
+                    const applied = Boolean(row.realtime_applied)
+                    const baseRowClass = idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'
+                    const realtimeLabel = applied
+                      ? [
+                          'リアルタイム',
+                          row.realtime_st_minutes != null
+                            ? `${Number(row.realtime_st_minutes).toLocaleString('ja-JP')}分`
+                            : '',
+                          row.realtime_label || '',
+                        ]
+                          .filter(Boolean)
+                          .join(' / ')
+                      : 'リアルタイム（未適用）'
+                    return (
+                      <Fragment key={row.model}>
+                        <tr className={baseRowClass}>
+                          <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top print:border-slate-200">
+                            <div className="font-semibold text-white print:text-slate-900">{row.display_name}</div>
+                            {row.display_name !== row.model && (
+                              <div className="mt-0.5 font-mono text-[11px] text-slate-500 print:text-slate-600">
+                                {row.model}
+                              </div>
+                            )}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">
+                            現行BOM
+                          </td>
+                          <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 text-right align-top text-slate-300 print:border-slate-200 print:text-slate-800">
+                            {row.part_count.toLocaleString('ja-JP')}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
+                            {currency(row.material_cost)}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
+                            {currency(row.indirect_cost)}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">
+                            {currency(row.labor_cost)}
+                          </td>
+                          <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
+                            {currency(row.total_cost)}
+                          </td>
+                        </tr>
+                        <tr className={baseRowClass}>
+                          <td className="border-t border-slate-800 px-4 py-2 print:border-slate-200">
+                            <div className={applied ? 'text-amber-200 print:text-slate-800' : 'text-slate-500 print:text-slate-500'}>
+                              {realtimeLabel}
+                            </div>
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
+                            {applied ? currency(Number(row.realtime_material_cost ?? row.material_cost)) : '—'}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
+                            {applied ? currency(Number(row.realtime_indirect_cost ?? 0)) : '—'}
+                          </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">
+                            {applied ? currency(Number(row.realtime_labor_cost ?? 0)) : '—'}
+                          </td>
+                          <td className="border-t border-slate-800 bg-amber-900/20 px-4 py-2 text-right font-bold text-amber-200 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
+                            {applied ? currency(Number(row.realtime_total_cost ?? 0)) : '—'}
+                          </td>
+                        </tr>
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
                 <tfoot className="bg-gradient-to-r from-amber-950/60 to-yellow-950/60 print:bg-slate-100">
                   <tr>
                     <td className="px-4 py-3 font-semibold text-yellow-300 print:text-slate-800">
-                      計（{modelRows.length} 機種）
+                      計（現行・{modelRows.length} 機種）
                     </td>
+                    <td className="px-4 py-3 text-slate-300 print:text-slate-700">現行BOM</td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">
                       {modelRows.reduce((s, r) => s + Number(r.part_count || 0), 0).toLocaleString('ja-JP')}
                     </td>
@@ -290,6 +355,27 @@ export default function CostReportsPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-2xl font-extrabold text-yellow-300 print:text-slate-900">
                       {currency(modelTotals.total_cost)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-3 font-semibold text-amber-200 print:text-slate-800">
+                      計（リアルタイム・適用 {realtimeModelTotals.applied_count} / 未適用は現行）
+                    </td>
+                    <td className="px-4 py-3 text-amber-100/80 print:text-slate-700">リアルタイム</td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">
+                      {modelRows.reduce((s, r) => s + Number(r.part_count || 0), 0).toLocaleString('ja-JP')}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-sky-300 print:text-slate-800">
+                      {currency(realtimeModelTotals.material_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-violet-300 print:text-slate-800">
+                      {currency(realtimeModelTotals.indirect_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-emerald-300 print:text-slate-800">
+                      {currency(realtimeModelTotals.labor_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-2xl font-extrabold text-amber-200 print:text-slate-900">
+                      {currency(realtimeModelTotals.total_cost)}
                     </td>
                   </tr>
                 </tfoot>

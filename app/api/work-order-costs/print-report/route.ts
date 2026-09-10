@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  applyModelRealtimeOverlay,
+  isLaborFeePartLabel,
+  listSavedModelRealtimeCosts,
+} from '@/lib/heater-model-realtime-cost'
 import { buildLinePartCostUnitMap } from '@/lib/line-part-cost-breakdown'
 
 export const runtime = 'nodejs'
@@ -24,13 +29,13 @@ async function buildModelCostList() {
 
   if (modelsError) throw modelsError
 
-  let allBom: Array<{ model: string; part_key: string; quantity: number }> = []
+  let allBom: Array<{ model: string; part_key: string; part_name: string | null; quantity: number }> = []
   let from = 0
   const pageSize = 1000
   while (true) {
     const { data, error } = await supabase
       .from('heater_bom')
-      .select('model, part_key, quantity')
+      .select('model, part_key, part_name, quantity')
       .range(from, from + pageSize - 1)
     if (error) throw error
     if (!data || data.length === 0) break
@@ -38,6 +43,7 @@ async function buildModelCostList() {
       data.map((row) => ({
         model: String(row.model || ''),
         part_key: String(row.part_key || ''),
+        part_name: row.part_name == null ? null : String(row.part_name),
         quantity: toNumber(row.quantity),
       }))
     )
@@ -48,7 +54,12 @@ async function buildModelCostList() {
   const partKeys = [...new Set(allBom.map((b) => b.part_key).filter(Boolean))]
   const partsFallbackMap = new Map<
     string,
-    { cost_price: number | null; material_cost_total: number | null; indirect_cost_total: number | null }
+    {
+      cost_price: number | null
+      material_cost_total: number | null
+      indirect_cost_total: number | null
+      part_name: string | null
+    }
   >()
 
   if (partKeys.length > 0) {
@@ -56,7 +67,7 @@ async function buildModelCostList() {
       const chunk = partKeys.slice(i, i + 150)
       const { data: partsData, error: partsError } = await supabase
         .from('heater_parts_master')
-        .select('part_key, cost_price, material_cost_total, indirect_cost_total')
+        .select('part_key, part_name, cost_price, material_cost_total, indirect_cost_total')
         .in('part_key', chunk)
       if (partsError) throw partsError
       for (const p of partsData || []) {
@@ -64,6 +75,7 @@ async function buildModelCostList() {
           cost_price: p.cost_price ?? null,
           material_cost_total: p.material_cost_total ?? null,
           indirect_cost_total: p.indirect_cost_total ?? null,
+          part_name: p.part_name ?? null,
         })
       }
     }
@@ -80,6 +92,9 @@ async function buildModelCostList() {
     indirect_cost: number
     total_cost: number
     part_count: number
+    fee_labor_cost: number
+    fee_indirect_cost: number
+    has_labor_fee_row: boolean
   }
   const map = new Map<string, Agg>()
 
@@ -96,6 +111,9 @@ async function buildModelCostList() {
         indirect_cost: 0,
         total_cost: 0,
         part_count: 0,
+        fee_labor_cost: 0,
+        fee_indirect_cost: 0,
+        has_labor_fee_row: false,
       }
       map.set(item.model, row)
     }
@@ -118,6 +136,11 @@ async function buildModelCostList() {
     row.indirect_cost += indirectUnit * qty
     row.total_cost += unitCost * qty
     row.part_count += 1
+    if (isLaborFeePartLabel(item.part_key, item.part_name, fallback?.part_name)) {
+      row.has_labor_fee_row = true
+      row.fee_labor_cost += laborUnit * qty
+      row.fee_indirect_cost += indirectUnit * qty
+    }
   }
 
   for (const m of models || []) {
@@ -132,17 +155,51 @@ async function buildModelCostList() {
       indirect_cost: 0,
       total_cost: 0,
       part_count: 0,
+      fee_labor_cost: 0,
+      fee_indirect_cost: 0,
+      has_labor_fee_row: false,
     })
   }
 
+  const savedMap = await listSavedModelRealtimeCosts(supabase)
+
   return Array.from(map.values())
-    .map((row) => ({
-      ...row,
-      material_cost: Math.round(row.material_cost),
-      labor_cost: Math.round(row.labor_cost),
-      indirect_cost: Math.round(row.indirect_cost),
-      total_cost: Math.round(row.total_cost),
-    }))
+    .map((row) => {
+      const current = {
+        material_cost: Math.round(row.material_cost),
+        labor_cost: Math.round(row.labor_cost),
+        indirect_cost: Math.round(row.indirect_cost),
+        total_cost: Math.round(row.total_cost),
+      }
+      const saved = savedMap.get(row.model) || null
+      const realtime = saved
+        ? applyModelRealtimeOverlay(
+            {
+              ...current,
+              fee_labor_cost: row.fee_labor_cost,
+              fee_indirect_cost: row.fee_indirect_cost,
+              has_labor_fee_row: row.has_labor_fee_row,
+            },
+            saved
+          )
+        : null
+      return {
+        model: row.model,
+        display_name: row.display_name,
+        part_count: row.part_count,
+        material_cost: current.material_cost,
+        labor_cost: current.labor_cost,
+        indirect_cost: current.indirect_cost,
+        total_cost: current.total_cost,
+        realtime_applied: Boolean(saved),
+        realtime_label: saved?.applied_label || null,
+        realtime_st_minutes: saved?.st_minutes ?? null,
+        realtime_material_cost: realtime?.material_cost ?? current.material_cost,
+        realtime_labor_cost: realtime?.labor_cost ?? null,
+        realtime_indirect_cost: realtime?.indirect_cost ?? null,
+        realtime_total_cost: realtime?.total_cost ?? null,
+      }
+    })
     .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true }))
 }
 
