@@ -12,11 +12,14 @@ import {
   saveModelRealtimeCost,
 } from '@/lib/heater-model-realtime-cost'
 import {
-  getFiscalYearAverageStByWorkGroupForSpec,
+  aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
+  formatSpecLabel,
   listLinkedInstructionsForModel,
   listProcessScheduleStSourcesByModel,
   listProcessTargets,
+  normalizeSpecKey,
   normalizeTargetCode,
+  stMapFromFiscalRows,
   sumFiscalAverageStMinutes,
   type FiscalYearWorkGroupSummary,
   type ProcessTargetType,
@@ -52,6 +55,8 @@ export type RealtimeCostCandidate = {
   formula: string
   relation: CandidateRelation
   relation_label: string
+  spec_key: string
+  spec_label: string
   applied_label: string
   note: string | null
   work_groups: WorkGroupSt[]
@@ -130,10 +135,20 @@ function relationLabel(relation: CandidateRelation): string {
   }
 }
 
-function appliedLabel(targetType: ProcessTargetType, targetCode: string): string {
+function inferSpecFromModel(model: string, modelName?: string | null): string {
+  const fromCode = normalizeSpecKey(model)
+  if (fromCode === 'DF' || fromCode === 'UF') return fromCode
+  const fromName = normalizeSpecKey(modelName)
+  if (fromName === 'DF' || fromName === 'UF') return fromName
+  return ''
+}
+
+function appliedLabel(targetType: ProcessTargetType, targetCode: string, specKey: string): string {
+  const specPart =
+    targetType === 'model' ? '' : specKey ? `（出庫${formatSpecLabel(specKey)}）` : '（全体）'
   if (targetType === 'model') return `機種 ${targetCode} の年間平均`
-  if (targetType === 'line') return `L指令 ${targetCode} の年間平均`
-  return `D指令 ${targetCode} の年間平均`
+  if (targetType === 'line') return `L指令 ${targetCode} の年間平均${specPart}`
+  return `D指令 ${targetCode} の年間平均${specPart}`
 }
 
 function toCandidate(
@@ -141,13 +156,20 @@ function toCandidate(
   targetCode: string,
   targetName: string,
   relation: CandidateRelation,
-  resolved: { minutes: number; fiscal_year: number; summary: FiscalYearWorkGroupSummary }
+  resolved: {
+    minutes: number
+    fiscal_year: number
+    summary: FiscalYearWorkGroupSummary
+    spec_key: string
+  }
 ): RealtimeCostCandidate {
   const minutes = Math.round(resolved.minutes)
   const laborCost = calcLaborCostFromMinutes(minutes)
   const indirectCost = calcLaborIndirectFromLabor(laborCost)
+  const specKey = resolved.spec_key || ''
+  const specNote = specKey ? `出庫伝票の${formatSpecLabel(specKey)}区分で集計` : null
   return {
-    id: `${targetType}:${targetCode}:${resolved.fiscal_year}`,
+    id: `${targetType}:${targetCode}:${resolved.fiscal_year}:${specKey || 'ALL'}`,
     target_type: targetType,
     target_code: targetCode,
     target_name: targetName,
@@ -161,34 +183,65 @@ function toCandidate(
     formula: `(${minutes}分 ÷ ${UNIT_MINUTES}) × ¥${UNIT_LABOR_COST.toLocaleString('ja-JP')}`,
     relation,
     relation_label: relationLabel(relation),
-    applied_label: appliedLabel(targetType, targetCode),
-    note: resolved.summary.st_aggregation_note || null,
+    spec_key: specKey,
+    spec_label: specKey ? formatSpecLabel(specKey) : targetType === 'model' ? '' : '全体',
+    applied_label: appliedLabel(targetType, targetCode, specKey),
+    note: [specNote, resolved.summary.st_aggregation_note].filter(Boolean).join(' ／ ') || null,
     work_groups: workGroupsFromSummary(resolved.summary),
   }
 }
 
-async function resolveTargetFiscalSt(
+async function resolveTargetFiscalVariants(
   targetType: ProcessTargetType,
   targetCode: string,
-  years: number[]
-): Promise<{
-  minutes: number
-  fiscal_year: number
-  summary: FiscalYearWorkGroupSummary
-} | null> {
+  years: number[],
+  preferredSpec: string
+): Promise<
+  Array<{
+    minutes: number
+    fiscal_year: number
+    summary: FiscalYearWorkGroupSummary
+    spec_key: string
+  }>
+> {
   for (const fiscalYear of years) {
-    const { map, summary } = await getFiscalYearAverageStByWorkGroupForSpec(
+    const { overall, by_spec } = await aggregateTargetWorkGroupSummariesBySpecInFiscalYear(
       supabase,
       targetType,
       targetCode,
-      fiscalYear,
-      null
+      fiscalYear
     )
-    const minutes = sumFiscalAverageStMinutes(map)
-    if (minutes <= 0) continue
-    return { minutes, fiscal_year: fiscalYear, summary }
+    const variants: Array<{
+      minutes: number
+      fiscal_year: number
+      summary: FiscalYearWorkGroupSummary
+      spec_key: string
+    }> = []
+    const pushSummary = (specKey: string, summary: FiscalYearWorkGroupSummary | null | undefined) => {
+      if (!summary) return
+      const minutes = sumFiscalAverageStMinutes(stMapFromFiscalRows(summary.rows))
+      if (minutes <= 0) return
+      if (variants.some((row) => row.spec_key === specKey)) return
+      variants.push({ minutes, fiscal_year: fiscalYear, summary, spec_key: specKey })
+    }
+
+    if (preferredSpec) {
+      pushSummary(
+        preferredSpec,
+        by_spec.find((item) => item.spec_key === preferredSpec)?.summary
+      )
+    }
+    pushSummary('', overall)
+
+    if (preferredSpec && variants.length > 1) {
+      const preferredMinutes = variants.find((row) => row.spec_key === preferredSpec)?.minutes
+      return variants.filter(
+        (row) => row.spec_key === preferredSpec || row.minutes !== preferredMinutes
+      )
+    }
+    if (variants.length > 0) return variants
   }
-  return null
+  return []
 }
 
 async function listRelatedDOrders(model: string): Promise<
@@ -267,6 +320,7 @@ async function listRelatedDOrders(model: string): Promise<
 async function listRealtimeCostCandidates(model: string): Promise<RealtimeCostCandidate[]> {
   const scheduleSources = await listProcessScheduleStSourcesByModel(supabase, model)
   const years = preferredFiscalYears(scheduleSources.map((row) => Number(row.fiscal_year)))
+  const preferredSpec = inferSpecFromModel(model)
   const pending = new Map<
     string,
     { target_type: ProcessTargetType; target_code: string; target_name: string; relation: CandidateRelation }
@@ -323,20 +377,33 @@ async function listRealtimeCostCandidates(model: string): Promise<RealtimeCostCa
 
   const resolved = await Promise.all(
     Array.from(pending.values()).map(async (item) => {
-      const hit = await resolveTargetFiscalSt(item.target_type, item.target_code, years)
-      if (!hit) return null
-      return toCandidate(item.target_type, item.target_code, item.target_name, item.relation, hit)
+      const hits = await resolveTargetFiscalVariants(
+        item.target_type,
+        item.target_code,
+        years,
+        item.target_type === 'model' ? '' : preferredSpec
+      )
+      return hits.map((hit) =>
+        toCandidate(item.target_type, item.target_code, item.target_name, item.relation, hit)
+      )
     })
   )
 
   const relationRank = (r: CandidateRelation) =>
     r === 'self' ? 5 : r === 'schedule' ? 4 : r === 'linked' ? 3 : r === 'field' ? 2 : r === 'family' ? 1 : 0
+  const specRank = (specKey: string) =>
+    preferredSpec && specKey === preferredSpec ? 2 : specKey ? 1 : 0
 
   return resolved
+    .flat()
     .filter((row): row is RealtimeCostCandidate => Boolean(row && row.st_minutes > 0))
     .sort((a, b) => {
       const rel = relationRank(b.relation) - relationRank(a.relation)
       if (rel !== 0) return rel
+      if (a.target_type === b.target_type && a.target_code === b.target_code) {
+        const spec = specRank(b.spec_key) - specRank(a.spec_key)
+        if (spec !== 0) return spec
+      }
       if (b.annual_completed_qty !== a.annual_completed_qty) {
         return b.annual_completed_qty - a.annual_completed_qty
       }

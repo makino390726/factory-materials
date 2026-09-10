@@ -185,6 +185,8 @@ export default function WorkOrderCostPage() {
       formula: string
       relation: string
       relation_label: string
+      spec_key?: string
+      spec_label?: string
       applied_label: string
       note: string | null
       work_groups: Array<{ work_group_code: string; work_group_name: string; avg_st_minutes: number }>
@@ -2863,6 +2865,7 @@ export default function WorkOrderCostPage() {
                         <tr>
                           <th className="px-3 py-2 font-semibold">区分</th>
                           <th className="px-3 py-2 font-semibold">対象</th>
+                          <th className="px-3 py-2 font-semibold">規格</th>
                           <th className="px-3 py-2 font-semibold">関係</th>
                           <th className="px-3 py-2 font-semibold text-right">年度</th>
                           <th className="px-3 py-2 font-semibold text-right">1台ST</th>
@@ -2892,6 +2895,9 @@ export default function WorkOrderCostPage() {
                               <td className="px-3 py-2">
                                 <p className="font-semibold text-amber-50">{candidate.target_code}</p>
                                 <p className="text-slate-400">{candidate.target_name}</p>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-amber-100/80">
+                                {candidate.spec_label || (candidate.target_type === 'model' ? '—' : '全体')}
                               </td>
                               <td className="px-3 py-2 whitespace-nowrap text-amber-100/80">
                                 {candidate.relation_label}
