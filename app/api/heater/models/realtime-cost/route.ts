@@ -216,19 +216,32 @@ async function listRelatedDOrders(model: string): Promise<
     .maybeSingle()
   const aliases = buildModelAliases(model, heater?.name ?? null)
 
-  let ordersQuery = await supabase
+  type WorkOrderMatchRow = {
+    order_no: string | null
+    product_name: string | null
+    model?: string | null
+    bom_model?: string | null
+    heater_model?: string | null
+  }
+  const firstOrders = await supabase
     .from('work_orders')
     .select('order_no, product_name, model, bom_model, heater_model')
     .order('order_no', { ascending: true })
-  if (ordersQuery.error && String(ordersQuery.error.message || '').includes('heater_model')) {
-    ordersQuery = await supabase
+  let orders: WorkOrderMatchRow[] = []
+  if (firstOrders.error && String(firstOrders.error.message || '').includes('heater_model')) {
+    const fallbackOrders = await supabase
       .from('work_orders')
       .select('order_no, product_name, model, bom_model')
       .order('order_no', { ascending: true })
+    if (fallbackOrders.error) throw fallbackOrders.error
+    orders = fallbackOrders.data || []
+  } else if (firstOrders.error) {
+    throw firstOrders.error
+  } else {
+    orders = firstOrders.data || []
   }
-  if (ordersQuery.error) throw ordersQuery.error
 
-  for (const order of ordersQuery.data || []) {
+  for (const order of orders) {
     const orderNo = normalizeTargetCode(String(order.order_no || ''))
     if (!orderNo || seen.has(orderNo)) continue
     const haystack = [order.heater_model, order.model, order.bom_model, order.product_name]
