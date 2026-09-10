@@ -513,7 +513,11 @@ export default function WorkOrderCostPage() {
       if (!res.ok || json.error) {
         throw new Error(json.error || '平均STがある工程の取得に失敗しました')
       }
-      const candidates = Array.isArray(json.candidates) ? json.candidates : []
+      const candidates: Array<(typeof realtimeCostCandidates)[number]> = Array.isArray(
+        json.candidates
+      )
+        ? json.candidates
+        : []
       setRealtimeCostCandidates(candidates)
       if (json.saved) {
         applySavedRealtimeCost(json.saved)
