@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { parseFiscalYearParam } from '@/lib/fiscal-year'
+import { loadLineCostForPartYear } from '@/lib/line-cost-carryover'
 
 export const runtime = 'nodejs'
 
@@ -71,6 +73,27 @@ export async function DELETE(req: Request) {
 
     if (!master_type || !master_id) {
       return NextResponse.json({ error: 'master_type and master_id required' }, { status: 400 })
+    }
+
+    const fiscalYearRaw = url.searchParams.get('fiscal_year')
+    if (fiscalYearRaw && master_type === 'ライン原価') {
+      const fiscalYear = parseFiscalYearParam(fiscalYearRaw)
+      const bundle = await loadLineCostForPartYear(supabase, master_id, fiscalYear, {
+        allowUntaggedFallback: false,
+      })
+      if (bundle?.header.id) {
+        const { error: itemDeleteError } = await supabase
+          .from('work_order_cost_items')
+          .delete()
+          .eq('work_order_cost_id', bundle.header.id)
+        if (itemDeleteError) throw itemDeleteError
+        const { error: headerDeleteError } = await supabase
+          .from('work_order_costs')
+          .delete()
+          .eq('id', bundle.header.id)
+        if (headerDeleteError) throw headerDeleteError
+      }
+      return NextResponse.json({ success: true })
     }
 
     // master_type と master_id に一致する明細を削除

@@ -64,3 +64,36 @@ export function parseFiscalYearParam(value: unknown, fallback = getCurrentFiscal
   if (!Number.isFinite(parsed) || parsed < 2000 || parsed > 2100) return fallback
   return Math.round(parsed)
 }
+
+/**
+ * 指令選択・一覧で見せる年度。
+ * 当年度はマスタ全件を出すため、前年度と未設定も含める（年度替わり直後に空にしない）。
+ */
+export function fiscalYearsVisibleOnSelect(selectedYear: number, now = new Date()) {
+  const current = getCurrentFiscalYear(now)
+  if (selectedYear === current) {
+    return { years: [selectedYear, selectedYear - 1], includeNull: true }
+  }
+  return { years: [selectedYear], includeNull: false }
+}
+
+export function workOrderFiscalYearOrFilter(selectedYear: number, now = new Date()) {
+  const { years, includeNull } = fiscalYearsVisibleOnSelect(selectedYear, now)
+  const parts = years.map((year) => `fiscal_year.eq.${year}`)
+  if (includeNull) parts.push('fiscal_year.is.null')
+  return parts.join(',')
+}
+
+export function matchesVisibleFiscalYear(
+  rowYear: number | null | undefined,
+  selectedYear: number,
+  createdAt?: string | null,
+  now = new Date()
+) {
+  const { years, includeNull } = fiscalYearsVisibleOnSelect(selectedYear, now)
+  const year = Number(rowYear)
+  if (Number.isFinite(year) && year > 0) return years.includes(year)
+  if (includeNull) return true
+  const createdYear = getFiscalYearFromDate(String(createdAt || ''))
+  return createdYear === selectedYear
+}

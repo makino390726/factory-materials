@@ -6,6 +6,7 @@ import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggr
 import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
 import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { isLine900Series } from '@/lib/line-part-labor-cost'
 import {
   type BomGroupDefinition,
   UNCATEGORIZED_BOM_GROUP,
@@ -78,6 +79,25 @@ const createPartRow = (): PartRow => ({
   indirect_cost: '0',
   cost_type: '加',
 })
+
+function parseLineCostItemsResponse(data: unknown): {
+  items: any[]
+  sourceYear: number | null
+} {
+  if (Array.isArray(data)) {
+    return { items: data, sourceYear: null }
+  }
+  if (data && typeof data === 'object') {
+    const payload = data as { items?: unknown; source_fiscal_year?: unknown }
+    const items = Array.isArray(payload.items) ? payload.items : []
+    const sourceYear = Number(payload.source_fiscal_year)
+    return {
+      items,
+      sourceYear: Number.isFinite(sourceYear) ? sourceYear : null,
+    }
+  }
+  return { items: [], sourceYear: null }
+}
 
 const toNumber = (value: string | number | null | undefined) => {
   if (typeof value === 'number') {
@@ -232,6 +252,7 @@ export default function WorkOrderCostPage() {
   const [lineMasters, setLineMasters] = useState<LineMaster[]>([])
   const [selectedLineId, setSelectedLineId] = useState('')
   const [selectedPartKey, setSelectedPartKey] = useState('')
+  const [lineCostSourceYear, setLineCostSourceYear] = useState<number | null>(null)
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -1147,6 +1168,7 @@ export default function WorkOrderCostPage() {
     const restore = async () => {
       if (!selectedPartKey) {
         setPartRows([createPartRow()])
+        setLineCostSourceYear(null)
         return
       }
 
@@ -1172,19 +1194,21 @@ export default function WorkOrderCostPage() {
 
       try {
         const res = await fetch(
-          `/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}`,
+          `/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}&fiscal_year=${fiscalYear}`,
           { signal: ac.signal }
         )
         if (!res.ok) {
           const errText = await res.text()
           throw new Error(`fetch items failed (${res.status}): ${errText}`)
         }
-        const items = (await res.json()) as any[]
+        const items = (await res.json()) as any
+        const parsed = parseLineCostItemsResponse(items)
+        setLineCostSourceYear(parsed.sourceYear)
 
-        if (Array.isArray(items) && items.length > 0) {
+        if (parsed.items.length > 0) {
           if (ac.signal.aborted) return
           setPartRows(
-            items.map((it: any) => ({
+            parsed.items.map((it: any) => ({
               id: it.id || crypto.randomUUID(),
               component_name: it.component_name || '',
               product_code: it.product_code || '',
@@ -1208,11 +1232,12 @@ export default function WorkOrderCostPage() {
       if (ac.signal.aborted) return
 
       // 明細未登録時のみ空の編集行（数量は初期1）
+      setLineCostSourceYear(null)
       setPartRows([createPartRow()])
     }
     void restore()
     return () => ac.abort()
-  }, [selectedPartKey, mode])
+  }, [selectedPartKey, mode, fiscalYear])
 
   // L指令モードの場合は parts master を取得してクライアント側検索に使う
   useEffect(() => {
@@ -1438,6 +1463,11 @@ export default function WorkOrderCostPage() {
     )
   }, [lineMasters, selectedPartKey])
 
+  const selectedLine = useMemo(
+    () => lineMasters.find((line) => line.id === selectedLineId) || null,
+    [lineMasters, selectedLineId]
+  )
+
   useEffect(() => {
     if (mode !== 'line' || !selectedPartKey || selectedLineId) return
     const match = matchingLines[0]
@@ -1445,35 +1475,41 @@ export default function WorkOrderCostPage() {
   }, [mode, selectedPartKey, selectedLineId, matchingLines])
 
   const linesForDropdown = useMemo(() => {
-    const withWork = lineMasters.filter(
-      (line) =>
-        Number(line.accumulated_duration_minutes || 0) > 0 ||
-        Number(line.accumulated_completed_qty || 0) > 0
-    )
-    const source = withWork.length > 0 ? withWork : lineMasters
-    return [...source].sort((a, b) =>
+    return [...lineMasters].sort((a, b) =>
       String(a.line_code || '').localeCompare(String(b.line_code || ''), 'ja-JP', { numeric: true })
     )
   }, [lineMasters])
 
   const partsForLineDropdown = useMemo(() => {
-    const sourceLines = selectedLineId
-      ? lineMasters.filter((line) => line.id === selectedLineId)
-      : lineMasters
-    const keys = new Set<string>()
-    for (const line of sourceLines) {
-      if (line.part_key) keys.add(line.part_key)
-      for (const assignment of line.part_assignments || []) {
-        if (assignment.part_key) keys.add(assignment.part_key)
-      }
-    }
-    const list =
-      keys.size > 0
-        ? partsMaster.filter((part) => keys.has(part.id) || keys.has(part.product_code))
-        : partsMaster
-    return [...list].sort((a, b) =>
-      String(a.id || a.product_code || '').localeCompare(String(b.id || b.product_code || ''))
-    )
+    if (!selectedLineId) return [] as Product[]
+    const line = lineMasters.find((item) => item.id === selectedLineId)
+    if (!line) return [] as Product[]
+
+    const keys = [
+      ...new Set(
+        [line.part_key, ...(line.part_assignments || []).map((row) => row.part_key)]
+          .map((key) => String(key || '').trim())
+          .filter(Boolean)
+      ),
+    ]
+
+    return keys
+      .map((key) => {
+        const matched = partsMaster.find(
+          (part) => part.id === key || part.product_code === key
+        )
+        return (
+          matched || {
+            id: key,
+            product_code: key,
+            name: key,
+            cost_price: 0,
+          }
+        )
+      })
+      .sort((a, b) =>
+        String(a.id || a.product_code || '').localeCompare(String(b.id || b.product_code || ''), 'ja-JP')
+      )
   }, [lineMasters, partsMaster, selectedLineId])
 
   useEffect(() => {
@@ -1525,7 +1561,7 @@ export default function WorkOrderCostPage() {
     )
   }, [matchingLines])
 
-  /** L指令の制作所要時間（標準所要時間を優先、なければ月次実績） */
+  /** L指令の制作所要時間（900番台のフォールバック用。標準所要時間を優先、なければ月次実績） */
   const totalProductionDurationMinutes = useMemo(() => {
     if (aggregatedStandardLineDurationMinutes > 0) {
       return aggregatedStandardLineDurationMinutes
@@ -1533,13 +1569,65 @@ export default function WorkOrderCostPage() {
     return aggregatedMonthlyLineDurationMinutes
   }, [aggregatedMonthlyLineDurationMinutes, aggregatedStandardLineDurationMinutes])
 
-  /** 1個あたり制作時間 = 制作所要時間 ÷ 製造計画部品数 */
-  const perUnitDurationMinutes = useMemo(() => {
+  /** 工賃数量: 900番台以外は日報の所要時間÷完成個数。900番台は製造計画。 */
+  const lineLaborQuantity = useMemo(() => {
     if (mode !== 'line' || !selectedPartKey) return null
+    const lines = selectedLine ? [selectedLine] : matchingLines
+    if (lines.length === 0) return null
+
+    const reportLines = lines.filter((line) => !isLine900Series(line.line_code))
+    if (reportLines.length > 0) {
+      let duration = 0
+      let completed = 0
+      for (const line of reportLines) {
+        const assignment = (line.part_assignments || []).find(
+          (row) => row.part_key === selectedPartKey
+        )
+        const ratio = Math.max(0, Math.min(100, Number(assignment?.ratio ?? 100)))
+        duration += Math.round((Number(line.accumulated_duration_minutes || 0) * ratio) / 100)
+        completed += Number(line.accumulated_completed_qty || 0)
+      }
+      if (completed > 0 && duration > 0) {
+        return {
+          kind: 'work_report' as const,
+          totalMinutes: duration,
+          qty: completed,
+          perUnit: Math.round((duration / completed) * 10) / 10,
+        }
+      }
+      return {
+        kind: 'work_report_missing' as const,
+        totalMinutes: duration,
+        qty: completed,
+        perUnit: null as number | null,
+      }
+    }
+
     if (totalProductionDurationMinutes <= 0) return null
-    if (!plannedPartQty || plannedPartQty <= 0) return null
-    return Math.round((totalProductionDurationMinutes / plannedPartQty) * 10) / 10
-  }, [mode, selectedPartKey, totalProductionDurationMinutes, plannedPartQty])
+    if (!plannedPartQty || plannedPartQty <= 0) {
+      return {
+        kind: 'plan_missing' as const,
+        totalMinutes: totalProductionDurationMinutes,
+        qty: 0,
+        perUnit: null as number | null,
+      }
+    }
+    return {
+      kind: 'plan' as const,
+      totalMinutes: totalProductionDurationMinutes,
+      qty: plannedPartQty,
+      perUnit: Math.round((totalProductionDurationMinutes / plannedPartQty) * 10) / 10,
+    }
+  }, [
+    mode,
+    selectedPartKey,
+    selectedLine,
+    matchingLines,
+    totalProductionDurationMinutes,
+    plannedPartQty,
+  ])
+
+  const perUnitDurationMinutes = lineLaborQuantity?.perUnit ?? null
 
   const isOrderCompleted = selectedOrder?.status === '完了'
   const orderStandardMinutes = Number(selectedOrder?.standard_duration_minutes || 0)
@@ -1548,7 +1636,7 @@ export default function WorkOrderCostPage() {
   const effectiveDurationMinutes = useMemo(() => {
     if (mode === 'line') {
       if (!selectedPartKey) return null
-      return perUnitDurationMinutes ?? totalProductionDurationMinutes ?? null
+      return perUnitDurationMinutes
     }
     // D指令: 完了かつ月次実績ありなら実績優先。それ以外はD指令マスタの所要時間
     if (isOrderCompleted && orderMonthlyMinutes > 0) return orderMonthlyMinutes
@@ -1559,7 +1647,6 @@ export default function WorkOrderCostPage() {
     mode,
     selectedPartKey,
     perUnitDurationMinutes,
-    totalProductionDurationMinutes,
     isOrderCompleted,
     orderStandardMinutes,
     orderMonthlyMinutes,
@@ -2089,8 +2176,16 @@ export default function WorkOrderCostPage() {
 
       setPartRows(updatedRows)
 
+      if (mode === 'line' && selectedPartKey && updatedCount > 0) {
+        await saveLineCostRows(updatedRows)
+        setLineCostSourceYear(fiscalYear)
+      }
+
       alert(
-        `一括更新が完了しました\n` +
+        `一括更新が完了しました` +
+        (mode === 'line' && selectedPartKey && updatedCount > 0
+          ? `（${formatFiscalYearLabel(fiscalYear)}として保存）\n`
+          : '\n') +
         `更新: ${updatedCount}件\n` +
         `未変更: ${unchangedCount}件\n` +
         `スキップ(products未登録): ${skippedNoProductCount}件\n` +
@@ -2347,6 +2442,71 @@ export default function WorkOrderCostPage() {
     load()
   }, [loadCostDepsKey])
 
+  const saveLineCostRows = async (rows: PartRow[]) => {
+    if (!selectedPartKey) {
+      throw new Error('パーツを選択してください')
+    }
+    const effectiveLaborCost = isAutoLaborMode ? calculateAutoLaborCost() : toNumber(laborCost)
+    const headerPayload = {
+      total_material_cost: rows.reduce((sum, row) => sum + toNumber(row.material_cost), 0),
+      total_labor_cost: effectiveLaborCost,
+      total_indirect_cost: toNumber(laborIndirectCost),
+      total_cost:
+        effectiveLaborCost +
+        toNumber(laborIndirectCost) +
+        rows.reduce(
+          (sum, row) =>
+            sum + toNumber(row.material_cost) + toNumber(row.labor_cost) + toNumber(row.indirect_cost),
+          0
+        ),
+      fiscal_year: fiscalYear,
+    }
+    const itemsPayload = rows.map((row, idx) => ({
+      line_no: idx + 1,
+      component_name: row.component_name || null,
+      product_code: row.product_code,
+      part_name: row.part_name,
+      spec: row.spec,
+      quantity: Number(row.quantity),
+      unit_price: Number(row.unit_price),
+      material_cost: Number(row.material_cost),
+      labor_cost: Number(row.labor_cost),
+      indirect_cost: Number(row.indirect_cost),
+      cost_type: row.cost_type || '加',
+      line_total: Number(row.material_cost) + Number(row.labor_cost) + Number(row.indirect_cost),
+      master_type: 'ライン原価',
+      master_id: selectedPartKey,
+    }))
+
+    await fetch(
+      `/api/work-order-costs/items-by-master?master_type=${encodeURIComponent('ライン原価')}&master_id=${encodeURIComponent(selectedPartKey)}&fiscal_year=${fiscalYear}`,
+      { method: 'DELETE' }
+    ).catch(() => undefined)
+
+    const res = await fetch('/api/work-order-costs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_no: buildLineOrderNo(selectedPartKey),
+        work_order_id: null,
+        header: headerPayload,
+        items: itemsPayload,
+      }),
+    })
+    if (!res.ok) throw new Error('line cost save failed')
+
+    const partRes = await fetch('/api/heater/parts-master', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        part_key: selectedPartKey,
+        cost_price: Math.round(headerPayload.total_cost),
+      }),
+    })
+    if (!partRes.ok) throw new Error('パーツマスタ更新に失敗しました')
+    return headerPayload
+  }
+
   // 保存処理: 存在すればPUT、なければPOST
   const handleSave = async () => {
     if (mode === 'order') {
@@ -2388,6 +2548,7 @@ export default function WorkOrderCostPage() {
       total_indirect_cost: toNumber(laborIndirectCost),
       total_cost:
         effectiveLaborCost + toNumber(laborIndirectCost) + partRows.reduce((s, r) => s + toNumber(r.material_cost) + toNumber(r.labor_cost) + toNumber(r.indirect_cost), 0),
+      ...(mode === 'line' ? { fiscal_year: fiscalYear } : {}),
     }
 
     const itemPartKey = mode === 'line' ? selectedPartKey : ''
@@ -2411,64 +2572,52 @@ export default function WorkOrderCostPage() {
       master_id: mode === 'order' ? orderMasterId : itemPartKey,
     }))
 
-    const saveLineCostToDb = async (orderNo: string) => {
-      // 既存データを削除（master_type='ライン原価' and master_id=selectedPartKey）
-      try {
-        const deleteRes = await fetch(`/api/work-order-costs/items-by-master?master_type=${encodeURIComponent('ライン原価')}&master_id=${encodeURIComponent(selectedPartKey)}`, {
-          method: 'DELETE'
-        })
-        console.debug('delete existing line items:', deleteRes.status)
-      } catch (err) {
-        console.warn('delete existing items failed (may not exist)', err)
-      }
-
-      // 新規登録
-      const res = await fetch('/api/work-order-costs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_no: orderNo, work_order_id: null, header: headerPayload, items: itemsPayload }),
-      })
-      const text = await res.text()
-      console.debug('work-order-costs POST (line)', res.status, text)
-      if (!res.ok) throw new Error('line cost save failed')
-    }
-
     try {
       if (mode === 'line' && !selectedWorkOrderId) {
-        // L指令モードでD指令未選択: work-order-costs へは保存せず、parts master の更新のみ行う
         try {
-          const orderNo = buildLineOrderNo(selectedPartKey)
-          await saveLineCostToDb(orderNo)
-          const partRes = await fetch('/api/heater/parts-master', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ part_key: selectedPartKey, cost_price: Math.round(headerPayload.total_cost) }),
-          })
-          const partBody = await partRes.text()
-          console.debug('parts master update response', partRes.status, partBody)
-          if (!partRes.ok) {
-            alert('パーツマスタ更新に失敗しました')
-            return
-          }
-          // 保存成功時に localStorage に退避、明細をクリア
+          await saveLineCostRows(partRows)
           try {
             const key = `linecost:${selectedPartKey}`
-            const itemsPayload = partRows.map(r => ({ component_name: r.component_name, product_code: r.product_code, part_name: r.part_name, spec: r.spec, quantity: r.quantity, unit_price: r.unit_price, material_cost: r.material_cost, labor: r.labor_cost, indirect_cost: r.indirect_cost, total: calculateRowTotal(r as any), cost_type: r.cost_type || '加', master_type: 'ライン原価', master_id: selectedPartKey }))
-            localStorage.setItem(key, JSON.stringify(itemsPayload || []))
+            localStorage.setItem(
+              key,
+              JSON.stringify(
+                partRows.map((r) => ({
+                  component_name: r.component_name,
+                  product_code: r.product_code,
+                  part_name: r.part_name,
+                  spec: r.spec,
+                  quantity: r.quantity,
+                  unit_price: r.unit_price,
+                  material_cost: r.material_cost,
+                  labor: r.labor_cost,
+                  indirect_cost: r.indirect_cost,
+                  total: calculateRowTotal(r as any),
+                  cost_type: r.cost_type || '加',
+                  master_type: 'ライン原価',
+                  master_id: selectedPartKey,
+                }))
+              )
+            )
           } catch (err) {
             console.error('localStorage save error', err)
           }
-          setPartRows([createPartRow()])
-          alert('保存しました')
-          // parts を再取得して UI を更新
+          setLineCostSourceYear(fiscalYear)
+          alert(`${formatFiscalYearLabel(fiscalYear)}として保存しました`)
           try {
             const refreshed = await fetch('/api/heater/parts-master')
             if (refreshed.ok) {
               const data = await refreshed.json()
               if (Array.isArray(data)) {
-                const mapped = data.map((p: any, i: number) => ({ id: p.part_key || p.id || p.product_code || `pm-${i}`, product_code: p.product_code || '', name: p.part_name || p.name || '', cost_price: p.cost_price || 0 }))
+                const mapped = data.map((p: any, i: number) => ({
+                  id: p.part_key || p.id || p.product_code || `pm-${i}`,
+                  product_code: p.product_code || '',
+                  name: p.part_name || p.name || '',
+                  cost_price: p.cost_price || 0,
+                }))
                 setPartsMaster(mapped)
-                const updated = mapped.find((pp: any) => pp.id === selectedPartKey || String(pp.id) === String(selectedPartKey))
+                const updated = mapped.find(
+                  (pp: any) => pp.id === selectedPartKey || String(pp.id) === String(selectedPartKey)
+                )
                 if (updated) {
                   setSelectedPartKey('')
                   setTimeout(() => setSelectedPartKey(updated.id), 10)
@@ -2480,7 +2629,7 @@ export default function WorkOrderCostPage() {
           }
         } catch (err) {
           console.error('parts master update error:', err)
-          alert('保存に失敗しました')
+          alert(err instanceof Error ? err.message : '保存に失敗しました')
         }
       } else {
         // 既存の挙動: work-order-costs に保存
@@ -2738,11 +2887,13 @@ export default function WorkOrderCostPage() {
         }
 
         if (mode === 'line' && selectedPartKey) {
-          const itemRes = await fetch(`/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}`)
+          const itemRes = await fetch(`/api/work-order-costs/items-by-part-key?part_key=${encodeURIComponent(selectedPartKey)}&fiscal_year=${fiscalYear}`)
           if (itemRes.ok) {
-            const items = await itemRes.json()
-            if (Array.isArray(items) && items.length > 0) {
-              const restored = items.map((it: any) => ({
+            const payload = await itemRes.json()
+            const parsed = parseLineCostItemsResponse(payload)
+            setLineCostSourceYear(parsed.sourceYear)
+            if (parsed.items.length > 0) {
+              const restored = parsed.items.map((it: any) => ({
                 id: it.id || crypto.randomUUID(),
                 component_name: it.component_name || '',
                 product_code: it.product_code || '',
@@ -2816,7 +2967,7 @@ export default function WorkOrderCostPage() {
               {mode === 'order'
                 ? `D指令ごとの材料費・工賃・間接費を編集・保存します（${formatFiscalYearLabel(fiscalYear)}）`
                 : mode === 'line'
-                  ? `パーツ単位で材料費・工賃・間接費を編集・保存します（${formatFiscalYearLabel(fiscalYear)}）`
+                  ? `パーツ単位で材料費・工賃・間接費を編集・保存します（${formatFiscalYearLabel(fiscalYear)}）。材料費は前年度を引き継ぎ、変更は今年度として保存します。`
                   : '機種を選ぶと該当パーツが表示されます。パーツをクリックして原価計算できます。年度は使いません。'}
             </p>
             {mode === 'line' && partsReturnModel && (
@@ -3654,9 +3805,16 @@ export default function WorkOrderCostPage() {
                       <select
                         value={selectedPartKey}
                         onChange={(e) => setSelectedPartKey(e.target.value)}
-                        className="min-w-[180px] flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
+                        disabled={!selectedLineId}
+                        className="min-w-[180px] flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/50 focus:outline-none disabled:opacity-50"
                       >
-                        <option value="">パーツを選択してください</option>
+                        <option value="">
+                          {!selectedLineId
+                            ? '先にL指令を選択'
+                            : partsForLineDropdown.length === 0
+                              ? 'このL指令に割り当てパーツがありません'
+                              : 'パーツを選択してください'}
+                        </option>
                         {partsForLineDropdown.map((p, idx) => (
                           <option key={p.id || p.product_code || idx} value={p.id || p.product_code || ''}>{p.name} ({p.product_code || p.id})</option>
                         ))}
@@ -3664,6 +3822,13 @@ export default function WorkOrderCostPage() {
                     </>
                   )}
                 </div>
+              {mode === 'line' &&
+                lineCostSourceYear &&
+                lineCostSourceYear !== fiscalYear && (
+                  <p className="mt-2 text-xs text-amber-300">
+                    {formatFiscalYearLabel(lineCostSourceYear)}の構成部品（材料費・材料間接費）を引き継いで表示しています。使用材料や単価を直して保存すると、{formatFiscalYearLabel(fiscalYear)}として残ります（前年度は変わりません）。
+                  </p>
+                )}
               {mode === 'order' && (selectedOrder?.cost_mode === 'bom' || branchOptions.length > 0) && (
                 <div className="mt-3">
                   <label className="text-xs font-semibold text-violet-300">枝番</label>
@@ -3828,21 +3993,33 @@ export default function WorkOrderCostPage() {
                   <td className="py-4 pr-4 font-medium text-rose-400">固定</td>
                   <td className="py-4 pr-4 text-rose-300 font-medium">
                     <div>{effectiveDurationMinutes ?? '-'} 分</div>
-                    {mode === 'line' && selectedPartKey && totalProductionDurationMinutes > 0 && (
+                    {mode === 'line' && selectedPartKey && (
                       <div className="mt-1 text-xs text-rose-200/80">
-                        {plannedPartQty && plannedPartQty > 0 ? (
+                        {lineLaborQuantity?.kind === 'work_report' ? (
                           <>
-                            制作所要 {totalProductionDurationMinutes.toLocaleString('ja-JP')}分
-                            ÷ 計画 {plannedPartQty.toLocaleString('ja-JP')}個
+                            所要 {lineLaborQuantity.totalMinutes.toLocaleString('ja-JP')}分
+                            ÷ 完成 {lineLaborQuantity.qty.toLocaleString('ja-JP')}個
+                            （{formatFiscalYearLabel(fiscalYear)}）
+                          </>
+                        ) : lineLaborQuantity?.kind === 'work_report_missing' ? (
+                          <span className="text-amber-300">
+                            {lineLaborQuantity.totalMinutes > 0
+                              ? `所要 ${lineLaborQuantity.totalMinutes.toLocaleString('ja-JP')}分。完成個数が未入力のため1個あたりに換算できません`
+                              : '選択年度の確定日報の所要時間・完成個数が未入力です'}
+                          </span>
+                        ) : lineLaborQuantity?.kind === 'plan' ? (
+                          <>
+                            900番台: 制作所要 {lineLaborQuantity.totalMinutes.toLocaleString('ja-JP')}分
+                            ÷ 計画 {lineLaborQuantity.qty.toLocaleString('ja-JP')}個
                             {plannedPartQtyMeta?.plan_fiscal_year
                               ? `（${plannedPartQtyMeta.plan_fiscal_year}年度）`
                               : ''}
                           </>
-                        ) : (
+                        ) : lineLaborQuantity?.kind === 'plan_missing' ? (
                           <span className="text-amber-300">
-                            製造計画が未登録のため1個あたりに換算できません
+                            900番台は製造計画が未登録のため1個あたりに換算できません
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </td>

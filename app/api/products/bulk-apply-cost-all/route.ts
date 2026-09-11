@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { carryOverLineCostsFromPreviousYear } from '@/lib/line-cost-carryover'
 import {
   computeCostLineFromMasterUnitPrice,
   rollupWorkOrderCostHeaders,
@@ -38,6 +40,19 @@ export async function POST(req: Request) {
     body = { execute: false }
   }
   try {
+    const execute = Boolean(body.execute)
+    const currentYear = getCurrentFiscalYear()
+    if (execute) {
+      try {
+        await carryOverLineCostsFromPreviousYear(supabase, {
+          fromYear: currentYear - 1,
+          toYear: currentYear,
+        })
+      } catch (carryError) {
+        console.warn('line cost carry-over before bulk apply:', carryError)
+      }
+    }
+
     // 1. 製品マスタ全件取得（1,000件上限を超える場合はページング）
     const productsData: { product_code: string | null; cost_price: number | null }[] = []
     for (let offset = 0; ; offset += PAGE_SIZE) {
@@ -105,6 +120,35 @@ export async function POST(req: Request) {
       if (rows.length < PAGE_SIZE) break
     }
 
+    const headerIds = [...new Set(allItems.map((row) => row.work_order_cost_id).filter(Boolean))]
+    const headerYearById = new Map<string, number | null>()
+    for (let i = 0; i < headerIds.length; i += 100) {
+      const chunk = headerIds.slice(i, i + 100)
+      const withYear = await supabase
+        .from('work_order_costs')
+        .select('id, fiscal_year, work_order_id')
+        .in('id', chunk)
+      if (withYear.error && String(withYear.error.message || '').includes('fiscal_year')) {
+        break
+      }
+      if (withYear.error) {
+        return NextResponse.json({ error: withYear.error.message }, { status: 500 })
+      }
+      for (const header of withYear.data || []) {
+        headerYearById.set(
+          String(header.id),
+          header.fiscal_year == null ? null : Number(header.fiscal_year)
+        )
+      }
+    }
+
+    const currentYearLineItems = allItems.filter((item) => {
+      if (item.master_type !== 'ライン原価') return true
+      const year = headerYearById.get(item.work_order_cost_id)
+      if (year == null || !Number.isFinite(year)) return true
+      return year === currentYear
+    })
+
     // 3. 分類
     type UpdateTarget = {
       id: string
@@ -129,7 +173,7 @@ export async function POST(req: Request) {
     let skippedNoCost = 0
     let unchanged = 0
 
-    for (const item of allItems) {
+    for (const item of currentYearLineItems) {
       const code = String(item.product_code || '').trim()
       if (!code) {
         unchanged++
@@ -196,7 +240,7 @@ export async function POST(req: Request) {
         success: true,
         mode: 'preview',
         summary: {
-          totalScanned: allItems.length,
+          totalScanned: currentYearLineItems.length,
           updated: toUpdate.length,
           skippedNoProduct,
           skippedNoCost,
@@ -262,7 +306,7 @@ export async function POST(req: Request) {
       success: true,
       mode: 'execute',
       summary: {
-        totalScanned: allItems.length,
+        totalScanned: currentYearLineItems.length,
         updated: toUpdate.length,
         skippedNoProduct,
         skippedNoCost,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
+import { getCurrentFiscalYear, parseFiscalYearParam, workOrderFiscalYearOrFilter } from '@/lib/fiscal-year'
 import {
   calcAssemblyLaborFromMinutes,
 } from '@/lib/work-order-assembly-labor'
@@ -157,11 +157,7 @@ export async function GET(req: Request) {
       query = query.eq('exclude_from_work_report', false)
     }
     if (fiscalYear) {
-      if (fiscalYear === getCurrentFiscalYear()) {
-        query = query.or(`fiscal_year.eq.${fiscalYear},fiscal_year.is.null`)
-      } else {
-        query = query.eq('fiscal_year', fiscalYear)
-      }
+      query = query.or(workOrderFiscalYearOrFilter(fiscalYear))
     }
 
     if (orderNo) {

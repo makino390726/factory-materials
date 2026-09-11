@@ -711,7 +711,7 @@ export default function WorkOrdersPage() {
               D指令マスタ
             </h1>
             <p className="mt-2 text-sm text-indigo-100/80">
-              {formatFiscalYearLabel(fiscalYear)} の指令を表示・登録します。前年度は年度を切り替えて呼び出します。
+              {formatFiscalYearLabel(fiscalYear)} の指令を表示・登録します。当年度は指令マスタ全件（前年度含む）を出します。過去年度だけ見る場合は年度を切り替えてください。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

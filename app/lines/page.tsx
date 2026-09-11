@@ -395,6 +395,40 @@ export default function LinesPage() {
     }
   }
 
+  const handleCarryOverPreviousYear = async () => {
+    const fromYear = fiscalYear - 1
+    if (
+      !confirm(
+        `${formatFiscalYearLabel(fromYear)}の L指令→パーツ名→構成部品（材料費・材料間接費）を${formatFiscalYearLabel(fiscalYear)}へ繰り越します。\n工費は繰越しません。既にある今年度データは上書きしません。よろしいですか？`
+      )
+    ) {
+      return
+    }
+
+    setLaborActionLoading(true)
+    setLaborSettingsError(null)
+    try {
+      const response = await fetch('/api/lines/carry-over-costs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_year: fromYear, to_year: fiscalYear }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || '繰越に失敗しました')
+      }
+      await fetchLaborSettings(fiscalYear)
+      alert(
+        data.message ||
+          `繰越完了: ${data.copied ?? 0}件 / スキップ ${data.skipped ?? 0}件`
+      )
+    } catch (err) {
+      setLaborSettingsError(err instanceof Error ? err.message : '繰越に失敗しました')
+    } finally {
+      setLaborActionLoading(false)
+    }
+  }
+
   const handleBulkLaborRecalc = async () => {
     const confirmedCount = laborSettings.filter((row) => row.settings_confirmed).length
     if (confirmedCount === 0) {
@@ -794,9 +828,8 @@ export default function LinesPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
               <p className="mt-1 text-sm text-slate-600">
-                900番台以外のL指令は、選択年度の確定日報の所要時間 ÷ 完成個数で1個あたり所要時間を出し、
-                工費 = 所要時間 ÷ 480分 × ¥17,810、間接費 = 工費 × 30% をパーツ原価へ反映します。
-                作業日報の確定保存のたびに今年度分が自動更新されます。900番台は対象外です。
+                L指令番号・指令名は毎年同じマスタを使います。構成部品の材料費・材料間接費は前年度を引き継ぎ、使用材料や単価の変更は当該年度で保存します。
+                900番台以外の工費は、選択年度の確定日報の所要時間 ÷ 完成個数で更新します（工費 = 所要時間 ÷ 480分 × ¥17,810、間接費 = 工費 × 30%）。900番台は対象外です。
                 現在表示: {formatFiscalYearLabel(fiscalYear)}
               </p>
             </div>
@@ -814,6 +847,14 @@ export default function LinesPage() {
                 className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
               >
                 BOMから共通明細を再検出
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCarryOverPreviousYear()}
+                disabled={laborActionLoading}
+                className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
+              >
+                前年度のL指令→パーツ→構成部品を繰越
               </button>
               <button
                 type="button"

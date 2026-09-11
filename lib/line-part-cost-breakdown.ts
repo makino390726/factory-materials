@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 
 export type PartCostUnit = {
   material_unit: number
@@ -18,6 +19,7 @@ type CostItemRow = {
 
 type CostHeaderRow = {
   id: string
+  fiscal_year?: number | null
   total_material_cost: number | null
   total_labor_cost: number | null
   total_indirect_cost: number | null
@@ -37,6 +39,51 @@ function emptyUnit(): PartCostUnit {
 }
 
 const IN_QUERY_CHUNK = 150
+
+function hasMissingColumnError(error: { message?: string } | null, column: string) {
+  return Boolean(error?.message && error.message.includes(column))
+}
+
+function pickPreferredHeader(headers: CostHeaderRow[], preferredYear: number) {
+  const yearMatch = headers.filter((header) => Number(header.fiscal_year) === preferredYear)
+  const pool = yearMatch.length > 0 ? yearMatch : headers
+  return [...pool].sort((a, b) => {
+    const aTime = String(a.updated_at || a.created_at || '')
+    const bTime = String(b.updated_at || b.created_at || '')
+    return bTime.localeCompare(aTime)
+  })[0]
+}
+
+async function loadCostHeadersByIds(supabase: SupabaseClient, headerIds: string[]) {
+  const headersById = new Map<string, CostHeaderRow>()
+  for (const idChunk of chunkArray(headerIds, IN_QUERY_CHUNK)) {
+    const withYear = await supabase
+      .from('work_order_costs')
+      .select(
+        'id, fiscal_year, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
+      )
+      .in('id', idChunk)
+
+    let headers = (withYear.data || []) as CostHeaderRow[]
+    if (withYear.error && hasMissingColumnError(withYear.error, 'fiscal_year')) {
+      const fallback = await supabase
+        .from('work_order_costs')
+        .select(
+          'id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
+        )
+        .in('id', idChunk)
+      if (fallback.error) throw fallback.error
+      headers = (fallback.data || []) as CostHeaderRow[]
+    } else if (withYear.error) {
+      throw withYear.error
+    }
+
+    for (const header of headers) {
+      headersById.set(header.id, header)
+    }
+  }
+  return headersById
+}
 
 function chunkArray<T>(values: T[], size: number): T[][] {
   if (values.length === 0) return []
@@ -298,21 +345,7 @@ export async function buildMasterCostUnitMap(
     }
   }
 
-  const headersById = new Map<string, CostHeaderRow>()
-  for (const idChunk of chunkArray([...headerIds], IN_QUERY_CHUNK)) {
-    const { data: headers, error: headerError } = await supabase
-      .from('work_order_costs')
-      .select(
-        'id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
-      )
-      .in('id', idChunk)
-
-    if (headerError) throw headerError
-
-    for (const header of (headers || []) as CostHeaderRow[]) {
-      headersById.set(header.id, header)
-    }
-  }
+  const headersById = await loadCostHeadersByIds(supabase, [...headerIds])
 
   for (const [key, spec] of uniqueSpecs) {
     const masterItems = itemsByMaster.get(key) || []
@@ -328,11 +361,10 @@ export async function buildMasterCostUnitMap(
     }
 
     if (headerCandidates.size > 0) {
-      const latestHeader = [...headerCandidates.values()].sort((a, b) => {
-        const aTime = String(a.updated_at || a.created_at || '')
-        const bTime = String(b.updated_at || b.created_at || '')
-        return bTime.localeCompare(aTime)
-      })[0]
+      const latestHeader = pickPreferredHeader(
+        [...headerCandidates.values()],
+        getCurrentFiscalYear()
+      )
       const latestItems = masterItems.filter(
         (item) => item.work_order_cost_id === latestHeader.id
       )
@@ -380,21 +412,7 @@ export async function buildLinePartCostUnitMap(
     }
   }
 
-  const headersById = new Map<string, CostHeaderRow>()
-  for (const idChunk of chunkArray([...headerIds], IN_QUERY_CHUNK)) {
-    const { data: headers, error: headerError } = await supabase
-      .from('work_order_costs')
-      .select(
-        'id, total_material_cost, total_labor_cost, total_indirect_cost, total_cost, updated_at, created_at'
-      )
-      .in('id', idChunk)
-
-    if (headerError) throw headerError
-
-    for (const header of (headers || []) as CostHeaderRow[]) {
-      headersById.set(header.id, header)
-    }
-  }
+  const headersById = await loadCostHeadersByIds(supabase, [...headerIds])
 
   for (const partKey of uniqueKeys) {
     const partItems = itemsByPart.get(partKey) || []
@@ -407,11 +425,10 @@ export async function buildLinePartCostUnitMap(
       }
 
       if (headerCandidates.size > 0) {
-        const latestHeader = [...headerCandidates.values()].sort((a, b) => {
-          const aTime = String(a.updated_at || a.created_at || '')
-          const bTime = String(b.updated_at || b.created_at || '')
-          return bTime.localeCompare(aTime)
-        })[0]
+        const latestHeader = pickPreferredHeader(
+          [...headerCandidates.values()],
+          getCurrentFiscalYear()
+        )
 
         const latestItems = partItems.filter(
           (item) => item.work_order_cost_id === latestHeader.id

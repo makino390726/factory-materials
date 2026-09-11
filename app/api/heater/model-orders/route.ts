@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
+import { getCurrentFiscalYear, matchesVisibleFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
 import {
   DEFAULT_PRODUCT_CATEGORY,
   inferProductCategory,
@@ -130,17 +130,13 @@ export async function GET(request: NextRequest) {
     }
 
     const { orderRows: allOrderRows } = await loadOrders()
-    const orderRows = allOrderRows.filter((row) => {
-      const year = Number((row as { fiscal_year?: number | null }).fiscal_year)
-      if (!Number.isFinite(year) || year <= 0) {
-        const created = String((row as { created_at?: string }).created_at || '')
-        const createdYear = Number(created.slice(0, 4))
-        const createdMonth = Number(created.slice(5, 7))
-        if (!Number.isFinite(createdYear) || !Number.isFinite(createdMonth)) return fiscalYear === getCurrentFiscalYear()
-        return (createdMonth >= 9 ? createdYear + 1 : createdYear) === fiscalYear
-      }
-      return year === fiscalYear
-    })
+    const orderRows = allOrderRows.filter((row) =>
+      matchesVisibleFiscalYear(
+        (row as { fiscal_year?: number | null }).fiscal_year,
+        fiscalYear,
+        (row as { created_at?: string }).created_at
+      )
+    )
     const heaterRefs = (models || []).map((m) => ({
       model: String(m.model),
       name: m.name ?? null,

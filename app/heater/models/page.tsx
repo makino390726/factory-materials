@@ -288,7 +288,7 @@ export default function HeaterModelsPage() {
               機種マスタ
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              配下の制作指令は会計年度で切り替えます。新年度は年度を選んで新たなD指令を登録します。
+              配下の制作指令は会計年度で切り替えます。当年度は指令マスタ全件（前年度含む）を表示します。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

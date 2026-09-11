@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 import { fetchLineAccumulations, type LineAccumulation } from '@/lib/line-work-accumulation'
+import { combineLineCostTotals, loadLineCostForPartYear } from '@/lib/line-cost-carryover'
 import {
   calcPerUnitDurationMinutes,
   getPlannedPartQuantity,
@@ -207,8 +208,10 @@ export async function recalculateAssignmentLabor(
     requireConfirmed?: boolean
     durationCache?: Map<string, { minutes: number; note: string | null }>
     accumulation?: LineAccumulation | null
+    fiscalYear?: number
   }
 ): Promise<LaborRecalcResult> {
+  const fiscalYear = options?.fiscalYear ?? getCurrentFiscalYear()
   const preview = await buildLaborRecalcPreview(
     supabase,
     assignment,
@@ -236,43 +239,45 @@ export async function recalculateAssignmentLabor(
     }
   }
 
-  const { data: existingItems, error: itemsError } = await supabase
-    .from('work_order_cost_items')
-    .select('*')
-    .eq('master_type', 'ライン原価')
-    .eq('master_id', assignment.part_key)
-    .order('line_no', { ascending: true })
+  let bundle = await loadLineCostForPartYear(supabase, assignment.part_key, fiscalYear)
+  const currentYearHeader =
+    bundle?.header.id && Number(bundle.header.fiscal_year) === fiscalYear ? bundle : null
+  if (!currentYearHeader) {
+    const previous = await loadLineCostForPartYear(supabase, assignment.part_key, fiscalYear - 1)
+    if (previous?.items.length) bundle = previous
+  }
+  const existingItems = bundle?.items || []
 
-  if (itemsError) throw itemsError
-
-  const materialTotal = (existingItems || []).reduce(
+  const materialTotal = existingItems.reduce(
     (sum, row) => sum + Number(row.material_cost || 0),
     0
   )
-  const itemLaborTotal = (existingItems || []).reduce(
-    (sum, row) => sum + Number(row.labor_cost || 0),
+  const materialIndirect = existingItems.reduce(
+    (sum, row) => sum + Number(row.indirect_cost || 0),
     0
   )
-  const itemIndirectTotal = (existingItems || []).reduce(
-    (sum, row) => sum + Number(row.indirect_cost || 0),
+  const itemLaborTotal = existingItems.reduce(
+    (sum, row) => sum + Number(row.labor_cost || 0),
     0
   )
 
   const headerLabor = preview.per_unit_labor_cost
-  const laborIndirect = preview.uses_work_report
-    ? preview.per_unit_indirect_cost
-    : Math.round((materialTotal + headerLabor + itemLaborTotal) * 0.3)
-  const totalCost = materialTotal + itemLaborTotal + itemIndirectTotal + headerLabor + laborIndirect
+  const totals = combineLineCostTotals({
+    material: materialTotal,
+    materialIndirect,
+    labor: headerLabor,
+  })
+  const totalCost = totals.total_cost + itemLaborTotal
 
-  const existingHeaderId = existingItems?.[0]?.work_order_cost_id
-    ? String(existingItems[0].work_order_cost_id)
-    : null
+  const existingHeaderId =
+    currentYearHeader?.header.id ? String(currentYearHeader.header.id) : null
 
   const headerPayload = {
-    total_material_cost: materialTotal,
-    total_labor_cost: headerLabor,
-    total_indirect_cost: laborIndirect,
+    total_material_cost: totals.total_material_cost,
+    total_labor_cost: totals.total_labor_cost,
+    total_indirect_cost: totals.total_indirect_cost,
     total_cost: totalCost,
+    fiscal_year: fiscalYear,
     updated_at: new Date().toISOString(),
   }
 
@@ -284,13 +289,42 @@ export async function recalculateAssignmentLabor(
 
     if (updateHeaderError) throw updateHeaderError
   } else {
-    const { error: insertHeaderError } = await supabase.from('work_order_costs').insert({
-      order_no: buildLineOrderNo(assignment.part_key),
-      work_order_id: null,
-      ...headerPayload,
-    })
+    const { data: created, error: insertHeaderError } = await supabase
+      .from('work_order_costs')
+      .insert({
+        order_no: buildLineOrderNo(assignment.part_key),
+        work_order_id: null,
+        ...headerPayload,
+      })
+      .select('id')
+      .single()
 
     if (insertHeaderError) throw insertHeaderError
+
+    if (created?.id && existingItems.length > 0) {
+      const { error: insertItemsError } = await supabase.from('work_order_cost_items').insert(
+        existingItems.map((row, index) => ({
+          work_order_cost_id: created.id,
+          line_no: Number(row.line_no || index + 1),
+          component_name: row.component_name ?? null,
+          product_code: row.product_code ?? null,
+          part_name: row.part_name ?? null,
+          spec: row.spec ?? null,
+          quantity: row.quantity ?? 0,
+          unit_price: row.unit_price ?? 0,
+          material_cost: Math.round(Number(row.material_cost || 0)),
+          labor_cost: 0,
+          indirect_cost: Math.round(Number(row.indirect_cost || 0)),
+          line_total:
+            Math.round(Number(row.material_cost || 0)) + Math.round(Number(row.indirect_cost || 0)),
+          cost_type: row.cost_type || '加',
+          master_type: 'ライン原価',
+          master_id: assignment.part_key,
+          part_key: row.part_key || assignment.part_key,
+        }))
+      )
+      if (insertItemsError) throw insertItemsError
+    }
   }
 
   const { error: partUpdateError } = await supabase
@@ -378,6 +412,7 @@ export async function bulkRecalculateConfirmedAssignments(
           requireConfirmed: onlyConfirmed,
           durationCache,
           accumulation: accumulations.get(line.id) || null,
+          fiscalYear,
         }
       )
       results.push(result)
@@ -452,6 +487,7 @@ export async function syncTouchedLineLaborFromWorkReports(
       {
         requireConfirmed: false,
         accumulation: accumulations.get(line.id) || null,
+        fiscalYear,
       }
     )
     if (result.success) updated += 1
