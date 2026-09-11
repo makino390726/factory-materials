@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
 import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
+import FiscalYearSelect from '@/app/components/FiscalYearSelect'
+import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
 import {
   type BomGroupDefinition,
   UNCATEGORIZED_BOM_GROUP,
@@ -38,7 +40,10 @@ type Product = {
 type LineMaster = {
   id: string
   line_code: string
+  name?: string | null
   standard_duration_minutes: number | null
+  accumulated_duration_minutes?: number | null
+  accumulated_completed_qty?: number | null
   part_key?: string | null
   part_assignments?: Array<{
     part_key: string
@@ -132,6 +137,7 @@ export default function WorkOrderCostPage() {
   const [isSearching, setIsSearching] = useState(false)
   const timersRef = useRef<Record<string, number>>({})
   const [mode, setMode] = useState<'order' | 'line' | 'parts'>('order')
+  const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear)
   const [heaterModels, setHeaterModels] = useState<
     Array<{ model: string; name: string | null }>
   >([])
@@ -224,6 +230,7 @@ export default function WorkOrderCostPage() {
   const [modelCostImportResult, setModelCostImportResult] = useState<string | null>(null)
   const [partsMaster, setPartsMaster] = useState<Product[]>([])
   const [lineMasters, setLineMasters] = useState<LineMaster[]>([])
+  const [selectedLineId, setSelectedLineId] = useState('')
   const [selectedPartKey, setSelectedPartKey] = useState('')
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
   const [selectedBranchId, setSelectedBranchId] = useState('')
@@ -1076,10 +1083,14 @@ export default function WorkOrderCostPage() {
       setIsLoading(true)
       setError(null)
       try {
-        const response = await fetch('/api/work-orders')
+        const response = await fetch(`/api/work-orders?fiscal_year=${fiscalYear}`)
         if (!response.ok) throw new Error('D指令の取得に失敗しました')
         const data = await response.json()
-        setWorkOrders(data || [])
+        const list = Array.isArray(data) ? (data as WorkOrderOption[]) : []
+        setWorkOrders(list)
+        setSelectedWorkOrderId((prev) =>
+          prev && list.some((order) => order.id === prev) ? prev : ''
+        )
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : 'Unknown error')
       } finally {
@@ -1088,7 +1099,7 @@ export default function WorkOrderCostPage() {
     }
 
     fetchWorkOrders()
-  }, [])
+  }, [fiscalYear])
 
   useEffect(() => {
     if (mode !== 'order') {
@@ -1229,23 +1240,25 @@ export default function WorkOrderCostPage() {
     setSelectedWorkOrderId('')
   }, [mode])
 
-  // L指令モードで所要時間を参照するため、L指令マスタを取得
+  // L指令モードで所要時間を参照するため、L指令マスタを取得（選択年度の累積）
   useEffect(() => {
     if (mode !== 'line') return
 
     const loadLines = async () => {
       try {
-        const res = await fetch('/api/lines')
+        const res = await fetch(`/api/lines?fiscal_year=${fiscalYear}`)
         if (!res.ok) return
         const data = await res.json()
-        setLineMasters(Array.isArray(data) ? data : [])
+        const list = Array.isArray(data) ? (data as LineMaster[]) : []
+        setLineMasters(list)
+        setSelectedLineId((prev) => (prev && list.some((line) => line.id === prev) ? prev : ''))
       } catch (err) {
         console.error('line master load error', err)
       }
     }
 
     loadLines()
-  }, [mode])
+  }, [mode, fiscalYear])
 
   // 追加: ページ読み込み時に parts master を先読みしておく（L指令切替の遅延対策）
   useEffect(() => {
@@ -1424,6 +1437,44 @@ export default function WorkOrderCostPage() {
         (line.part_assignments || []).some((a) => a.part_key === selectedPartKey)
     )
   }, [lineMasters, selectedPartKey])
+
+  useEffect(() => {
+    if (mode !== 'line' || !selectedPartKey || selectedLineId) return
+    const match = matchingLines[0]
+    if (match) setSelectedLineId(match.id)
+  }, [mode, selectedPartKey, selectedLineId, matchingLines])
+
+  const linesForDropdown = useMemo(() => {
+    const withWork = lineMasters.filter(
+      (line) =>
+        Number(line.accumulated_duration_minutes || 0) > 0 ||
+        Number(line.accumulated_completed_qty || 0) > 0
+    )
+    const source = withWork.length > 0 ? withWork : lineMasters
+    return [...source].sort((a, b) =>
+      String(a.line_code || '').localeCompare(String(b.line_code || ''), 'ja-JP', { numeric: true })
+    )
+  }, [lineMasters])
+
+  const partsForLineDropdown = useMemo(() => {
+    const sourceLines = selectedLineId
+      ? lineMasters.filter((line) => line.id === selectedLineId)
+      : lineMasters
+    const keys = new Set<string>()
+    for (const line of sourceLines) {
+      if (line.part_key) keys.add(line.part_key)
+      for (const assignment of line.part_assignments || []) {
+        if (assignment.part_key) keys.add(assignment.part_key)
+      }
+    }
+    const list =
+      keys.size > 0
+        ? partsMaster.filter((part) => keys.has(part.id) || keys.has(part.product_code))
+        : partsMaster
+    return [...list].sort((a, b) =>
+      String(a.id || a.product_code || '').localeCompare(String(b.id || b.product_code || ''))
+    )
+  }, [lineMasters, partsMaster, selectedLineId])
 
   useEffect(() => {
     if (mode !== 'line' || !selectedPartKey) {
@@ -2763,10 +2814,10 @@ export default function WorkOrderCostPage() {
             </h1>
             <p className="mt-2 text-sm text-slate-300">
               {mode === 'order'
-                ? 'D指令ごとの材料費・工賃・間接費を編集・保存します'
+                ? `D指令ごとの材料費・工賃・間接費を編集・保存します（${formatFiscalYearLabel(fiscalYear)}）`
                 : mode === 'line'
-                  ? 'パーツ単位で材料費・工賃・間接費を編集・保存します'
-                  : '機種を選ぶと該当パーツが表示されます。パーツをクリックして原価計算できます'}
+                  ? `パーツ単位で材料費・工賃・間接費を編集・保存します（${formatFiscalYearLabel(fiscalYear)}）`
+                  : '機種を選ぶと該当パーツが表示されます。パーツをクリックして原価計算できます。年度は使いません。'}
             </p>
             {mode === 'line' && partsReturnModel && (
               partsReturnFrom === 'bom' ? (
@@ -3527,8 +3578,18 @@ export default function WorkOrderCostPage() {
           <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_1fr]">
             <div>
-                <label className="text-sm font-semibold text-slate-200">{mode === 'order' ? 'D指令' : 'パーツリスト選択'}</label>
-                <div className="mt-2 flex gap-2">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <label className="text-sm font-semibold text-slate-200">
+                    {mode === 'order' ? 'D指令' : 'L指令 / パーツ'}
+                  </label>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <FiscalYearSelect
+                    value={fiscalYear}
+                    onChange={setFiscalYear}
+                    className="w-44 shrink-0"
+                    hint={false}
+                  />
                   {mode === 'order' ? (
                     <>
                       <select
@@ -3540,9 +3601,11 @@ export default function WorkOrderCostPage() {
                             setSourceWorkOrderId('')
                           }
                         }}
-                        className="flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-500/50 focus:outline-none"
+                        className="min-w-[220px] flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-500/50 focus:outline-none"
                       >
-                        <option value="">D指令を選択してください</option>
+                        <option value="">
+                          {isLoading ? '読み込み中...' : `${formatFiscalYearLabel(fiscalYear)}のD指令を選択`}
+                        </option>
                         {getSortedOrders().map((order) => (
                           <option key={order.id} value={order.id}>
                             {order.order_no} {order.product_name ? `- ${order.product_name}` : ''}
@@ -3559,16 +3622,46 @@ export default function WorkOrderCostPage() {
                       </button>
                     </>
                   ) : (
-                    <select
-                      value={selectedPartKey}
-                      onChange={(e) => setSelectedPartKey(e.target.value)}
-                      className="flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
-                    >
-                      <option value="">パーツを選択してください</option>
-                      {[...partsMaster].sort((a, b) => String(a.id || a.product_code || '').localeCompare(String(b.id || b.product_code || ''))).map((p, idx) => (
-                        <option key={p.id || p.product_code || idx} value={p.id || p.product_code || ''}>{p.name} ({p.product_code || p.id})</option>
-                      ))}
-                    </select>
+                    <>
+                      <select
+                        value={selectedLineId}
+                        onChange={(event) => {
+                          const nextId = event.target.value
+                          setSelectedLineId(nextId)
+                          const line = lineMasters.find((item) => item.id === nextId)
+                          const assigned = [
+                            line?.part_key,
+                            ...(line?.part_assignments || []).map((a) => a.part_key),
+                          ].filter(Boolean) as string[]
+                          if (assigned.length === 0) {
+                            setSelectedPartKey('')
+                            return
+                          }
+                          if (!assigned.includes(selectedPartKey)) {
+                            setSelectedPartKey(assigned[0])
+                          }
+                        }}
+                        className="min-w-[180px] flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
+                      >
+                        <option value="">{formatFiscalYearLabel(fiscalYear)}のL指令を選択</option>
+                        {linesForDropdown.map((line) => (
+                          <option key={line.id} value={line.id}>
+                            {line.line_code}
+                            {line.name ? ` - ${line.name}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedPartKey}
+                        onChange={(e) => setSelectedPartKey(e.target.value)}
+                        className="min-w-[180px] flex-1 rounded-xl border-2 border-slate-600 bg-slate-800 px-4 py-3 text-slate-100 font-medium shadow-sm focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
+                      >
+                        <option value="">パーツを選択してください</option>
+                        {partsForLineDropdown.map((p, idx) => (
+                          <option key={p.id || p.product_code || idx} value={p.id || p.product_code || ''}>{p.name} ({p.product_code || p.id})</option>
+                        ))}
+                      </select>
+                    </>
                   )}
                 </div>
               {mode === 'order' && (selectedOrder?.cost_mode === 'bom' || branchOptions.length > 0) && (

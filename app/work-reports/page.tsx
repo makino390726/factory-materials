@@ -5,6 +5,7 @@ import Link from 'next/link'
 import ModalOverlay from '@/app/components/ModalOverlay'
 import PushNotificationManager from '@/app/components/PushNotificationManager'
 import { isModelInstructionOrderNo } from '@/lib/model-instruction-orders'
+import { getCurrentFiscalYear, getFiscalYearFromDate } from '@/lib/fiscal-year'
 import { validateWorkReportItem } from '@/lib/work-report-item-validation'
 import {
   computeItemDurationMinutes,
@@ -104,6 +105,13 @@ const formatMinutes = (value: number) => {
   return `${hours}h ${minutes.toString().padStart(2, '0')}m`
 }
 
+const toLocalDateInputValue = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 const isSelectableWorkOrder = (order: WorkOrderOption) => {
   // D指令リストでは「完了」状態および「日報非表示」のD指令は選択対象外
   if (order.exclude_from_work_report) return false
@@ -145,8 +153,7 @@ export default function WorkReportsPage() {
   >([])
 
   useEffect(() => {
-    const today = new Date()
-    setWorkDate(today.toISOString().slice(0, 10))
+    setWorkDate(toLocalDateInputValue())
 
     const stored = sessionStorage.getItem('staff')
     if (stored) {
@@ -193,10 +200,15 @@ export default function WorkReportsPage() {
     fetchNotifications()
   }, [staff])
 
+  const workDateFiscalYear = useMemo(
+    () => getFiscalYearFromDate(workDate) || getCurrentFiscalYear(),
+    [workDate]
+  )
+
   useEffect(() => {
     const fetchLines = async () => {
       try {
-        const response = await fetch('/api/lines')
+        const response = await fetch(`/api/lines?fiscal_year=${workDateFiscalYear}`)
         if (!response.ok) throw new Error('Failed to fetch lines')
         const data = await response.json()
         setLines((data || []).filter((line: LineItem) => line.is_active))
@@ -205,12 +217,15 @@ export default function WorkReportsPage() {
       }
     }
 
+    if (!workDate) return
     fetchLines()
-  }, [])
+  }, [workDate, workDateFiscalYear])
 
-  const refetchWorkOrders = async () => {
+  const refetchWorkOrders = async (fiscalYear = workDateFiscalYear) => {
     try {
-      const response = await fetch('/api/work-orders?for_work_report=1')
+      const response = await fetch(
+        `/api/work-orders?for_work_report=1&fiscal_year=${fiscalYear}`
+      )
       if (!response.ok) throw new Error('Failed to fetch work orders')
       const data = await response.json()
       const selectable = (data || []).filter(isSelectableWorkOrder)
@@ -224,8 +239,9 @@ export default function WorkReportsPage() {
   }
 
   useEffect(() => {
-    refetchWorkOrders()
-  }, [])
+    if (!workDate) return
+    void refetchWorkOrders(workDateFiscalYear)
+  }, [workDate, workDateFiscalYear])
 
   const handleAddOrderCancel = () => {
     setShowAddOrderModal(false)
@@ -931,6 +947,12 @@ export default function WorkReportsPage() {
                                 {order.product_name ? ` - ${order.product_name}` : ''}
                               </option>
                             ))}
+                            {item.instruction_text &&
+                            !workOrders.some((order) => order.order_no === item.instruction_text) ? (
+                              <option value={item.instruction_text}>
+                                {item.instruction_text}（この作業日の年度外）
+                              </option>
+                            ) : null}
                           </select>
                           <button
                             type="button"
@@ -1259,7 +1281,7 @@ export default function WorkReportsPage() {
                     <ul className="space-y-2 text-sm">
                       <li>• 作業内訳の合計所要時間が勤務時間と一致する必要があります。</li>
                       <li>• 作業区分と作業内容は作業内容マスタから選択してください。</li>
-                      <li>• D指令はD指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
+                      <li>• D指令は、作業日の会計年度（9/1〜翌8/31）の未完了一覧から選んでください。年度の切替操作は不要です。</li>
                       <li>• D指令 KR9-0001 は機種指令です。日報ではD指令として選べますが、工程管理表の入庫は「機種指令」で登録してください。</li>
                       <li>• L指令は事前にL指令マスタで登録します。</li>
                       <li>• L指令を選んだ行では、今日の完成個数を入力できます。完成する工程のときだけ入力し、必須ではありません。D指令は制作台数が決まっているため不要です。</li>
@@ -1315,7 +1337,7 @@ export default function WorkReportsPage() {
 
               <div className="flex-1 overflow-y-auto p-6">
                 <iframe
-                  src="/work-orders?modal=true"
+                  src={`/work-orders?modal=true&fiscal_year=${workDateFiscalYear}`}
                   className="w-full h-full border-0"
                   style={{ minHeight: '500px' }}
                   title="Work Order Registration"
