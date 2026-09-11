@@ -52,3 +52,15 @@ export function getFiscalYearDateRange(fiscalYear: number) {
     end: `${fiscalYear}-08-31`,
   }
 }
+
+/** 画面の年度セレクト（来年度〜過去4年） */
+export function listSelectableFiscalYears(now = new Date()) {
+  const current = getCurrentFiscalYear(now)
+  return [current + 1, current, current - 1, current - 2, current - 3, current - 4]
+}
+
+export function parseFiscalYearParam(value: unknown, fallback = getCurrentFiscalYear()) {
+  const parsed = typeof value === 'number' ? value : Number(String(value || '').trim())
+  if (!Number.isFinite(parsed) || parsed < 2000 || parsed > 2100) return fallback
+  return Math.round(parsed)
+}

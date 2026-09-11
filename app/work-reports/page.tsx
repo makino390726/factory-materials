@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import ModalOverlay from '@/app/components/ModalOverlay'
 import PushNotificationManager from '@/app/components/PushNotificationManager'
+import { isModelInstructionOrderNo } from '@/lib/model-instruction-orders'
 import { validateWorkReportItem } from '@/lib/work-report-item-validation'
 import {
   computeItemDurationMinutes,
@@ -66,6 +67,7 @@ type WorkItem = {
   work_content: string
   instruction_text: string
   line_id: string
+  completed_qty: string
   model: string
   machine: string
   notes: string
@@ -88,6 +90,7 @@ const createItem = (): WorkItem => ({
   work_content: '',
   instruction_text: '',
   line_id: '',
+  completed_qty: '',
   model: '',
   machine: '',
   notes: '',
@@ -457,6 +460,14 @@ export default function WorkReportsPage() {
           const model = selectedOrder?.model || ''
           return { ...item, instruction_text: value as string, model }
         }
+        if (key === 'line_id') {
+          const lineId = value as string
+          return {
+            ...item,
+            line_id: lineId,
+            completed_qty: lineId ? item.completed_qty : '',
+          }
+        }
         return { ...item, [key]: value }
       })
     )
@@ -487,6 +498,10 @@ export default function WorkReportsPage() {
           work_content: item.work_content,
           instruction_text: item.instruction_text || '',
           line_id: item.line_id || '',
+          completed_qty:
+            item.completed_qty !== undefined && item.completed_qty !== null && item.completed_qty !== ''
+              ? String(item.completed_qty)
+              : '',
           model: item.model || '',
           machine: item.machine || '',
           notes: item.notes || '',
@@ -558,6 +573,7 @@ export default function WorkReportsPage() {
           work_content: item.work_content.trim(),
           instruction_text: item.instruction_text.trim(),
           line_id: item.line_id || null,
+          completed_qty: item.line_id && item.completed_qty.trim() !== '' ? item.completed_qty.trim() : null,
           model: item.model.trim(),
           machine: item.machine.trim(),
           notes: item.notes.trim(),
@@ -911,6 +927,7 @@ export default function WorkReportsPage() {
                             {workOrders.map((order) => (
                               <option key={order.id} value={order.order_no}>
                                 {order.order_no}
+                                {isModelInstructionOrderNo(order.order_no) ? ' 【機種指令】' : ''}
                                 {order.product_name ? ` - ${order.product_name}` : ''}
                               </option>
                             ))}
@@ -945,6 +962,26 @@ export default function WorkReportsPage() {
                         ))}
                       </select>
                     </div>
+                    {item.line_id ? (
+                      <div>
+                        <label className="text-sm font-bold text-slate-900">
+                          今日の完成個数
+                          <span className="ml-1 text-xs font-normal text-slate-500">（任意）</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          inputMode="numeric"
+                          value={item.completed_qty}
+                          onChange={(event) =>
+                            handleItemChange(item.id, 'completed_qty', event.target.value)
+                          }
+                          placeholder="完成工程のときだけ入力"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                        />
+                      </div>
+                    ) : null}
                     <div>
                       <label className="text-sm font-bold text-slate-900">型式</label>
                       <input
@@ -1223,7 +1260,9 @@ export default function WorkReportsPage() {
                       <li>• 作業内訳の合計所要時間が勤務時間と一致する必要があります。</li>
                       <li>• 作業区分と作業内容は作業内容マスタから選択してください。</li>
                       <li>• D指令はD指令一覧（状態が「完了」以外、かつ「日報非表示」にチェックがないもの）から選択してください。</li>
+                      <li>• D指令 KR9-0001 は機種指令です。日報ではD指令として選べますが、工程管理表の入庫は「機種指令」で登録してください。</li>
                       <li>• L指令は事前にL指令マスタで登録します。</li>
+                      <li>• L指令を選んだ行では、今日の完成個数を入力できます。完成する工程のときだけ入力し、必須ではありません。D指令は制作台数が決まっているため不要です。</li>
                       <li>• 作業区分（直接・間接）の選択が必要です。</li>
                       <li>• 作業区分が「直接」の行は、D指令・L指令のいずれかも選択してください（直接費のため）。</li>
                       <li>• 作業区分が「間接」の行は、D指令・L指令は未入力でも保存できます。</li>

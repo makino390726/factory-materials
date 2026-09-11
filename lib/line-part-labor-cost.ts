@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { fetchLineAccumulations, type LineAccumulation } from '@/lib/line-work-accumulation'
 import {
   calcPerUnitDurationMinutes,
   getPlannedPartQuantity,
@@ -38,10 +40,21 @@ export type LaborRecalcPreview = {
   common_group_label: string | null
   total_duration_minutes: number
   planned_part_qty: number
+  completed_qty: number
   per_unit_duration_minutes: number | null
   per_unit_labor_cost: number
+  per_unit_indirect_cost: number
   settings_confirmed: boolean
   duration_source?: string | null
+  uses_work_report?: boolean
+}
+
+/** L指令 900番台（902〜909など）は日報工費の自動反映対象外 */
+export function isLine900Series(lineCode: string | null | undefined): boolean {
+  const digits = String(lineCode || '').match(/9\d{2}/)
+  if (!digits) return false
+  const n = Number(digits[0])
+  return n >= 900 && n <= 999
 }
 
 export type LaborRecalcResult = LaborRecalcPreview & {
@@ -105,13 +118,57 @@ export function resolveAssignmentDurationMinutes(
   return Math.round((base * ratio) / 100)
 }
 
+function buildPreviewFromMinutes(
+  assignment: LinePartAssignmentRow,
+  line: LineRow,
+  totalDuration: number,
+  divisorQty: number,
+  extras: {
+    planned_part_qty?: number
+    completed_qty?: number
+    duration_source?: string | null
+    uses_work_report?: boolean
+  }
+): LaborRecalcPreview {
+  const perUnitMinutes = calcPerUnitDurationMinutes(totalDuration, divisorQty)
+  const labor = calcLaborCostFromMinutes(perUnitMinutes ?? 0)
+  return {
+    part_key: assignment.part_key,
+    line_code: line.line_code,
+    common_group_label: assignment.common_group_label ?? null,
+    total_duration_minutes: totalDuration,
+    planned_part_qty: extras.planned_part_qty ?? 0,
+    completed_qty: extras.completed_qty ?? 0,
+    per_unit_duration_minutes: perUnitMinutes,
+    per_unit_labor_cost: labor,
+    per_unit_indirect_cost: calcLaborIndirectFromLabor(labor),
+    settings_confirmed: Boolean(assignment.settings_confirmed),
+    duration_source: extras.duration_source ?? null,
+    uses_work_report: Boolean(extras.uses_work_report),
+  }
+}
+
 export async function buildLaborRecalcPreview(
   supabase: SupabaseClient,
   assignment: LinePartAssignmentRow,
   line: LineRow,
   planId?: string | null,
-  durationCache?: Map<string, { minutes: number; note: string | null }>
+  durationCache?: Map<string, { minutes: number; note: string | null }>,
+  accumulation?: LineAccumulation | null
 ): Promise<LaborRecalcPreview> {
+  if (!isLine900Series(line.line_code) && accumulation && accumulation.completed_qty > 0) {
+    const totalDuration = resolveAssignmentDurationMinutes(
+      line,
+      assignment,
+      accumulation.duration_minutes
+    )
+    return buildPreviewFromMinutes(assignment, line, totalDuration, accumulation.completed_qty, {
+      completed_qty: accumulation.completed_qty,
+      duration_source: '作業日報の所要時間 ÷ 完成個数',
+      uses_work_report: true,
+    })
+  }
+
   const allocationModels = parseAllocationModels(assignment.allocation_models)
   const duration = await resolveLineDurationMinutesPreferred(supabase, line, durationCache)
   const totalDuration = resolveAssignmentDurationMinutes(line, assignment, duration.minutes)
@@ -121,22 +178,18 @@ export async function buildLaborRecalcPreview(
     planId,
     allocationModels
   )
-  const perUnitMinutes = calcPerUnitDurationMinutes(
-    totalDuration,
-    planned.planned_part_qty
-  )
 
-  return {
-    part_key: assignment.part_key,
-    line_code: line.line_code,
-    common_group_label: assignment.common_group_label ?? null,
-    total_duration_minutes: totalDuration,
-    planned_part_qty: planned.planned_part_qty,
-    per_unit_duration_minutes: perUnitMinutes,
-    per_unit_labor_cost: calcLaborCostFromMinutes(perUnitMinutes ?? 0),
-    settings_confirmed: Boolean(assignment.settings_confirmed),
-    duration_source: duration.note,
-  }
+  return buildPreviewFromMinutes(
+    assignment,
+    line,
+    totalDuration,
+    planned.planned_part_qty,
+    {
+      planned_part_qty: planned.planned_part_qty,
+      duration_source: duration.note,
+      uses_work_report: false,
+    }
+  )
 }
 
 function buildLineOrderNo(partKey: string) {
@@ -153,6 +206,7 @@ export async function recalculateAssignmentLabor(
     planId?: string | null
     requireConfirmed?: boolean
     durationCache?: Map<string, { minutes: number; note: string | null }>
+    accumulation?: LineAccumulation | null
   }
 ): Promise<LaborRecalcResult> {
   const preview = await buildLaborRecalcPreview(
@@ -160,19 +214,25 @@ export async function recalculateAssignmentLabor(
     assignment,
     line,
     options?.planId,
-    options?.durationCache
+    options?.durationCache,
+    options?.accumulation
   )
 
   if (options?.requireConfirmed && !assignment.settings_confirmed) {
     return { ...preview, success: false, skipped: true, reason: '設定未確認' }
   }
 
-  if (!preview.per_unit_duration_minutes || preview.planned_part_qty <= 0) {
+  const hasQty = preview.uses_work_report
+    ? preview.completed_qty > 0
+    : preview.planned_part_qty > 0
+  if (!preview.per_unit_duration_minutes || !hasQty) {
     return {
       ...preview,
       success: false,
       skipped: true,
-      reason: '制作所要時間または製造計画部品数が未設定',
+      reason: preview.uses_work_report
+        ? '作業日報の所要時間または完成個数が未設定'
+        : '制作所要時間または製造計画部品数が未設定',
     }
   }
 
@@ -199,7 +259,9 @@ export async function recalculateAssignmentLabor(
   )
 
   const headerLabor = preview.per_unit_labor_cost
-  const laborIndirect = Math.round((materialTotal + headerLabor + itemLaborTotal) * 0.3)
+  const laborIndirect = preview.uses_work_report
+    ? preview.per_unit_indirect_cost
+    : Math.round((materialTotal + headerLabor + itemLaborTotal) * 0.3)
   const totalCost = materialTotal + itemLaborTotal + itemIndirectTotal + headerLabor + laborIndirect
 
   const existingHeaderId = existingItems?.[0]?.work_order_cost_id
@@ -279,6 +341,9 @@ export async function bulkRecalculateConfirmedAssignments(
 
   const lineMap = new Map((lines || []).map((line) => [line.id, line as LineRow]))
   const durationCache = new Map<string, { minutes: number; note: string | null }>()
+  const accumulations = await fetchLineAccumulations(supabase, getCurrentFiscalYear()).catch(
+    () => new Map<string, LineAccumulation>()
+  )
   const results: LaborRecalcResult[] = []
 
   for (const assignment of assignments || []) {
@@ -290,8 +355,10 @@ export async function bulkRecalculateConfirmedAssignments(
         common_group_label: assignment.common_group_label ?? null,
         total_duration_minutes: 0,
         planned_part_qty: 0,
+        completed_qty: 0,
         per_unit_duration_minutes: null,
         per_unit_labor_cost: 0,
+        per_unit_indirect_cost: 0,
         settings_confirmed: Boolean(assignment.settings_confirmed),
         success: false,
         skipped: true,
@@ -309,6 +376,7 @@ export async function bulkRecalculateConfirmedAssignments(
           planId: options?.planId,
           requireConfirmed: onlyConfirmed,
           durationCache,
+          accumulation: accumulations.get(line.id) || null,
         }
       )
       results.push(result)
@@ -319,8 +387,10 @@ export async function bulkRecalculateConfirmedAssignments(
         common_group_label: assignment.common_group_label ?? null,
         total_duration_minutes: 0,
         planned_part_qty: 0,
+        completed_qty: 0,
         per_unit_duration_minutes: null,
         per_unit_labor_cost: 0,
+        per_unit_indirect_cost: 0,
         settings_confirmed: Boolean(assignment.settings_confirmed),
         success: false,
         reason: err instanceof Error ? err.message : '再計算に失敗',
@@ -335,4 +405,57 @@ export async function bulkRecalculateConfirmedAssignments(
     failed_count: results.filter((row) => !row.success && !row.skipped).length,
     results,
   }
+}
+
+/** 日報確定後、900番台以外のL指令パーツ工費を所要時間÷完成個数で自動更新する */
+export async function syncTouchedLineLaborFromWorkReports(
+  supabase: SupabaseClient,
+  lineCodes: Iterable<string>,
+  fiscalYear = getCurrentFiscalYear()
+) {
+  const codes = [...new Set([...lineCodes].map((code) => String(code || '').trim()).filter(Boolean))].filter(
+    (code) => !isLine900Series(code)
+  )
+  if (codes.length === 0) return { updated: 0, skipped: 0 }
+
+  const { data: lines, error: lineError } = await supabase
+    .from('lines')
+    .select('id, line_code, name, standard_duration_minutes')
+    .in('line_code', codes)
+
+  if (lineError) throw lineError
+  const targetLines = (lines || []).filter((line) => !isLine900Series(line.line_code)) as LineRow[]
+  if (targetLines.length === 0) return { updated: 0, skipped: 0 }
+
+  const lineIds = targetLines.map((line) => line.id)
+  const { data: assignments, error: assignmentError } = await supabase
+    .from('line_part_assignments')
+    .select('*')
+    .in('line_id', lineIds)
+
+  if (assignmentError) throw assignmentError
+  if (!assignments || assignments.length === 0) return { updated: 0, skipped: 0 }
+
+  const accumulations = await fetchLineAccumulations(supabase, fiscalYear)
+  const lineMap = new Map(targetLines.map((line) => [line.id, line]))
+  let updated = 0
+  let skipped = 0
+
+  for (const assignment of assignments) {
+    const line = lineMap.get(assignment.line_id)
+    if (!line) continue
+    const result = await recalculateAssignmentLabor(
+      supabase,
+      assignment as LinePartAssignmentRow,
+      line,
+      {
+        requireConfirmed: false,
+        accumulation: accumulations.get(line.id) || null,
+      }
+    )
+    if (result.success) updated += 1
+    else skipped += 1
+  }
+
+  return { updated, skipped }
 }

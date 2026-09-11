@@ -41,6 +41,7 @@ type InstructionAggregation = {
   code: string
   name: string
   duration_minutes: number
+  completed_qty?: number | null
 }
 
 type MachineAggregation = {
@@ -80,6 +81,7 @@ type StaffDetail = {
       line_id?: string | null
       line_code?: string | null
       line_name?: string | null
+      completed_qty?: number | null
       model?: string | null
       machine?: string | null
       notes?: string | null
@@ -485,6 +487,12 @@ export default function WorkReportSummaryPage() {
           work_content: edited.work_content ?? item.work_content,
           instruction_text: edited.instruction_text ?? item.instruction_text,
           line_id: edited.line_id ?? item.line_id,
+          completed_qty:
+            edited.completed_qty !== undefined
+              ? edited.completed_qty === '' || edited.completed_qty === null
+                ? null
+                : Number(edited.completed_qty)
+              : item.completed_qty ?? null,
           model: edited.model ?? item.model,
           machine: edited.machine ?? item.machine,
           notes: edited.notes ?? item.notes,
@@ -822,13 +830,14 @@ export default function WorkReportSummaryPage() {
                     <th className="py-2 pr-4">コード</th>
                     <th className="py-2 pr-4">名称</th>
                     <th className="py-2 pr-4">所要時間</th>
+                    <th className="py-2 pr-4">完成個数</th>
                     <th className="py-2">工程</th>
                   </tr>
                 </thead>
                 <tbody className="text-black">
                   {instructionData.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-slate-400">
+                      <td colSpan={6} className="py-6 text-center text-slate-400">
                         集計データがありません
                       </td>
                     </tr>
@@ -848,6 +857,11 @@ export default function WorkReportSummaryPage() {
                           <td className="py-3 pr-4 font-medium text-slate-900">{row.code}</td>
                           <td className="py-3 pr-4">{row.name || '-'}</td>
                           <td className="py-3 pr-4">{formatMinutes(row.duration_minutes)}</td>
+                          <td className="py-3 pr-4">
+                            {row.category === 'line'
+                              ? `${Number(row.completed_qty || 0).toLocaleString()}個`
+                              : '—'}
+                          </td>
                           <td className="py-3">
                             <Link
                               href={buildProcessManagementPath(
@@ -1068,6 +1082,20 @@ export default function WorkReportSummaryPage() {
                                 {item.line_name && (
                                   <div className="text-xs text-black">L: {item.line_name}</div>
                                 )}
+                                {item.line_id ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    inputMode="numeric"
+                                    value={getItemValue(item, 'completed_qty') ?? ''}
+                                    onChange={(e) =>
+                                      handleItemChange(item.id, 'completed_qty', e.target.value)
+                                    }
+                                    placeholder="完成個数（任意）"
+                                    className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-black mt-1 focus:outline-none focus:border-teal-500"
+                                  />
+                                ) : null}
                                 {item.model && (
                                   <input
                                     type="text"
@@ -1158,6 +1186,11 @@ export default function WorkReportSummaryPage() {
                                   ) : null}
                                   {lineName ? (
                                     <div className="text-[10px] text-black">L: {lineName}</div>
+                                  ) : null}
+                                  {item.line_id && getItemValue(item, 'completed_qty') ? (
+                                    <div className="text-[10px] text-black">
+                                      完成個数: {getItemValue(item, 'completed_qty')}
+                                    </div>
                                   ) : null}
                                   {model ? (
                                     <div className="text-[10px] text-black">型式: {model}</div>

@@ -8,8 +8,11 @@ import {
   toMinutes,
 } from '@/lib/work-report-time'
 import {
+  parseOptionalCompletedQty,
   validateWorkReportItem,
 } from '@/lib/work-report-item-validation'
+import { getFiscalYearFromDate } from '@/lib/fiscal-year'
+import { syncTouchedLineLaborFromWorkReports } from '@/lib/line-part-labor-cost'
 import {
   fetchLineCodeById,
   parseYearMonthFromDate,
@@ -35,6 +38,7 @@ type WorkItemInput = {
   notes?: string
   start_time?: string
   end_time?: string
+  completed_qty?: number | string | null
 }
 
 type MachineTimeConfirmationInput = {
@@ -227,19 +231,23 @@ export async function POST(request: NextRequest) {
 
       totalItemMinutes += duration
 
+      const lineId =
+        typeof item.line_id === 'string' && item.line_id.trim() ? item.line_id.trim() : null
+
       acc.push({
         is_support: item.is_support || false,
         support_work_group_code: item.support_work_group_code || null,
         work_type: item.work_type,
         work_content: item.work_content,
         instruction_text: item.instruction_text || null,
-        line_id: item.line_id || null,
+        line_id: lineId,
         model: item.model || null,
         machine: item.machine || null,
         notes: item.notes || null,
         start_time: item.start_time,
         end_time: item.end_time,
         duration_minutes: duration,
+        completed_qty: parseOptionalCompletedQty(item.completed_qty, Boolean(lineId)),
       })
 
       return acc
@@ -529,6 +537,22 @@ export async function POST(request: NextRequest) {
               )
             } catch (syncErr) {
               console.error('月別実績の同期エラー:', syncErr)
+            }
+          }
+          const fiscalYears = new Set<number>()
+          if (workDate) {
+            const fy = getFiscalYearFromDate(workDate)
+            if (fy) fiscalYears.add(fy)
+          }
+          if (previousWorkDate && previousWorkDate !== workDate) {
+            const prevFy = getFiscalYearFromDate(previousWorkDate)
+            if (prevFy) fiscalYears.add(prevFy)
+          }
+          for (const fiscalYear of fiscalYears) {
+            try {
+              await syncTouchedLineLaborFromWorkReports(supabase, lineCodes, fiscalYear)
+            } catch (laborErr) {
+              console.error('L指令工費の自動更新エラー:', laborErr)
             }
           }
         })

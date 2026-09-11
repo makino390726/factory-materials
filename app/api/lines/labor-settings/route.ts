@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { fetchLineAccumulations } from '@/lib/line-work-accumulation'
 import {
   bulkRecalculateConfirmedAssignments,
   buildLaborRecalcPreview,
@@ -68,6 +70,9 @@ export async function GET(req: NextRequest) {
     if (lineError) throw lineError
 
     const lineMap = new Map((lines || []).map((line) => [line.id, line as LineRow]))
+    const accumulations = await fetchLineAccumulations(supabase, getCurrentFiscalYear()).catch(
+      () => new Map()
+    )
     const rows = []
 
     for (const assignment of assignments || []) {
@@ -78,7 +83,9 @@ export async function GET(req: NextRequest) {
         supabase,
         assignment as LinePartAssignmentRow,
         line,
-        planId
+        planId,
+        undefined,
+        accumulations.get(line.id) || null
       )
 
       rows.push({

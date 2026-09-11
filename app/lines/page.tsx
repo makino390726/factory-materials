@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import FiscalYearSelect from '@/app/components/FiscalYearSelect'
+import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
 import { buildProcessManagementPath } from '@/lib/process-management'
 import { formatDurationHours } from '@/lib/work-report-aggregation'
 
@@ -12,6 +14,8 @@ type LineItem = {
   sort_order: number
   is_active: boolean
   standard_duration_minutes: number | null
+  accumulated_duration_minutes?: number | null
+  accumulated_completed_qty?: number | null
   part_key: string | null
   part_assignments?: Array<{
     id: string
@@ -58,8 +62,11 @@ type LaborSettingsRow = {
   preview: {
     total_duration_minutes: number
     planned_part_qty: number
+    completed_qty?: number
     per_unit_duration_minutes: number | null
     per_unit_labor_cost: number
+    per_unit_indirect_cost?: number
+    uses_work_report?: boolean
   }
 }
 
@@ -111,6 +118,7 @@ export default function LinesPage() {
   const [deletedMonthlyMonths, setDeletedMonthlyMonths] = useState<Set<string>>(new Set())
   const [newMonthlyMonth, setNewMonthlyMonth] = useState('')
   const [newMonthlyMinutes, setNewMonthlyMinutes] = useState('')
+  const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear)
 
   const formatMonthLabel = (monthKey: string) => {
     const [year, month] = monthKey.split('-')
@@ -304,12 +312,13 @@ export default function LinesPage() {
     }
   }
 
-  const fetchLines = async (filters?: { lineCode?: string; lineName?: string }) => {
+  const fetchLines = async (filters?: { lineCode?: string; lineName?: string; fiscalYear?: number }) => {
     setIsLoading(true)
     setError(null)
     try {
       const lineCode = (filters?.lineCode ?? searchLineCode).trim()
       const lineName = (filters?.lineName ?? searchLineName).trim()
+      const year = filters?.fiscalYear ?? fiscalYear
       const params = new URLSearchParams()
 
       if (lineCode) {
@@ -319,6 +328,7 @@ export default function LinesPage() {
       if (lineName) {
         params.set('lineName', lineName)
       }
+      params.set('fiscal_year', String(year))
 
       const query = params.toString()
       const response = await fetch(`/api/lines${query ? `?${query}` : ''}`)
@@ -333,11 +343,14 @@ export default function LinesPage() {
   }
 
   useEffect(() => {
-    fetchLines()
     fetchParts()
     fetchMonthlyDurations()
     fetchLaborSettings()
   }, [])
+
+  useEffect(() => {
+    void fetchLines({ fiscalYear })
+  }, [fiscalYear])
 
   const fetchLaborSettings = async () => {
     setLaborSettingsLoading(true)
@@ -780,9 +793,9 @@ export default function LinesPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
               <p className="mt-1 text-sm text-slate-600">
-                各L指令の部品割り当てに共通明細（全機種、500・600系共通など）を設定し、確認後に一括で労賃を再計算します。
-                計算式: 1個あたり工賃 = (制作所要時間 ÷ 製造計画部品数) から算出。
-                制作所要時間は工程管理の年平均ST合計（無ければL指令マスタ標準時間）を採用します。
+                900番台以外のL指令は、日報の所要時間 ÷ 完成個数で1個あたり所要時間を出し、
+                工費 = 所要時間 ÷ 480分 × ¥17,810、間接費 = 工費 × 30% をパーツ原価へ反映します。
+                作業日報の確定保存のたびに自動更新されます。900番台は対象外です。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -819,9 +832,10 @@ export default function LinesPage() {
                   <th className="px-3 py-2">部品キー</th>
                   <th className="px-3 py-2">共通明細</th>
                   <th className="px-3 py-2 text-right">制作所要</th>
-                  <th className="px-3 py-2 text-right">計画部品数</th>
+                  <th className="px-3 py-2 text-right">完成個数</th>
                   <th className="px-3 py-2 text-right">1個あたり</th>
-                  <th className="px-3 py-2 text-right">工賃/個</th>
+                  <th className="px-3 py-2 text-right">工費/個</th>
+                  <th className="px-3 py-2 text-right">間接/個</th>
                   <th className="px-3 py-2 text-center">確認</th>
                   <th className="px-3 py-2">最終再計算</th>
                   <th className="px-3 py-2 text-center">操作</th>
@@ -830,13 +844,13 @@ export default function LinesPage() {
               <tbody>
                 {laborSettingsLoading ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-6 text-center text-slate-400">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-400">
                       読み込み中...
                     </td>
                   </tr>
                 ) : laborSettings.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-6 text-center text-slate-400">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-400">
                       部品割り当てがありません
                     </td>
                   </tr>
@@ -861,7 +875,9 @@ export default function LinesPage() {
                         {row.preview.total_duration_minutes.toLocaleString('ja-JP')}分
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {row.preview.planned_part_qty.toLocaleString('ja-JP')}
+                        {row.preview.uses_work_report
+                          ? (row.preview.completed_qty || 0).toLocaleString('ja-JP')
+                          : row.preview.planned_part_qty.toLocaleString('ja-JP')}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {row.preview.per_unit_duration_minutes ?? '—'}
@@ -869,6 +885,9 @@ export default function LinesPage() {
                       </td>
                       <td className="px-3 py-2 text-right font-medium text-amber-700">
                         ¥{row.preview.per_unit_labor_cost.toLocaleString('ja-JP')}
+                      </td>
+                      <td className="px-3 py-2 text-right text-orange-700">
+                        ¥{(row.preview.per_unit_indirect_cost || 0).toLocaleString('ja-JP')}
                       </td>
                       <td className="px-3 py-2 text-center">
                         {row.settings_confirmed ? (
@@ -1207,7 +1226,13 @@ export default function LinesPage() {
               </div>
             </div>
 
-            <form onSubmit={handleSearchSubmit} className="mb-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+            <form onSubmit={handleSearchSubmit} className="mb-4 grid grid-cols-1 md:grid-cols-[160px_1fr_1fr_auto] gap-3 items-end">
+              <FiscalYearSelect
+                value={fiscalYear}
+                onChange={setFiscalYear}
+                className="md:col-span-1"
+                hint={false}
+              />
               <input
                 type="text"
                 value={searchLineCode}
@@ -1242,8 +1267,8 @@ export default function LinesPage() {
             </form>
 
             <p className="mb-3 text-xs text-slate-600">
-              月別実績は作業日報（確定分）から自動登録されます。当社年度は9/1〜翌8/31（例: 26年度=2025/9/1〜2026/8/31）。同じ暦月は更新、年度が変わる同じ暦月は前年度分を削除します。
-              {monthlyLoading ? '（読み込み中...）' : ''}
+              制作時間・完成個数は、選択した会計年度（9/1〜翌8/31）の確定日報だけを累積します。前年度は年度を切り替えて呼び出します。
+              現在表示: {formatFiscalYearLabel(fiscalYear)}
             </p>
             {monthlyError && (
               <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -1264,7 +1289,8 @@ export default function LinesPage() {
                   <tr>
                     <th className="py-3 px-3 font-semibold">コード</th>
                     <th className="py-3 px-3 font-semibold">L指令名</th>
-                    <th className="py-3 px-3 font-semibold">月別実績</th>
+                    <th className="py-3 px-3 font-semibold">制作時間（{formatFiscalYearLabel(fiscalYear)}）</th>
+                    <th className="py-3 px-3 font-semibold">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
                     <th className="py-3 px-3 font-semibold">部品割り当て</th>
                     <th className="py-3 px-3 font-semibold">有効</th>
                     <th className="py-3 px-3 font-semibold">操作</th>
@@ -1273,7 +1299,7 @@ export default function LinesPage() {
                 <tbody className="text-black">
                   {lines.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-slate-400">
+                      <td colSpan={7} className="py-6 text-center text-slate-400">
                         L指令が未登録です
                       </td>
                     </tr>
@@ -1284,25 +1310,26 @@ export default function LinesPage() {
                           {line.line_code}
                         </td>
                         <td className="py-3 px-3 text-black">{line.name}</td>
-                        <td className="py-3 px-3 text-black">
-                          {(() => {
-                            const rows = monthlyByLine[line.line_code] || []
-                            if (rows.length === 0) {
-                              return <span className="text-slate-400">—</span>
-                            }
-                            return (
-                              <div className="flex flex-wrap gap-1">
-                                {rows.map((row) => (
-                                  <span
-                                    key={row.month}
-                                    className="inline-block rounded border border-sky-400/40 bg-sky-950 px-1.5 py-0.5 text-[11px] font-medium text-sky-100 whitespace-nowrap"
-                                  >
-                                    {row.month_label}-{row.duration_hours}
-                                  </span>
-                                ))}
-                              </div>
-                            )
-                          })()}
+                        <td className="py-3 px-3 text-black whitespace-nowrap">
+                          {(line.accumulated_duration_minutes || 0) > 0 ? (
+                            <span className="inline-block rounded border border-sky-400/40 bg-sky-950 px-1.5 py-0.5 text-[11px] font-medium text-sky-100">
+                              {formatDurationHours(line.accumulated_duration_minutes || 0)}
+                              <span className="ml-1 text-sky-200/80">
+                                ({(line.accumulated_duration_minutes || 0).toLocaleString()}分)
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-black whitespace-nowrap">
+                          {(line.accumulated_completed_qty || 0) > 0 ? (
+                            <span className="inline-block rounded border border-emerald-400/40 bg-emerald-950 px-1.5 py-0.5 text-[11px] font-medium text-emerald-100">
+                              {(line.accumulated_completed_qty || 0).toLocaleString()}個
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                         <td className="py-3 px-3">
                           {(line.part_assignments || []).length > 0 ? (

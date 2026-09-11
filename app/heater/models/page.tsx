@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import Link from 'next/link';
+import FiscalYearSelect from '@/app/components/FiscalYearSelect';
+import { getCurrentFiscalYear } from '@/lib/fiscal-year';
 import {
   DEFAULT_PRODUCT_CATEGORY,
   PRODUCT_CATEGORIES,
@@ -58,6 +60,7 @@ export default function HeaterModelsPage() {
     >
   >({});
   const [childLoading, setChildLoading] = useState<string | null>(null);
+  const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear);
 
   useEffect(() => {
     fetchModels();
@@ -108,7 +111,7 @@ export default function HeaterModelsPage() {
     setChildLoading(modelCode);
     try {
       const res = await fetch(
-        `/api/work-orders?heater_model=${encodeURIComponent(modelCode)}`
+        `/api/work-orders?heater_model=${encodeURIComponent(modelCode)}&fiscal_year=${fiscalYear}`
       );
       const data = await res.json();
       setChildOrders((prev) => ({
@@ -280,9 +283,14 @@ export default function HeaterModelsPage() {
 
       <div className="relative z-10 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400">
-            機種マスタ
-          </h1>
+          <div>
+            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400">
+              機種マスタ
+            </h1>
+            <p className="mt-2 text-sm text-slate-300">
+              配下の制作指令は会計年度で切り替えます。新年度は年度を選んで新たなD指令を登録します。
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -460,7 +468,17 @@ export default function HeaterModelsPage() {
           </form>
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <FiscalYearSelect
+            value={fiscalYear}
+            onChange={(year) => {
+              setFiscalYear(year)
+              setChildOrders({})
+              setExpandedModel(null)
+            }}
+            className="min-w-[160px] [&_label]:text-slate-300 [&_select]:border-slate-600 [&_select]:bg-slate-950 [&_select]:text-white"
+            hint={false}
+          />
           <button
             type="button"
             onClick={() => setFilterCategory('すべて')}

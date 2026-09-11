@@ -125,6 +125,17 @@ COMMENT ON COLUMN work_report_items.model IS '型式';
 COMMENT ON COLUMN work_report_items.machine IS '使用機械';
 COMMENT ON COLUMN work_report_items.notes IS '備考';
 COMMENT ON COLUMN work_report_items.duration_minutes IS '所要時間（分）';
+COMMENT ON COLUMN work_report_items.completed_qty IS '当日の完成個数（L指令のみ・任意。完成工程のときだけ入力）';
+
+ALTER TABLE work_report_items
+ADD COLUMN IF NOT EXISTS completed_qty INTEGER;
+
+ALTER TABLE work_report_items
+DROP CONSTRAINT IF EXISTS work_report_items_completed_qty_check;
+
+ALTER TABLE work_report_items
+ADD CONSTRAINT work_report_items_completed_qty_check
+CHECK (completed_qty IS NULL OR completed_qty >= 0);
 
 -- 使用機械の明細集計・確定時間（add-work-report-machine-durations.sql と同等）
 CREATE TABLE IF NOT EXISTS work_report_machine_durations (

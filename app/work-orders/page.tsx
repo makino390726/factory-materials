@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import FiscalYearSelect from '@/app/components/FiscalYearSelect'
+import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { isModelInstructionOrderNo } from '@/lib/model-instruction-orders'
 import { buildProcessManagementPath } from '@/lib/process-management'
 
 type WorkOrder = {
@@ -19,6 +22,7 @@ type WorkOrder = {
   cost_mode: 'direct' | 'bom' | null
   bom_model: string | null
   exclude_from_work_report?: boolean | null
+  fiscal_year?: number | null
   is_cost_template?: boolean | null
   cost_template_work_order_id?: string | null
   heater_model?: string | null
@@ -56,6 +60,10 @@ export default function WorkOrdersPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [searchOrderNo, setSearchOrderNo] = useState('')
   const [searchProductName, setSearchProductName] = useState('')
+  const [fiscalYear, setFiscalYear] = useState(() => {
+    const fromQuery = Number(searchParams.get('fiscal_year') || '')
+    return Number.isFinite(fromQuery) && fromQuery >= 2000 ? fromQuery : getCurrentFiscalYear()
+  })
   const [formData, setFormData] = useState({
     order_no: '',
     product_name: '',
@@ -336,12 +344,13 @@ export default function WorkOrdersPage() {
     }
   }
 
-  const fetchOrders = async (filters?: { orderNo?: string; productName?: string }) => {
+  const fetchOrders = async (filters?: { orderNo?: string; productName?: string; fiscalYear?: number }) => {
     setIsLoading(true)
     setError(null)
     try {
       const orderNo = (filters?.orderNo ?? searchOrderNo).trim()
       const productName = (filters?.productName ?? searchProductName).trim()
+      const year = filters?.fiscalYear ?? fiscalYear
       const params = new URLSearchParams()
 
       if (orderNo) {
@@ -351,6 +360,7 @@ export default function WorkOrdersPage() {
       if (productName) {
         params.set('productName', productName)
       }
+      params.set('fiscal_year', String(year))
 
       const query = params.toString()
       const response = await fetch(`/api/work-orders${query ? `?${query}` : ''}`)
@@ -413,7 +423,10 @@ export default function WorkOrdersPage() {
   }
 
   useEffect(() => {
-    fetchOrders()
+    void fetchOrders({ fiscalYear })
+  }, [fiscalYear])
+
+  useEffect(() => {
     fetch('/api/heater/models')
       .then((r) => r.json())
       .then((data) => {
@@ -611,6 +624,7 @@ export default function WorkOrdersPage() {
           is_cost_template: formData.is_cost_template,
           cost_template_work_order_id: formData.cost_template_work_order_id.trim() || null,
           heater_model: formData.heater_model.trim() || null,
+          fiscal_year: fiscalYear,
         }),
       })
 
@@ -696,6 +710,9 @@ export default function WorkOrdersPage() {
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300">
               D指令マスタ
             </h1>
+            <p className="mt-2 text-sm text-indigo-100/80">
+              {formatFiscalYearLabel(fiscalYear)} の指令を表示・登録します。前年度は年度を切り替えて呼び出します。
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/heater/model-orders">
@@ -729,6 +746,7 @@ export default function WorkOrdersPage() {
               {editingId ? 'D指令を編集' : '新しいD指令を追加'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-3">
+              <FiscalYearSelect value={fiscalYear} onChange={setFiscalYear} />
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">D指令番号 *</label>
                 <input
@@ -786,6 +804,11 @@ export default function WorkOrdersPage() {
                   機種を選ぶと機種マスタ配下の制作指令になります。未選択なら従来どおりです。
                   制作工賃は標準時間から自動計算（分÷480×¥17,810）。工程管理の入庫で確定・時間リセットされます。
                 </p>
+                {isModelInstructionOrderNo(formData.order_no) ? (
+                  <p className="rounded border border-cyan-300 bg-white/70 px-2 py-1 text-xs font-semibold text-cyan-900">
+                    この指令番号（{formData.order_no.trim()}）は機種指令です。親機種を必ず選び、工程管理表では「機種指令」で登録してください。
+                  </p>
+                ) : null}
                 {formData.standard_duration_minutes && Number(formData.standard_duration_minutes) > 0 && (
                   <p className="text-xs font-semibold text-cyan-900">
                     制作工賃（自動）: ¥
@@ -1122,7 +1145,12 @@ export default function WorkOrdersPage() {
               </div>
             </div>
 
-            <form onSubmit={handleSearchSubmit} className="mb-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+            <form onSubmit={handleSearchSubmit} className="mb-4 grid grid-cols-1 md:grid-cols-[160px_1fr_1fr_auto] gap-3 items-end">
+              <FiscalYearSelect
+                value={fiscalYear}
+                onChange={setFiscalYear}
+                hint={false}
+              />
               <input
                 type="text"
                 value={searchOrderNo}
@@ -1205,6 +1233,11 @@ export default function WorkOrdersPage() {
                                 原価テンプレ
                               </span>
                             )}
+                            {isModelInstructionOrderNo(order.order_no) && (
+                              <span className="rounded border border-fuchsia-400/50 bg-fuchsia-950 px-1.5 py-0.5 text-xs font-bold text-fuchsia-100">
+                                機種指令
+                              </span>
+                            )}
                             {order.heater_model && (
                               <span className="rounded border border-cyan-400/50 bg-cyan-950 px-1.5 py-0.5 text-xs font-bold text-cyan-100">
                                 {order.heater_model}
@@ -1282,7 +1315,11 @@ export default function WorkOrdersPage() {
                               📄
                             </button>
                             <Link
-                              href={buildProcessManagementPath('instruction', order.order_no)}
+                              href={
+                                isModelInstructionOrderNo(order.order_no) && order.heater_model
+                                  ? `${buildProcessManagementPath('model', order.heater_model)}&order_no=${encodeURIComponent(order.order_no)}`
+                                  : buildProcessManagementPath('instruction', order.order_no)
+                              }
                               className="px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition text-xs font-medium whitespace-nowrap"
                             >
                               工程

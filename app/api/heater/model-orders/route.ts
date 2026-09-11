@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
 import {
   DEFAULT_PRODUCT_CATEGORY,
   inferProductCategory,
@@ -19,11 +20,37 @@ async function loadOrders() {
   const { data: orders, error: orderError } = await supabase
     .from('work_orders')
     .select(
-      'id, order_no, product_name, model, bom_model, qty, status, standard_duration_minutes, heater_model, assembly_labor_minutes, assembly_labor_cost, current_period_minutes, labor_receipt_date, cost_mode, created_at'
+      'id, order_no, product_name, model, bom_model, qty, status, standard_duration_minutes, heater_model, assembly_labor_minutes, assembly_labor_cost, current_period_minutes, labor_receipt_date, cost_mode, created_at, fiscal_year'
     )
     .order('created_at', { ascending: false })
 
   if (!orderError) return { orderRows: orders || [], missingColumn: false }
+
+  if (String(orderError.message || '').includes('fiscal_year')) {
+    const fallback = await supabase
+      .from('work_orders')
+      .select(
+        'id, order_no, product_name, model, bom_model, qty, status, standard_duration_minutes, heater_model, assembly_labor_minutes, assembly_labor_cost, current_period_minutes, labor_receipt_date, cost_mode, created_at'
+      )
+      .order('created_at', { ascending: false })
+    if (fallback.error) {
+      if (
+        String(fallback.error.message || '').includes('heater_model') ||
+        String(fallback.error.message || '').includes('assembly_labor')
+      ) {
+        const legacy = await supabase
+          .from('work_orders')
+          .select(
+            'id, order_no, product_name, model, bom_model, qty, status, standard_duration_minutes, cost_mode, created_at'
+          )
+          .order('created_at', { ascending: false })
+        if (legacy.error) throw legacy.error
+        return { orderRows: legacy.data || [], missingColumn: true }
+      }
+      throw fallback.error
+    }
+    return { orderRows: fallback.data || [], missingColumn: false }
+  }
 
   if (
     String(orderError.message || '').includes('heater_model') ||
@@ -88,6 +115,10 @@ export async function GET(request: NextRequest) {
   try {
     const category = request.nextUrl.searchParams.get('category')?.trim() || ''
     const q = request.nextUrl.searchParams.get('q')?.trim() || ''
+    const fiscalYear = parseFiscalYearParam(
+      request.nextUrl.searchParams.get('fiscal_year'),
+      getCurrentFiscalYear()
+    )
 
     const { data: models, error: modelError } = await supabase
       .from('heater_models')
@@ -98,7 +129,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: modelError.message }, { status: 500 })
     }
 
-    const { orderRows } = await loadOrders()
+    const { orderRows: allOrderRows } = await loadOrders()
+    const orderRows = allOrderRows.filter((row) => {
+      const year = Number((row as { fiscal_year?: number | null }).fiscal_year)
+      if (!Number.isFinite(year) || year <= 0) {
+        const created = String((row as { created_at?: string }).created_at || '')
+        const createdYear = Number(created.slice(0, 4))
+        const createdMonth = Number(created.slice(5, 7))
+        if (!Number.isFinite(createdYear) || !Number.isFinite(createdMonth)) return fiscalYear === getCurrentFiscalYear()
+        return (createdMonth >= 9 ? createdYear + 1 : createdYear) === fiscalYear
+      }
+      return year === fiscalYear
+    })
     const heaterRefs = (models || []).map((m) => ({
       model: String(m.model),
       name: m.name ?? null,

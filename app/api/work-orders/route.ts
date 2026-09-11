@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
 import {
   calcAssemblyLaborFromMinutes,
 } from '@/lib/work-order-assembly-labor'
@@ -44,6 +45,10 @@ function hasHeaterModelLaborColumnError(error: any) {
     hasMissingColumnError(error, 'current_period_minutes') ||
     hasMissingColumnError(error, 'labor_receipt_date')
   )
+}
+
+function hasFiscalYearColumnError(error: any) {
+  return hasMissingColumnError(error, 'fiscal_year')
 }
 
 async function syncWorkOrderBranchesFromBom(workOrderId: string, bomModel: string) {
@@ -138,11 +143,25 @@ export async function GET(req: Request) {
     const productName = searchParams.get('productName')?.trim()
     const heaterModel = searchParams.get('heater_model')?.trim()
     const forWorkReport = searchParams.get('for_work_report') === '1'
+    const fiscalYearParam = searchParams.get('fiscal_year')
+    const fiscalYear =
+      fiscalYearParam && fiscalYearParam !== 'all'
+        ? parseFiscalYearParam(fiscalYearParam)
+        : forWorkReport
+          ? getCurrentFiscalYear()
+          : null
 
     let query = supabase.from('work_orders').select('*')
 
     if (forWorkReport) {
       query = query.eq('exclude_from_work_report', false)
+    }
+    if (fiscalYear) {
+      if (fiscalYear === getCurrentFiscalYear()) {
+        query = query.or(`fiscal_year.eq.${fiscalYear},fiscal_year.is.null`)
+      } else {
+        query = query.eq('fiscal_year', fiscalYear)
+      }
     }
 
     if (orderNo) {
@@ -157,7 +176,18 @@ export async function GET(req: Request) {
       query = query.eq('heater_model', heaterModel)
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false })
+    let { data, error } = await query.order('created_at', { ascending: false })
+
+    if (error && fiscalYear && hasFiscalYearColumnError(error)) {
+      let fallbackQuery = supabase.from('work_orders').select('*')
+      if (forWorkReport) fallbackQuery = fallbackQuery.eq('exclude_from_work_report', false)
+      if (orderNo) fallbackQuery = fallbackQuery.ilike('order_no', `%${orderNo}%`)
+      if (productName) fallbackQuery = fallbackQuery.ilike('product_name', `%${productName}%`)
+      if (heaterModel) fallbackQuery = fallbackQuery.eq('heater_model', heaterModel)
+      const fallback = await fallbackQuery.order('created_at', { ascending: false })
+      data = fallback.data
+      error = fallback.error
+    }
 
     if (error && heaterModel && hasHeaterModelLaborColumnError(error)) {
       return NextResponse.json(
@@ -212,6 +242,7 @@ export async function POST(req: Request) {
       is_cost_template,
       cost_template_work_order_id,
       heater_model,
+      fiscal_year,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -225,6 +256,7 @@ export async function POST(req: Request) {
         : null
     const normalizedHeaterModel =
       typeof heater_model === 'string' && heater_model.trim() ? heater_model.trim() : null
+    const normalizedFiscalYear = parseFiscalYearParam(fiscal_year, getCurrentFiscalYear())
     const durationMinutes = parseStandardDuration(standard_duration_minutes)
     const assemblyLabor = calcAssemblyLaborFromMinutes(durationMinutes)
 
@@ -270,6 +302,7 @@ export async function POST(req: Request) {
       assembly_labor_minutes: assemblyLabor.assembly_labor_minutes,
       assembly_labor_cost: assemblyLabor.assembly_labor_cost,
       current_period_minutes: 0,
+      fiscal_year: normalizedFiscalYear,
     }
 
     let data: any[] | null = null
@@ -285,7 +318,8 @@ export async function POST(req: Request) {
       (hasWorkOrdersCostColumnError(error) ||
         hasExcludeFromWorkReportColumnError(error) ||
         hasCostTemplateColumnError(error) ||
-        hasHeaterModelLaborColumnError(error))
+        hasHeaterModelLaborColumnError(error) ||
+        hasFiscalYearColumnError(error))
     ) {
       const fallbackInsert = await supabase.from('work_orders').insert([basePayload]).select()
       data = fallbackInsert.data
@@ -334,6 +368,7 @@ export async function PUT(req: Request) {
       is_cost_template,
       cost_template_work_order_id,
       heater_model,
+      fiscal_year,
     } = body
     const normalizedOrderNo = typeof order_no === 'string' ? order_no.trim() : ''
     const normalizedCostMode = cost_mode === 'bom' ? 'bom' : 'direct'
@@ -351,6 +386,7 @@ export async function PUT(req: Request) {
         : heater_model === null || heater_model === ''
           ? null
           : undefined
+    const normalizedFiscalYear = parseFiscalYearParam(fiscal_year, getCurrentFiscalYear())
     const durationMinutes = parseStandardDuration(standard_duration_minutes)
     const assemblyLabor = calcAssemblyLaborFromMinutes(durationMinutes)
 
@@ -395,6 +431,7 @@ export async function PUT(req: Request) {
       ...(heater_model !== undefined ? { heater_model: normalizedHeaterModel } : {}),
       assembly_labor_minutes: assemblyLabor.assembly_labor_minutes,
       assembly_labor_cost: assemblyLabor.assembly_labor_cost,
+      fiscal_year: normalizedFiscalYear,
     }
 
     let data: any[] | null = null
@@ -415,7 +452,8 @@ export async function PUT(req: Request) {
       (hasWorkOrdersCostColumnError(error) ||
         hasExcludeFromWorkReportColumnError(error) ||
         hasCostTemplateColumnError(error) ||
-        hasHeaterModelLaborColumnError(error))
+        hasHeaterModelLaborColumnError(error) ||
+        hasFiscalYearColumnError(error))
     ) {
       const fallbackUpdate = await supabase
         .from('work_orders')

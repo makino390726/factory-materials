@@ -29,11 +29,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([])
     }
 
-    const items = await fetchByIdChunks<{
+    let items: Array<{
       line_id: string | null
       instruction_text: string | null
       duration_minutes: number | null
-    }>(supabase, 'work_report_items', 'line_id, instruction_text, duration_minutes', 'report_id', reportIds)
+      completed_qty?: number | null
+    }>
+    try {
+      items = await fetchByIdChunks(
+        supabase,
+        'work_report_items',
+        'line_id, instruction_text, duration_minutes, completed_qty',
+        'report_id',
+        reportIds
+      )
+    } catch (itemError) {
+      const message = itemError instanceof Error ? itemError.message : ''
+      if (!message.includes('completed_qty')) throw itemError
+      items = await fetchByIdChunks(
+        supabase,
+        'work_report_items',
+        'line_id, instruction_text, duration_minutes',
+        'report_id',
+        reportIds
+      )
+    }
 
     const lineIdSet = new Set<string>()
     const instructionSet = new Set<string>()
@@ -65,12 +85,15 @@ export async function GET(request: NextRequest) {
     const lineMap = new Map(lines.map((line) => [line.id, { code: line.line_code, name: line.name }]))
     const orderMap = new Map(orders.map((order) => [order.order_no, { name: order.product_name }]))
 
-    const lineTotals = new Map<string, number>()
+    const lineTotals = new Map<string, { duration: number; completedQty: number }>()
     const instructionTotals = new Map<string, number>()
 
     for (const item of items) {
       if (item.line_id) {
-        lineTotals.set(item.line_id, (lineTotals.get(item.line_id) || 0) + (item.duration_minutes || 0))
+        const current = lineTotals.get(item.line_id) || { duration: 0, completedQty: 0 }
+        current.duration += item.duration_minutes || 0
+        current.completedQty += item.completed_qty || 0
+        lineTotals.set(item.line_id, current)
       }
       if (item.instruction_text && item.instruction_text.trim()) {
         const key = item.instruction_text.trim()
@@ -79,13 +102,14 @@ export async function GET(request: NextRequest) {
     }
 
     const result = [
-      ...Array.from(lineTotals.entries()).map(([lineId, duration]) => {
+      ...Array.from(lineTotals.entries()).map(([lineId, totals]) => {
         const lineInfo = lineMap.get(lineId)
         return {
           category: 'line',
           code: lineInfo?.code || lineId,
           name: lineInfo?.name || '',
-          duration_minutes: duration,
+          duration_minutes: totals.duration,
+          completed_qty: totals.completedQty,
         }
       }),
       ...Array.from(instructionTotals.entries()).map(([instruction, duration]) => {
@@ -95,6 +119,7 @@ export async function GET(request: NextRequest) {
           code: instruction,
           name: orderInfo?.name || '',
           duration_minutes: duration,
+          completed_qty: null,
         }
       }),
     ]

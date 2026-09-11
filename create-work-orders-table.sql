@@ -63,3 +63,9 @@ COMMENT ON COLUMN work_orders.qty IS '数量';
 COMMENT ON COLUMN work_orders.status IS 'ステータス（未開始/進行中/完了など）';
 COMMENT ON COLUMN work_orders.completed IS '完了フラグ';
 COMMENT ON COLUMN work_orders.completed_date IS '完了日時';
+COMMENT ON COLUMN work_orders.fiscal_year IS '会計年度（4桁。例:2027=27年度。9/1〜翌8/31）';
+
+ALTER TABLE work_orders
+ADD COLUMN IF NOT EXISTS fiscal_year INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_work_orders_fiscal_year ON work_orders(fiscal_year);

@@ -9,6 +9,7 @@ import {
   getCurrentFiscalYear,
   getFiscalYearDateRange,
 } from '@/lib/fiscal-year'
+import { isModelInstructionOrderNo } from '@/lib/model-instruction-orders'
 
 type ProcessRow = {
   work_group_code: string
@@ -268,6 +269,7 @@ function ProcessManagementContent() {
   const today = new Date().toISOString().slice(0, 10)
   const initialTargetType = searchParams.get('target_type')
   const initialTargetCode = searchParams.get('target_code')?.trim() || ''
+  const initialOrderNo = searchParams.get('order_no')?.trim() || ''
   const initialWorkDate = searchParams.get('work_date')?.trim() || today
   const initialTargetKey =
     (initialTargetType === 'line' || initialTargetType === 'instruction') && initialTargetCode
@@ -287,7 +289,9 @@ function ProcessManagementContent() {
   const [modelCode, setModelCode] = useState(
     initialTargetType === 'model' ? initialTargetCode : ''
   )
-  const [modelOrderNo, setModelOrderNo] = useState('')
+  const [modelOrderNo, setModelOrderNo] = useState(
+    initialTargetType === 'model' ? initialOrderNo : ''
+  )
   const [modelInstructions, setModelInstructions] = useState<
     Array<{ order_no: string; product_name: string | null; qty: number | null }>
   >([])
@@ -892,7 +896,7 @@ function ProcessManagementContent() {
                   [
                     { id: 'line' as const, label: 'L指令' },
                     { id: 'instruction' as const, label: 'D指令' },
-                    { id: 'model' as const, label: '機種指令' },
+                    { id: 'model' as const, label: '機種指令（KR9-0001）' },
                   ] as const
                 ).map((item) => (
                   <button
@@ -973,6 +977,7 @@ function ProcessManagementContent() {
                         >
                           {item.target_code}
                           {item.subtitle ? ` — ${item.subtitle}` : ''}
+                          {isModelInstructionOrderNo(item.target_code) ? ' 【機種指令】' : ''}
                           {(item.lot_count || 0) > 0
                             ? `（入庫${item.lot_count}件${
                                 item.latest_lot_end ? ` / 直近${item.latest_lot_end}` : ''
@@ -1050,6 +1055,7 @@ function ProcessManagementContent() {
                             return (
                               <option key={item.order_no} value={item.order_no}>
                                 {item.order_no}
+                                {isModelInstructionOrderNo(item.order_no) ? ' 【機種指令】' : ''}
                                 {item.product_name ? ` — ${item.product_name}` : ''}
                                 {item.qty != null ? ` / 数量${item.qty}` : ''}
                                 {(stats?.lot_count || 0) > 0
@@ -1067,6 +1073,7 @@ function ProcessManagementContent() {
                     </select>
                     <p className="mt-1 text-xs text-slate-500">
                       選択した指令番号の入庫ロットについて、各作業グループの作業時間・1台STを表示します。
+                      KR9-0001 はここ（機種指令）で入庫登録してください。
                     </p>
                   </div>
                 </div>

@@ -4,6 +4,8 @@ import {
   type ShinseiParsedReport,
   type ShinseiParseResult,
 } from '@/lib/shinsei-work-report-csv'
+import { getFiscalYearFromDate } from '@/lib/fiscal-year'
+import { syncTouchedLineLaborFromWorkReports } from '@/lib/line-part-labor-cost'
 import {
   parseYearMonthFromDate,
   syncMonthForTouchedCodes,
@@ -299,6 +301,16 @@ export async function importShinseiWorkReports(
         warnings.push(
           `月次同期失敗 ${monthKey}: ${error instanceof Error ? error.message : 'unknown'}`
         )
+      }
+      const fiscalYear = getFiscalYearFromDate(`${monthKey}-01`)
+      if (fiscalYear && bucket.lines.size > 0) {
+        try {
+          await syncTouchedLineLaborFromWorkReports(supabase, bucket.lines, fiscalYear)
+        } catch (error) {
+          warnings.push(
+            `L指令工費更新失敗 ${monthKey}: ${error instanceof Error ? error.message : 'unknown'}`
+          )
+        }
       }
     }
   }

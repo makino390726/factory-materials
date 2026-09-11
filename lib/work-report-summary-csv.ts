@@ -22,6 +22,7 @@ type InstructionAggregation = {
   code: string
   name: string
   duration_minutes: number
+  completed_qty?: number | null
 }
 
 type MachineAggregation = {
@@ -39,7 +40,9 @@ type StaffDetailItem = {
   id: string
   work_content: string
   instruction_text?: string | null
+  line_id?: string | null
   line_name?: string | null
+  completed_qty?: number | null
   model?: string | null
   start_time: string
   end_time: string
@@ -123,7 +126,7 @@ export function buildWorkReportSummaryCsv(
       break
 
     case 'instruction':
-      lines.push(buildCsvRow(['区分', 'コード', '名称', '所要時間']))
+      lines.push(buildCsvRow(['区分', 'コード', '名称', '所要時間', '完成個数']))
       for (const row of [...data.instructionData].sort((a, b) => {
         if (a.category !== b.category) return a.category === 'line' ? -1 : 1
         return a.code.localeCompare(b.code)
@@ -134,6 +137,7 @@ export function buildWorkReportSummaryCsv(
             row.code,
             row.name || '-',
             data.formatMinutes(row.duration_minutes),
+            row.category === 'line' ? String(row.completed_qty || 0) : '',
           ])
         )
       }
@@ -178,6 +182,7 @@ export function buildWorkReportSummaryCsv(
           '作業内容',
           'D指令',
           'L指令',
+          '完成個数',
           '型式',
           '開始時間',
           '終了時間',
@@ -209,11 +214,13 @@ export function buildWorkReportSummaryCsv(
                 '',
                 '',
                 '',
+                '',
               ])
             )
             continue
           }
           for (const item of report.items) {
+            const completedQty = data.getItemValue(item, 'completed_qty') ?? item.completed_qty
             lines.push(
               buildCsvRow([
                 staff.staff.name,
@@ -228,6 +235,7 @@ export function buildWorkReportSummaryCsv(
                 data.getItemValue(item, 'work_content') ?? '',
                 data.getItemValue(item, 'instruction_text') ?? item.instruction_text ?? '',
                 item.line_name ?? '',
+                item.line_id || item.line_name ? (completedQty ?? '') : '',
                 data.getItemValue(item, 'model') ?? '',
                 data.getItemValue(item, 'start_time') ?? '',
                 data.getItemValue(item, 'end_time') ?? '',

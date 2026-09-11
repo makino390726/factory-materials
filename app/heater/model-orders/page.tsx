@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import FiscalYearSelect from '@/app/components/FiscalYearSelect'
+import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { isModelInstructionOrderNo } from '@/lib/model-instruction-orders'
 import {
   PRODUCT_CATEGORIES,
   type ProductCategory,
@@ -48,15 +51,18 @@ export default function ModelOrdersMasterPage() {
   const [linkableCount, setLinkableCount] = useState(0)
   const [linking, setLinking] = useState(false)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
+  const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear)
 
-  const load = useCallback(async (qOverride?: string) => {
+  const load = useCallback(async (qOverride?: string, yearOverride?: number) => {
     setLoading(true)
     setError(null)
     try {
       const qValue = qOverride !== undefined ? qOverride : appliedQuery
+      const year = yearOverride ?? fiscalYear
       const params = new URLSearchParams()
       if (category !== 'すべて') params.set('category', category)
       if (qValue.trim()) params.set('q', qValue.trim())
+      params.set('fiscal_year', String(year))
       const res = await fetch(`/api/heater/model-orders?${params.toString()}`)
       const json = await res.json()
       if (!res.ok || json.error) throw new Error(json.error || '取得に失敗しました')
@@ -77,11 +83,11 @@ export default function ModelOrdersMasterPage() {
     } finally {
       setLoading(false)
     }
-  }, [category, appliedQuery])
+  }, [category, appliedQuery, fiscalYear])
 
   useEffect(() => {
     void load()
-  }, [category])
+  }, [category, fiscalYear])
 
   const runSearch = () => {
     setAppliedQuery(query)
@@ -136,7 +142,8 @@ export default function ModelOrdersMasterPage() {
             </p>
             <h1 className="mt-1 text-3xl font-bold text-white">機種別制作指令マスタ</h1>
             <p className="mt-2 text-sm text-slate-400">
-              機種マスタ（親）の下に、制作指令（指令番号・台数・時間）が並びます。
+              機種マスタ（親）の下に、選択年度の制作指令（指令番号・台数・時間）が並びます。
+              現在表示: {formatFiscalYearLabel(fiscalYear)}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -159,6 +166,12 @@ export default function ModelOrdersMasterPage() {
         </div>
 
         <div className="mb-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
+          <FiscalYearSelect
+            value={fiscalYear}
+            onChange={setFiscalYear}
+            className="min-w-[160px] [&_label]:text-slate-400 [&_select]:border-slate-600 [&_select]:bg-slate-950 [&_select]:text-white"
+            hint={false}
+          />
           <div>
             <label className="mb-1 block text-xs text-slate-400">カテゴリ</label>
             <select
@@ -286,7 +299,7 @@ export default function ModelOrdersMasterPage() {
                   <p className="mt-1 text-xs text-slate-400">
                     機種マスタに紐づいていない指令です。D指令マスタで「親機種」を指定すると左側の機種配下に入ります。
                   </p>
-                  <UnlinkedTable orders={unlinked} />
+                  <UnlinkedTable orders={unlinked} fiscalYear={fiscalYear} />
                 </div>
               ) : !selected ? (
                 <div className="p-12 text-center text-slate-500">左から機種を選択してください</div>
@@ -325,7 +338,7 @@ export default function ModelOrdersMasterPage() {
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Link
-                        href={`/work-orders?heater_model=${encodeURIComponent(selected.model)}`}
+                        href={`/work-orders?heater_model=${encodeURIComponent(selected.model)}&fiscal_year=${fiscalYear}`}
                       >
                         <button className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500">
                           ＋ この機種の制作指令を追加
@@ -384,6 +397,11 @@ export default function ModelOrdersMasterPage() {
                                 </p>
                                 <p className="mt-1 font-mono text-lg font-bold text-cyan-300">
                                   指令番号：{order.order_no}
+                                  {isModelInstructionOrderNo(order.order_no) ? (
+                                    <span className="ml-2 rounded border border-fuchsia-400/50 bg-fuchsia-950 px-1.5 py-0.5 align-middle text-xs font-bold text-fuchsia-100">
+                                      機種指令
+                                    </span>
+                                  ) : null}
                                 </p>
                                 <p className="mt-1 text-sm text-slate-300">
                                   指令台数：
@@ -407,7 +425,7 @@ export default function ModelOrdersMasterPage() {
                                 </p>
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                <Link href={`/work-orders?edit=${order.id}#work-order-form`}>
+                                <Link href={`/work-orders?edit=${order.id}&fiscal_year=${fiscalYear}#work-order-form`}>
                                   <button className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600">
                                     編集
                                   </button>
@@ -420,7 +438,11 @@ export default function ModelOrdersMasterPage() {
                                   </button>
                                 </Link>
                                 <Link
-                                  href={`/process-management?target_type=instruction&target_code=${encodeURIComponent(order.order_no)}`}
+                                  href={
+                                    isModelInstructionOrderNo(order.order_no)
+                                      ? `/process-management?target_type=model&target_code=${encodeURIComponent(selected.model)}&order_no=${encodeURIComponent(order.order_no)}`
+                                      : `/process-management?target_type=instruction&target_code=${encodeURIComponent(order.order_no)}`
+                                  }
                                 >
                                   <button className="rounded-md bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-600">
                                     工程
@@ -446,7 +468,13 @@ export default function ModelOrdersMasterPage() {
   )
 }
 
-function UnlinkedTable({ orders }: { orders: ChildOrder[] }) {
+function UnlinkedTable({
+  orders,
+  fiscalYear,
+}: {
+  orders: ChildOrder[]
+  fiscalYear: number
+}) {
   if (orders.length === 0) {
     return <p className="mt-6 text-sm text-slate-500">親なしの指令はありません</p>
   }
@@ -466,7 +494,14 @@ function UnlinkedTable({ orders }: { orders: ChildOrder[] }) {
         <tbody>
           {orders.map((o) => (
             <tr key={o.id} className="border-t border-slate-800">
-              <td className="px-3 py-2 font-mono text-cyan-300">{o.order_no}</td>
+              <td className="px-3 py-2 font-mono text-cyan-300">
+                {o.order_no}
+                {isModelInstructionOrderNo(o.order_no) ? (
+                  <span className="ml-2 rounded border border-fuchsia-400/50 bg-fuchsia-950 px-1.5 py-0.5 text-xs font-bold text-fuchsia-100">
+                    機種指令
+                  </span>
+                ) : null}
+              </td>
               <td className="px-3 py-2 text-slate-300">{o.product_name || '-'}</td>
               <td className="px-3 py-2 text-slate-400">{o.model || '-'}</td>
               <td className="px-3 py-2 text-right text-yellow-300">{o.qty ?? '-'}</td>
@@ -475,7 +510,7 @@ function UnlinkedTable({ orders }: { orders: ChildOrder[] }) {
               </td>
               <td className="px-3 py-2">
                 <Link
-                  href={`/work-orders?edit=${o.id}#work-order-form`}
+                  href={`/work-orders?edit=${o.id}&fiscal_year=${fiscalYear}#work-order-form`}
                   className="text-xs text-emerald-300 underline"
                 >
                   親機種を設定

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
+import { fetchLineAccumulations } from '@/lib/line-work-accumulation'
 
 export const runtime = 'nodejs'
 
@@ -18,6 +20,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const lineCode = searchParams.get('lineCode')?.trim()
     const lineName = searchParams.get('lineName')?.trim()
+    const fiscalYear = parseFiscalYearParam(searchParams.get('fiscal_year'), getCurrentFiscalYear())
 
     let query = supabase.from('lines').select('*')
 
@@ -40,6 +43,10 @@ export async function GET(req: Request) {
 
     // 各L指令の割り当てを取得
     const lines = data || []
+    const accumulations = await fetchLineAccumulations(supabase, fiscalYear).catch((accumulationError) => {
+      console.error('L指令累積集計エラー:', accumulationError)
+      return new Map()
+    })
     const enriched = await Promise.all(
       lines.map(async (line: any) => {
         const { data: assignments, error: assignError } = await supabase
@@ -50,10 +57,14 @@ export async function GET(req: Request) {
         if (assignError) {
           console.error(`割り当て取得エラー (line_id=${line.id}):`, assignError)
         }
+
+        const accumulation = accumulations.get(line.id)
         
         return {
           ...line,
-          part_assignments: assignments || []
+          part_assignments: assignments || [],
+          accumulated_duration_minutes: accumulation?.duration_minutes || 0,
+          accumulated_completed_qty: accumulation?.completed_qty || 0,
         }
       })
     )
