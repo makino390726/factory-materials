@@ -254,12 +254,15 @@ export async function POST(request: NextRequest) {
 
     for (const [modelCode, children] of byModel.entries()) {
       for (const order of children) {
-        if (order.heater_model && String(order.heater_model) === modelCode) {
+        const existingHeaterModel = String(
+          (order as { heater_model?: string | null }).heater_model || ''
+        )
+        if (existingHeaterModel && existingHeaterModel === modelCode) {
           skipped += 1
           continue
         }
         // 既に別機種へ明示紐づけ済みなら上書きしない
-        if (order.heater_model && String(order.heater_model) !== modelCode) {
+        if (existingHeaterModel && existingHeaterModel !== modelCode) {
           skipped += 1
           continue
         }
