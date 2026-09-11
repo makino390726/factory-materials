@@ -21,14 +21,6 @@ type LineItem = {
     id: string
     line_id: string
     part_key: string
-    ratio: number
-    common_group_label?: string | null
-    allocation_models?: string[] | null
-    bom_model_count?: number | null
-    common_group_source?: string | null
-    settings_confirmed?: boolean | null
-    settings_confirmed_at?: string | null
-    labor_recalc_at?: string | null
   }>
 }
 
@@ -40,34 +32,6 @@ type Part = {
 
 type PartAssignment = {
   part_key: string
-  ratio: number
-  common_group_label?: string
-  allocation_models?: string[] | null
-  bom_model_count?: number | null
-  common_group_source?: 'bom_auto' | 'manual'
-  settings_confirmed?: boolean
-}
-
-type LaborSettingsRow = {
-  assignment_id: string
-  line_id: string
-  line_code: string
-  line_name: string
-  part_key: string
-  ratio: number
-  common_group_label: string | null
-  bom_model_count: number | null
-  settings_confirmed: boolean
-  labor_recalc_at: string | null
-  preview: {
-    total_duration_minutes: number
-    planned_part_qty: number
-    completed_qty?: number
-    per_unit_duration_minutes: number | null
-    per_unit_labor_cost: number
-    per_unit_indirect_cost?: number
-    uses_work_report?: boolean
-  }
 }
 
 type MonthlyDurationHistory = {
@@ -101,7 +65,6 @@ export default function LinesPage() {
   })
   const [currentAssignments, setCurrentAssignments] = useState<PartAssignment[]>([])
   const [newPartKey, setNewPartKey] = useState('')
-  const [newRatio, setNewRatio] = useState('100')
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null)
   const [history, setHistory] = useState<MonthlyDurationHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -109,10 +72,7 @@ export default function LinesPage() {
   const [monthlyByLine, setMonthlyByLine] = useState<Record<string, MonthlyDurationHistory[]>>({})
   const [monthlyLoading, setMonthlyLoading] = useState(false)
   const [monthlyError, setMonthlyError] = useState<string | null>(null)
-  const [laborSettings, setLaborSettings] = useState<LaborSettingsRow[]>([])
-  const [laborSettingsLoading, setLaborSettingsLoading] = useState(false)
-  const [laborSettingsError, setLaborSettingsError] = useState<string | null>(null)
-  const [laborActionLoading, setLaborActionLoading] = useState(false)
+  const [carryActionLoading, setCarryActionLoading] = useState(false)
   const [monthlyEdits, setMonthlyEdits] = useState<EditableMonthlyRow[]>([])
   const [monthlyEditsLoading, setMonthlyEditsLoading] = useState(false)
   const [deletedMonthlyMonths, setDeletedMonthlyMonths] = useState<Set<string>>(new Set())
@@ -349,51 +309,7 @@ export default function LinesPage() {
 
   useEffect(() => {
     void fetchLines({ fiscalYear })
-    void fetchLaborSettings(fiscalYear)
   }, [fiscalYear])
-
-  const fetchLaborSettings = async (yearOverride?: number) => {
-    const year = yearOverride ?? fiscalYear
-    setLaborSettingsLoading(true)
-    setLaborSettingsError(null)
-    try {
-      const response = await fetch(`/api/lines/labor-settings?fiscal_year=${year}`)
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || '労賃按分設定の取得に失敗しました')
-      }
-      setLaborSettings(Array.isArray(data?.rows) ? data.rows : [])
-    } catch (err) {
-      console.error('labor settings fetch error:', err)
-      setLaborSettingsError(err instanceof Error ? err.message : '労賃按分設定の取得に失敗しました')
-      setLaborSettings([])
-    } finally {
-      setLaborSettingsLoading(false)
-    }
-  }
-
-  const handleDetectCommonGroups = async () => {
-    if (!confirm('BOMから共通明細を再検出します。手動修正した共通明細は維持されます。確認済みフラグは解除されます。よろしいですか？')) {
-      return
-    }
-
-    setLaborActionLoading(true)
-    setLaborSettingsError(null)
-    try {
-      const response = await fetch('/api/lines/labor-settings', { method: 'PATCH' })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || 'BOM再検出に失敗しました')
-      }
-      await fetchLines()
-      await fetchLaborSettings()
-      alert(`BOMから共通明細を再検出しました（${data.updated_count ?? 0}件）`)
-    } catch (err) {
-      setLaborSettingsError(err instanceof Error ? err.message : 'BOM再検出に失敗しました')
-    } finally {
-      setLaborActionLoading(false)
-    }
-  }
 
   const handleCarryOverPreviousYear = async () => {
     const fromYear = fiscalYear - 1
@@ -405,8 +321,8 @@ export default function LinesPage() {
       return
     }
 
-    setLaborActionLoading(true)
-    setLaborSettingsError(null)
+    setCarryActionLoading(true)
+    setError(null)
     try {
       const response = await fetch('/api/lines/carry-over-costs', {
         method: 'POST',
@@ -417,53 +333,14 @@ export default function LinesPage() {
       if (!response.ok) {
         throw new Error(data?.error || '繰越に失敗しました')
       }
-      await fetchLaborSettings(fiscalYear)
       alert(
         data.message ||
           `繰越完了: ${data.copied ?? 0}件 / スキップ ${data.skipped ?? 0}件`
       )
     } catch (err) {
-      setLaborSettingsError(err instanceof Error ? err.message : '繰越に失敗しました')
+      setError(err instanceof Error ? err.message : '繰越に失敗しました')
     } finally {
-      setLaborActionLoading(false)
-    }
-  }
-
-  const handleBulkLaborRecalc = async () => {
-    const confirmedCount = laborSettings.filter((row) => row.settings_confirmed).length
-    if (confirmedCount === 0) {
-      alert('確認済みの割り当てがありません。各割り当ての「確認済み」にチェックを入れてから実行してください。')
-      return
-    }
-
-    if (
-      !confirm(
-        `確認済み ${confirmedCount} 件の労賃を一括再計算します（${formatFiscalYearLabel(fiscalYear)}）。\n制作所要時間 ÷ 完成個数 で1個あたり工賃を算出し、パーツマスタ原価を更新します。よろしいですか？`
-      )
-    ) {
-      return
-    }
-
-    setLaborActionLoading(true)
-    setLaborSettingsError(null)
-    try {
-      const response = await fetch('/api/lines/labor-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ only_confirmed: true, fiscal_year: fiscalYear }),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.error || '一括再計算に失敗しました')
-      }
-      await fetchLaborSettings()
-      alert(
-        `一括再計算が完了しました。\n成功: ${data.success_count ?? 0}件 / スキップ: ${data.skipped_count ?? 0}件 / 失敗: ${data.failed_count ?? 0}件`
-      )
-    } catch (err) {
-      setLaborSettingsError(err instanceof Error ? err.message : '一括再計算に失敗しました')
-    } finally {
-      setLaborActionLoading(false)
+      setCarryActionLoading(false)
     }
   }
 
@@ -507,7 +384,6 @@ export default function LinesPage() {
     setFormData({ line_code: '', name: '', sort_order: 0, is_active: true })
     setCurrentAssignments([])
     setNewPartKey('')
-    setNewRatio('100')
     setEditingId(null)
     setMonthlyEdits([])
     setDeletedMonthlyMonths(new Set())
@@ -558,7 +434,6 @@ export default function LinesPage() {
 
       await fetchLines()
       await fetchMonthlyDurations()
-      await fetchLaborSettings()
       resetForm()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unknown error')
@@ -575,50 +450,16 @@ export default function LinesPage() {
       sort_order: line.sort_order ?? 0,
       is_active: line.is_active ?? true,
     })
-    // 割り当てを読み込む
-    const assignments: PartAssignment[] = (line.part_assignments || []).map((a: any) => ({
-      part_key: a.part_key,
-      ratio: a.ratio,
-      common_group_label: a.common_group_label || '',
-      allocation_models: Array.isArray(a.allocation_models) ? a.allocation_models : null,
-      bom_model_count: a.bom_model_count ?? null,
-      common_group_source: (a.common_group_source === 'manual' ? 'manual' : 'bom_auto') as PartAssignment['common_group_source'],
-      settings_confirmed: Boolean(a.settings_confirmed),
-    }))
-    setCurrentAssignments(assignments)
+    setCurrentAssignments(
+      (line.part_assignments || []).map((a) => ({
+        part_key: a.part_key,
+      }))
+    )
     void loadMonthlyEdits(line.line_code)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleEditFromLaborRow = async (row: LaborSettingsRow) => {
-    let line = lines.find((item) => item.id === row.line_id)
-
-    if (!line) {
-      try {
-        const response = await fetch('/api/lines')
-        if (!response.ok) throw new Error('L指令一覧の取得に失敗しました')
-        const data = await response.json()
-        const refreshed = Array.isArray(data) ? data : []
-        setLines(refreshed)
-        line = refreshed.find((item: LineItem) => item.id === row.line_id)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'L指令の取得に失敗しました')
-        return
-      }
-    }
-
-    if (!line) {
-      setError(`L指令 ${row.line_code} が見つかりませんでした`)
-      return
-    }
-
-    handleEdit(line)
-    requestAnimationFrame(() => {
-      document.getElementById('line-edit-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-  }
-
-  const handleAddPartAssignment = async () => {
+  const handleAddPartAssignment = () => {
     if (!newPartKey.trim()) {
       setError('部品キーを選択してください')
       return
@@ -629,89 +470,8 @@ export default function LinesPage() {
       return
     }
 
-    const ratioNum = Math.max(0, Math.min(100, Number(newRatio) || 100))
-    let commonGroupLabel = ''
-    let allocationModels: string[] | null = null
-    let bomModelCount: number | null = null
-
-    try {
-      const res = await fetch(
-        `/api/heater/parts-commonality?part_key=${encodeURIComponent(newPartKey)}`
-      )
-      if (res.ok) {
-        const data = await res.json()
-        commonGroupLabel = data.common_group_label || ''
-        allocationModels = Array.isArray(data.models) ? data.models : null
-        bomModelCount = Number(data.bom_model_count || 0) || null
-      }
-    } catch (err) {
-      console.error('commonality fetch error:', err)
-    }
-
-    setCurrentAssignments([
-      ...currentAssignments,
-      {
-        part_key: newPartKey,
-        ratio: ratioNum,
-        common_group_label: commonGroupLabel,
-        allocation_models: allocationModels,
-        bom_model_count: bomModelCount,
-        common_group_source: 'bom_auto',
-        settings_confirmed: false,
-      },
-    ])
+    setCurrentAssignments([...currentAssignments, { part_key: newPartKey }])
     setNewPartKey('')
-    setNewRatio('100')
-  }
-
-  const handleAssignmentFieldChange = (
-    partKey: string,
-    field: keyof PartAssignment,
-    value: string | boolean
-  ) => {
-    setCurrentAssignments((prev) =>
-      prev.map((assignment) => {
-        if (assignment.part_key !== partKey) return assignment
-        if (field === 'common_group_label') {
-          return {
-            ...assignment,
-            common_group_label: String(value),
-            common_group_source: 'manual',
-            settings_confirmed: false,
-          }
-        }
-        if (field === 'settings_confirmed') {
-          return { ...assignment, settings_confirmed: Boolean(value) }
-        }
-        return assignment
-      })
-    )
-  }
-
-  const handleRefreshCommonGroupFromBom = async (partKey: string) => {
-    try {
-      const res = await fetch(
-        `/api/heater/parts-commonality?part_key=${encodeURIComponent(partKey)}`
-      )
-      if (!res.ok) return
-      const data = await res.json()
-      setCurrentAssignments((prev) =>
-        prev.map((assignment) =>
-          assignment.part_key === partKey
-            ? {
-                ...assignment,
-                common_group_label: data.common_group_label || '',
-                allocation_models: Array.isArray(data.models) ? data.models : null,
-                bom_model_count: Number(data.bom_model_count || 0) || null,
-                common_group_source: 'bom_auto',
-                settings_confirmed: false,
-              }
-            : assignment
-        )
-      )
-    } catch (err) {
-      console.error('refresh common group error:', err)
-    }
   }
 
   const handleDeletePartAssignment = (partKey: string) => {
@@ -744,12 +504,7 @@ export default function LinesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             part_key: assignment.part_key,
-            ratio: assignment.ratio,
-            common_group_label: assignment.common_group_label || null,
-            allocation_models: assignment.allocation_models ?? null,
-            bom_model_count: assignment.bom_model_count ?? null,
-            common_group_source: assignment.common_group_source || 'bom_auto',
-            settings_confirmed: Boolean(assignment.settings_confirmed),
+            ratio: 100,
           }),
         })
 
@@ -823,154 +578,6 @@ export default function LinesPage() {
           </div>
         )}
 
-        <div className="bg-white/95 rounded-2xl shadow-xl border border-amber-100 p-6 backdrop-blur mb-6">
-          <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                L指令番号・指令名は毎年同じマスタを使います。構成部品の材料費・材料間接費は前年度を引き継ぎ、使用材料や単価の変更は当該年度で保存します。
-                900番台以外の工費は、選択年度の確定日報の所要時間 ÷ 完成個数で更新します（工費 = 所要時間 ÷ 480分 × ¥17,810、間接費 = 工費 × 30%）。900番台は対象外です。
-                現在表示: {formatFiscalYearLabel(fiscalYear)}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <FiscalYearSelect
-                value={fiscalYear}
-                onChange={setFiscalYear}
-                className="w-44"
-                hint={false}
-              />
-              <button
-                type="button"
-                onClick={() => void handleDetectCommonGroups()}
-                disabled={laborActionLoading}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
-              >
-                BOMから共通明細を再検出
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleCarryOverPreviousYear()}
-                disabled={laborActionLoading}
-                className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
-              >
-                前年度のL指令→パーツ→構成部品を繰越
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleBulkLaborRecalc()}
-                disabled={laborActionLoading}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-lg disabled:opacity-50"
-              >
-                確認済みの労賃を一括再計算
-              </button>
-            </div>
-          </div>
-
-          {laborSettingsError && (
-            <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {laborSettingsError}
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-left bg-slate-50 text-slate-700">
-                <tr>
-                  <th className="px-3 py-2">L指令</th>
-                  <th className="px-3 py-2">部品キー</th>
-                  <th className="px-3 py-2">共通明細</th>
-                  <th className="px-3 py-2 text-right">制作所要（{formatFiscalYearLabel(fiscalYear)}）</th>
-                  <th className="px-3 py-2 text-right">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
-                  <th className="px-3 py-2 text-right">1個あたり</th>
-                  <th className="px-3 py-2 text-right">工費/個</th>
-                  <th className="px-3 py-2 text-right">間接/個</th>
-                  <th className="px-3 py-2 text-center">確認</th>
-                  <th className="px-3 py-2">最終再計算</th>
-                  <th className="px-3 py-2 text-center">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {laborSettingsLoading ? (
-                  <tr>
-                    <td colSpan={11} className="px-3 py-6 text-center text-slate-400">
-                      読み込み中...
-                    </td>
-                  </tr>
-                ) : laborSettings.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="px-3 py-6 text-center text-slate-400">
-                      部品割り当てがありません
-                    </td>
-                  </tr>
-                ) : (
-                  laborSettings.map((row) => (
-                    <tr
-                      key={row.assignment_id}
-                      className={`border-t border-slate-100 ${editingId === row.line_id ? 'bg-sky-50' : ''}`}
-                    >
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {row.line_code}
-                        <div className="text-[11px] text-slate-500">{row.line_name}</div>
-                      </td>
-                      <td className="px-3 py-2 font-medium">{row.part_key}</td>
-                      <td className="px-3 py-2">
-                        {row.common_group_label || '—'}
-                        {row.bom_model_count ? (
-                          <div className="text-[11px] text-slate-500">BOM {row.bom_model_count}機種</div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {row.preview.total_duration_minutes.toLocaleString('ja-JP')}分
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {row.preview.uses_work_report
-                          ? (row.preview.completed_qty || 0).toLocaleString('ja-JP')
-                          : row.preview.planned_part_qty.toLocaleString('ja-JP')}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {row.preview.per_unit_duration_minutes ?? '—'}
-                        {row.preview.per_unit_duration_minutes ? '分' : ''}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-amber-700">
-                        ¥{row.preview.per_unit_labor_cost.toLocaleString('ja-JP')}
-                      </td>
-                      <td className="px-3 py-2 text-right text-orange-700">
-                        ¥{(row.preview.per_unit_indirect_cost || 0).toLocaleString('ja-JP')}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {row.settings_confirmed ? (
-                          <span className="inline-block rounded bg-emerald-100 px-2 py-0.5 text-emerald-800">
-                            済
-                          </span>
-                        ) : (
-                          <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-slate-500">
-                            未
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-slate-500 whitespace-nowrap">
-                        {row.labor_recalc_at
-                          ? new Date(row.labor_recalc_at).toLocaleString('ja-JP')
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => void handleEditFromLaborRow(row)}
-                          className="px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition text-xs font-medium whitespace-nowrap"
-                        >
-                          編集
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <div className="grid grid-cols-[500px_1fr] gap-6">
           <div id="line-edit-form" className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit sticky top-8">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
@@ -1025,11 +632,13 @@ export default function LinesPage() {
                 </label>
               </div>
 
-              {/* 部品割り当てセクション */}
               <div className="border-t border-slate-200 pt-4">
-                <h3 className="text-sm font-semibold text-slate-900 mb-3">部品割り当て</h3>
+                <h3 className="text-sm font-semibold text-slate-900 mb-1">対象パーツ</h3>
+                <p className="mb-3 text-[11px] text-slate-500">
+                  原価画面でこのL指令を選んだときに表示するパーツです。材料費の年度繰越にも使います。
+                </p>
                 <div className="space-y-3">
-                  <div className="grid grid-cols-[1fr_80px_auto] gap-2">
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">部品キー</label>
                       <select
@@ -1048,17 +657,6 @@ export default function LinesPage() {
                       </select>
                       <p className="mt-1 text-xs text-slate-500">部品件数: {parts.length}</p>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">割合（%）</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={newRatio}
-                        onChange={(e) => setNewRatio(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-                      />
-                    </div>
                     <div className="flex items-end">
                       <button
                         type="button"
@@ -1076,60 +674,13 @@ export default function LinesPage() {
                         <thead className="bg-slate-50">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium text-slate-700">部品キー</th>
-                            <th className="px-3 py-2 text-right font-medium text-slate-700">割合</th>
-                            <th className="px-3 py-2 text-left font-medium text-slate-700">共通明細</th>
-                            <th className="px-3 py-2 text-center font-medium text-slate-700">確認</th>
                             <th className="px-3 py-2 text-center font-medium text-slate-700">操作</th>
                           </tr>
                         </thead>
                         <tbody>
                           {currentAssignments.map((assignment) => (
-                            <tr key={assignment.part_key} className="border-t border-slate-100 align-top">
-                              <td className="px-3 py-2 text-slate-900">
-                                <div>{assignment.part_key}</div>
-                                {assignment.bom_model_count ? (
-                                  <div className="text-[11px] text-slate-500">
-                                    BOM {assignment.bom_model_count}機種
-                                  </div>
-                                ) : null}
-                              </td>
-                              <td className="px-3 py-2 text-right text-slate-900">{assignment.ratio}%</td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="text"
-                                  value={assignment.common_group_label || ''}
-                                  onChange={(e) =>
-                                    handleAssignmentFieldChange(
-                                      assignment.part_key,
-                                      'common_group_label',
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="例: 全機種 / 500・600系共通"
-                                  className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleRefreshCommonGroupFromBom(assignment.part_key)}
-                                  className="mt-1 text-[11px] text-sky-700 hover:underline"
-                                >
-                                  BOMから再取得
-                                </button>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(assignment.settings_confirmed)}
-                                  onChange={(e) =>
-                                    handleAssignmentFieldChange(
-                                      assignment.part_key,
-                                      'settings_confirmed',
-                                      e.target.checked
-                                    )
-                                  }
-                                  className="h-4 w-4"
-                                />
-                              </td>
+                            <tr key={assignment.part_key} className="border-t border-slate-100">
+                              <td className="px-3 py-2 text-slate-900">{assignment.part_key}</td>
                               <td className="px-3 py-2 text-center">
                                 <button
                                   type="button"
@@ -1143,9 +694,6 @@ export default function LinesPage() {
                           ))}
                         </tbody>
                       </table>
-                      <p className="px-3 py-2 text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100">
-                        共通明細を確認後「確認済み」にチェックし、画面下部の一括再計算を実行してください。
-                      </p>
                     </div>
                   )}
                 </div>
@@ -1296,7 +844,7 @@ export default function LinesPage() {
                 placeholder="L指令名で検索（あいまい）"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -1311,6 +859,14 @@ export default function LinesPage() {
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   解除
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCarryOverPreviousYear()}
+                  disabled={carryActionLoading}
+                  className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
+                >
+                  前年度の構成部品を繰越
                 </button>
               </div>
             </form>
@@ -1340,7 +896,6 @@ export default function LinesPage() {
                     <th className="py-3 px-3 font-semibold">L指令名</th>
                     <th className="py-3 px-3 font-semibold">制作時間（{formatFiscalYearLabel(fiscalYear)}）</th>
                     <th className="py-3 px-3 font-semibold">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
-                    <th className="py-3 px-3 font-semibold">部品割り当て</th>
                     <th className="py-3 px-3 font-semibold">有効</th>
                     <th className="py-3 px-3 font-semibold">操作</th>
                   </tr>
@@ -1348,7 +903,7 @@ export default function LinesPage() {
                 <tbody className="text-black">
                   {lines.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={7} className="py-6 text-center text-slate-400">
+                      <td colSpan={6} className="py-6 text-center text-slate-400">
                         L指令が未登録です
                       </td>
                     </tr>
@@ -1376,24 +931,6 @@ export default function LinesPage() {
                             <span className="inline-block rounded border border-emerald-400/40 bg-emerald-950 px-1.5 py-0.5 text-[11px] font-medium text-emerald-100">
                               {(line.accumulated_completed_qty || 0).toLocaleString()}個
                             </span>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3">
-                          {(line.part_assignments || []).length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {(line.part_assignments || []).map((a: any) => (
-                                <span
-                                  key={a.part_key}
-                                  className="inline-block rounded border border-cyan-400/40 bg-cyan-950 px-2 py-1 text-xs font-medium text-cyan-100 whitespace-nowrap"
-                                >
-                                  {a.part_key} ({a.ratio}%)
-                                  {a.common_group_label ? ` / ${a.common_group_label}` : ''}
-                                  {a.settings_confirmed ? ' ✓' : ''}
-                                </span>
-                              ))}
-                            </div>
                           ) : (
                             <span className="text-slate-400">—</span>
                           )}
