@@ -1104,7 +1104,7 @@ export default function WorkOrderCostPage() {
       setIsLoading(true)
       setError(null)
       try {
-        const response = await fetch(`/api/work-orders?fiscal_year=${fiscalYear}`)
+        const response = await fetch(`/api/work-orders?fiscal_year=${fiscalYear}&for_select=1`)
         if (!response.ok) throw new Error('D指令の取得に失敗しました')
         const data = await response.json()
         const list = Array.isArray(data) ? (data as WorkOrderOption[]) : []

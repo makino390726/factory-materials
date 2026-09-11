@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCurrentFiscalYear, matchesVisibleFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
+import { getCurrentFiscalYear, matchesExactFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
 import {
   DEFAULT_PRODUCT_CATEGORY,
   inferProductCategory,
@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
 
     const { orderRows: allOrderRows } = await loadOrders()
     const orderRows = allOrderRows.filter((row) =>
-      matchesVisibleFiscalYear(
+      matchesExactFiscalYear(
         (row as { fiscal_year?: number | null }).fiscal_year,
         fiscalYear,
         (row as { created_at?: string }).created_at

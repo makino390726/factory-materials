@@ -143,6 +143,7 @@ export async function GET(req: Request) {
     const productName = searchParams.get('productName')?.trim()
     const heaterModel = searchParams.get('heater_model')?.trim()
     const forWorkReport = searchParams.get('for_work_report') === '1'
+    const forSelect = searchParams.get('for_select') === '1'
     const fiscalYearParam = searchParams.get('fiscal_year')
     const fiscalYear =
       fiscalYearParam && fiscalYearParam !== 'all'
@@ -150,6 +151,7 @@ export async function GET(req: Request) {
         : forWorkReport
           ? getCurrentFiscalYear()
           : null
+    const inheritVisibleYears = forWorkReport || forSelect
 
     let query = supabase.from('work_orders').select('*')
 
@@ -157,7 +159,9 @@ export async function GET(req: Request) {
       query = query.eq('exclude_from_work_report', false)
     }
     if (fiscalYear) {
-      query = query.or(workOrderFiscalYearOrFilter(fiscalYear))
+      query = inheritVisibleYears
+        ? query.or(workOrderFiscalYearOrFilter(fiscalYear))
+        : query.eq('fiscal_year', fiscalYear)
     }
 
     if (orderNo) {

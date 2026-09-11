@@ -66,8 +66,9 @@ export function parseFiscalYearParam(value: unknown, fallback = getCurrentFiscal
 }
 
 /**
- * 指令選択・一覧で見せる年度。
- * 当年度はマスタ全件を出すため、前年度と未設定も含める（年度替わり直後に空にしない）。
+ * 原価・日報などの指令選択で見せる年度。
+ * 当年度はまだ今年度登録が少ないので、前年度と未設定も含める。
+ * D指令マスタ／機種指令マスタの一覧は exact 年度だけを使う。
  */
 export function fiscalYearsVisibleOnSelect(selectedYear: number, now = new Date()) {
   const current = getCurrentFiscalYear(now)
@@ -75,6 +76,16 @@ export function fiscalYearsVisibleOnSelect(selectedYear: number, now = new Date(
     return { years: [selectedYear, selectedYear - 1], includeNull: true }
   }
   return { years: [selectedYear], includeNull: false }
+}
+
+export function matchesExactFiscalYear(
+  rowYear: number | null | undefined,
+  selectedYear: number,
+  createdAt?: string | null
+) {
+  const year = Number(rowYear)
+  if (Number.isFinite(year) && year > 0) return year === selectedYear
+  return getFiscalYearFromDate(String(createdAt || '')) === selectedYear
 }
 
 export function workOrderFiscalYearOrFilter(selectedYear: number, now = new Date()) {

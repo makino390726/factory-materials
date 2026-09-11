@@ -30,11 +30,12 @@ type BomSummaryRow = {
 type ModelReportRow = {
   model: string
   display_name: string
-  material_cost: number
-  labor_cost: number
-  indirect_cost: number
-  total_cost: number
   part_count: number
+  previous_year_available?: boolean
+  previous_material_cost?: number | null
+  previous_labor_cost?: number | null
+  previous_indirect_cost?: number | null
+  previous_total_cost?: number | null
   realtime_applied?: boolean
   realtime_label?: string | null
   realtime_st_minutes?: number | null
@@ -42,6 +43,8 @@ type ModelReportRow = {
   realtime_labor_cost?: number | null
   realtime_indirect_cost?: number | null
   realtime_total_cost?: number | null
+  current_year_applied?: boolean
+  current_year_updated_at?: string | null
 }
 
 const currency = (value: number) => `\u00a5${Math.round(value || 0).toLocaleString('ja-JP')}`
@@ -72,6 +75,9 @@ export default function CostReportsPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [costAsOfLabel, setCostAsOfLabel] = useState<string | null>(null)
+  const [fiscalYearLabel, setFiscalYearLabel] = useState('')
+  const [previousFiscalYearLabel, setPreviousFiscalYearLabel] = useState('')
+  const [applyingModel, setApplyingModel] = useState<string | null>(null)
 
   const reportTitle =
     reportType === 'order' ? 'D指令原価一覧' : reportType === 'line' ? 'L指令原価一覧' : '機種別原価一覧'
@@ -97,6 +103,8 @@ export default function CostReportsPage() {
 
         if (requestedType === 'model') {
           setModelRows(Array.isArray(data?.rows) ? data.rows : [])
+          setFiscalYearLabel(String(data?.fiscal_year_label || ''))
+          setPreviousFiscalYearLabel(String(data?.previous_fiscal_year_label || ''))
           setRows([])
           setBomSummary([])
         } else {
@@ -129,13 +137,13 @@ export default function CostReportsPage() {
     )
   }, [rows])
 
-  const modelTotals = useMemo(() => {
+  const previousYearTotals = useMemo(() => {
     return modelRows.reduce(
       (acc, row) => {
-        acc.material_cost += Number(row.material_cost || 0)
-        acc.labor_cost += Number(row.labor_cost || 0)
-        acc.indirect_cost += Number(row.indirect_cost || 0)
-        acc.total_cost += Number(row.total_cost || 0)
+        acc.material_cost += Number(row.previous_material_cost || 0)
+        acc.labor_cost += Number(row.previous_labor_cost || 0)
+        acc.indirect_cost += Number(row.previous_indirect_cost || 0)
+        acc.total_cost += Number(row.previous_total_cost || 0)
         return acc
       },
       { material_cost: 0, labor_cost: 0, indirect_cost: 0, total_cost: 0 }
@@ -146,20 +154,66 @@ export default function CostReportsPage() {
     return modelRows.reduce(
       (acc, row) => {
         const applied = Boolean(row.realtime_applied)
-        acc.material_cost += Number(
-          applied ? row.realtime_material_cost ?? row.material_cost : row.material_cost || 0
-        )
-        acc.labor_cost += Number(applied ? row.realtime_labor_cost ?? row.labor_cost : row.labor_cost || 0)
-        acc.indirect_cost += Number(
-          applied ? row.realtime_indirect_cost ?? row.indirect_cost : row.indirect_cost || 0
-        )
-        acc.total_cost += Number(applied ? row.realtime_total_cost ?? row.total_cost : row.total_cost || 0)
         if (applied) acc.applied_count += 1
+        acc.material_cost += Number(
+          applied ? row.realtime_material_cost ?? 0 : row.previous_material_cost || 0
+        )
+        acc.labor_cost += Number(applied ? row.realtime_labor_cost ?? 0 : row.previous_labor_cost || 0)
+        acc.indirect_cost += Number(
+          applied ? row.realtime_indirect_cost ?? 0 : row.previous_indirect_cost || 0
+        )
+        acc.total_cost += Number(applied ? row.realtime_total_cost ?? 0 : row.previous_total_cost || 0)
         return acc
       },
       { material_cost: 0, labor_cost: 0, indirect_cost: 0, total_cost: 0, applied_count: 0 }
     )
   }, [modelRows])
+
+  const handleApplyCurrentYearCost = async (row: ModelReportRow) => {
+    if (!row.realtime_applied) {
+      setError('リアルタイム原価が未適用です。製品パーツ計算で適用してから保存してください。')
+      return
+    }
+    const already = Boolean(row.current_year_applied)
+    if (
+      !confirm(
+        already
+          ? `${row.display_name} の${fiscalYearLabel || '本年'}原価をリアルタイム原価で上書きします。よろしいですか？`
+          : `${row.display_name} のリアルタイム原価を${fiscalYearLabel || '本年'}原価として保存します。よろしいですか？`
+      )
+    ) {
+      return
+    }
+
+    setApplyingModel(row.model)
+    setError(null)
+    try {
+      const response = await fetch('/api/heater/models/annual-cost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: row.model }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data?.error || '本年原価の保存に失敗しました')
+      }
+      setModelRows((prev) =>
+        prev.map((item) =>
+          item.model === row.model
+            ? {
+                ...item,
+                current_year_applied: true,
+                current_year_updated_at: data?.saved?.updated_at || new Date().toISOString(),
+              }
+            : item
+        )
+      )
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : '本年原価の保存に失敗しました')
+    } finally {
+      setApplyingModel(null)
+    }
+  }
 
   const handlePrint = () => {
     setCostAsOfLabel(formatCostAsOfJa(new Date()))
@@ -225,7 +279,9 @@ export default function CostReportsPage() {
           <h2 className="text-xl font-bold">{reportTitle}</h2>
           <p className="text-xs text-slate-600">
             {costAsOfLabel || `印刷日時: ${new Date().toLocaleString('ja-JP')}`}
-            {reportType === 'model' ? ' ／ 各機種 現行BOM・リアルタイム 2段' : ''}
+            {reportType === 'model'
+              ? ` ／ 各機種 ${previousFiscalYearLabel || '前年度'}・リアルタイム 2段`
+              : ''}
           </p>
         </div>
 
@@ -242,7 +298,8 @@ export default function CostReportsPage() {
             <div className="border-b border-slate-700 bg-slate-800 px-6 py-4 print:hidden">
               <h2 className="text-xl font-bold text-white">機種別原価一覧</h2>
               <p className="mt-1 text-xs text-slate-400">
-                各機種を2段で表示します。上段は現行BOM、下段は製品パーツ計算で適用したリアルタイム原価です（1台当たり）。
+                各機種を2段で表示します。上段は{previousFiscalYearLabel || '前年度'}原価、下段はリアルタイム原価です（1台当たり）。
+                リアルタイム原価を{fiscalYearLabel || '本年'}原価にする場合は、行末の「本年原価適用」で保存します。
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -258,19 +315,25 @@ export default function CostReportsPage() {
                     <th className="border-b border-slate-700 bg-slate-700 px-4 py-3 text-right font-bold text-yellow-300 print:border-slate-300 print:bg-slate-100 print:text-slate-700">
                       合計
                     </th>
+                    <th className="border-b border-slate-700 px-4 py-3 text-center print:hidden">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {modelRows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                         データがありません。
                       </td>
                     </tr>
                   )}
                   {modelRows.map((row, idx) => {
                     const applied = Boolean(row.realtime_applied)
+                    const previousSaved = Boolean(row.previous_year_available)
+                    const currentApplied = Boolean(row.current_year_applied)
                     const baseRowClass = idx % 2 === 0 ? 'bg-slate-900/40 print:bg-white' : 'bg-slate-800/20 print:bg-slate-50'
+                    const previousLabel = previousSaved
+                      ? `前年度（${previousFiscalYearLabel || '前年度'}）`
+                      : `前年度（未保存）`
                     const realtimeLabel = applied
                       ? [
                           'リアルタイム',
@@ -294,23 +357,24 @@ export default function CostReportsPage() {
                             )}
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">
-                            現行BOM
+                            {previousLabel}
                           </td>
                           <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 text-right align-top text-slate-300 print:border-slate-200 print:text-slate-800">
                             {row.part_count.toLocaleString('ja-JP')}
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
-                            {currency(row.material_cost)}
+                            {currency(Number(row.previous_material_cost || 0))}
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
-                            {currency(row.indirect_cost)}
+                            {currency(Number(row.previous_indirect_cost || 0))}
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-right text-emerald-300 print:border-slate-200 print:text-slate-800">
-                            {currency(row.labor_cost)}
+                            {currency(Number(row.previous_labor_cost || 0))}
                           </td>
                           <td className="border-t border-slate-800 bg-yellow-900/10 px-4 py-2 text-right font-bold text-yellow-300 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
-                            {currency(row.total_cost)}
+                            {currency(Number(row.previous_total_cost || 0))}
                           </td>
+                          <td className="border-t border-slate-800 px-4 py-2 print:hidden" />
                         </tr>
                         <tr className={baseRowClass}>
                           <td className="border-t border-slate-800 px-4 py-2 print:border-slate-200">
@@ -319,7 +383,7 @@ export default function CostReportsPage() {
                             </div>
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-right text-sky-300 print:border-slate-200 print:text-slate-800">
-                            {applied ? currency(Number(row.realtime_material_cost ?? row.material_cost)) : '—'}
+                            {applied ? currency(Number(row.realtime_material_cost ?? 0)) : '—'}
                           </td>
                           <td className="border-t border-slate-800 px-4 py-2 text-right text-violet-300 print:border-slate-200 print:text-slate-800">
                             {applied ? currency(Number(row.realtime_indirect_cost ?? 0)) : '—'}
@@ -330,6 +394,25 @@ export default function CostReportsPage() {
                           <td className="border-t border-slate-800 bg-amber-900/20 px-4 py-2 text-right font-bold text-amber-200 print:border-slate-200 print:bg-slate-100 print:text-slate-900">
                             {applied ? currency(Number(row.realtime_total_cost ?? 0)) : '—'}
                           </td>
+                          <td className="border-t border-slate-800 px-4 py-2 text-center print:hidden">
+                            <button
+                              type="button"
+                              disabled={!applied || applyingModel === row.model}
+                              onClick={() => void handleApplyCurrentYearCost(row)}
+                              className="rounded-md bg-cyan-700 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                            >
+                              {applyingModel === row.model
+                                ? '保存中...'
+                                : currentApplied
+                                  ? '本年原価を更新'
+                                  : '本年原価適用'}
+                            </button>
+                            {currentApplied && (
+                              <div className="mt-1 text-[10px] text-emerald-300">
+                                {fiscalYearLabel || '本年'}適用済
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       </Fragment>
                     )
@@ -338,28 +421,31 @@ export default function CostReportsPage() {
                 <tfoot className="bg-gradient-to-r from-amber-950/60 to-yellow-950/60 print:bg-slate-100">
                   <tr>
                     <td className="px-4 py-3 font-semibold text-yellow-300 print:text-slate-800">
-                      計（現行・{modelRows.length} 機種）
+                      計（前年度・{modelRows.length} 機種）
                     </td>
-                    <td className="px-4 py-3 text-slate-300 print:text-slate-700">現行BOM</td>
+                    <td className="px-4 py-3 text-slate-300 print:text-slate-700">
+                      {previousFiscalYearLabel || '前年度'}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">
                       {modelRows.reduce((s, r) => s + Number(r.part_count || 0), 0).toLocaleString('ja-JP')}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-sky-300 print:text-slate-800">
-                      {currency(modelTotals.material_cost)}
+                      {currency(previousYearTotals.material_cost)}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-violet-300 print:text-slate-800">
-                      {currency(modelTotals.indirect_cost)}
+                      {currency(previousYearTotals.indirect_cost)}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-emerald-300 print:text-slate-800">
-                      {currency(modelTotals.labor_cost)}
+                      {currency(previousYearTotals.labor_cost)}
                     </td>
                     <td className="px-4 py-3 text-right text-2xl font-extrabold text-yellow-300 print:text-slate-900">
-                      {currency(modelTotals.total_cost)}
+                      {currency(previousYearTotals.total_cost)}
                     </td>
+                    <td className="px-4 py-3 print:hidden" />
                   </tr>
                   <tr>
                     <td className="px-4 py-3 font-semibold text-amber-200 print:text-slate-800">
-                      計（リアルタイム・適用 {realtimeModelTotals.applied_count} / 未適用は現行）
+                      計（リアルタイム・適用 {realtimeModelTotals.applied_count} / 未適用は前年度）
                     </td>
                     <td className="px-4 py-3 text-amber-100/80 print:text-slate-700">リアルタイム</td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 print:text-slate-800">
@@ -377,6 +463,7 @@ export default function CostReportsPage() {
                     <td className="px-4 py-3 text-right text-2xl font-extrabold text-amber-200 print:text-slate-900">
                       {currency(realtimeModelTotals.total_cost)}
                     </td>
+                    <td className="px-4 py-3 print:hidden" />
                   </tr>
                 </tfoot>
               </table>

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { listAnnualModelCosts } from '@/lib/heater-model-annual-cost'
 import {
   applyModelRealtimeOverlay,
   isLaborFeePartLabel,
@@ -161,46 +163,61 @@ async function buildModelCostList() {
     })
   }
 
-  const savedMap = await listSavedModelRealtimeCosts(supabase)
+  const currentFiscalYear = getCurrentFiscalYear()
+  const previousFiscalYear = currentFiscalYear - 1
+  const [savedMap, previousYearMap, currentYearMap] = await Promise.all([
+    listSavedModelRealtimeCosts(supabase),
+    listAnnualModelCosts(supabase, previousFiscalYear),
+    listAnnualModelCosts(supabase, currentFiscalYear),
+  ])
 
-  return Array.from(map.values())
-    .map((row) => {
-      const current = {
-        material_cost: Math.round(row.material_cost),
-        labor_cost: Math.round(row.labor_cost),
-        indirect_cost: Math.round(row.indirect_cost),
-        total_cost: Math.round(row.total_cost),
-      }
-      const saved = savedMap.get(row.model) || null
-      const realtime = saved
-        ? applyModelRealtimeOverlay(
-            {
-              ...current,
-              fee_labor_cost: row.fee_labor_cost,
-              fee_indirect_cost: row.fee_indirect_cost,
-              has_labor_fee_row: row.has_labor_fee_row,
-            },
-            saved
-          )
-        : null
-      return {
-        model: row.model,
-        display_name: row.display_name,
-        part_count: row.part_count,
-        material_cost: current.material_cost,
-        labor_cost: current.labor_cost,
-        indirect_cost: current.indirect_cost,
-        total_cost: current.total_cost,
-        realtime_applied: Boolean(saved),
-        realtime_label: saved?.applied_label || null,
-        realtime_st_minutes: saved?.st_minutes ?? null,
-        realtime_material_cost: realtime?.material_cost ?? current.material_cost,
-        realtime_labor_cost: realtime?.labor_cost ?? null,
-        realtime_indirect_cost: realtime?.indirect_cost ?? null,
-        realtime_total_cost: realtime?.total_cost ?? null,
-      }
-    })
-    .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true }))
+  return {
+    fiscal_year: currentFiscalYear,
+    previous_fiscal_year: previousFiscalYear,
+    rows: Array.from(map.values())
+      .map((row) => {
+        const current = {
+          material_cost: Math.round(row.material_cost),
+          labor_cost: Math.round(row.labor_cost),
+          indirect_cost: Math.round(row.indirect_cost),
+          total_cost: Math.round(row.total_cost),
+        }
+        const saved = savedMap.get(row.model) || null
+        const realtime = saved
+          ? applyModelRealtimeOverlay(
+              {
+                ...current,
+                fee_labor_cost: row.fee_labor_cost,
+                fee_indirect_cost: row.fee_indirect_cost,
+                has_labor_fee_row: row.has_labor_fee_row,
+              },
+              saved
+            )
+          : null
+        const previous = previousYearMap.get(row.model) || null
+        const currentYear = currentYearMap.get(row.model) || null
+        return {
+          model: row.model,
+          display_name: row.display_name,
+          part_count: row.part_count,
+          previous_year_available: Boolean(previous),
+          previous_material_cost: previous?.material_cost ?? current.material_cost,
+          previous_labor_cost: previous?.labor_cost ?? current.labor_cost,
+          previous_indirect_cost: previous?.indirect_cost ?? current.indirect_cost,
+          previous_total_cost: previous?.total_cost ?? current.total_cost,
+          realtime_applied: Boolean(saved),
+          realtime_label: saved?.applied_label || null,
+          realtime_st_minutes: saved?.st_minutes ?? null,
+          realtime_material_cost: realtime?.material_cost ?? current.material_cost,
+          realtime_labor_cost: realtime?.labor_cost ?? null,
+          realtime_indirect_cost: realtime?.indirect_cost ?? null,
+          realtime_total_cost: realtime?.total_cost ?? null,
+          current_year_applied: Boolean(currentYear),
+          current_year_updated_at: currentYear?.updated_at ?? null,
+        }
+      })
+      .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true })),
+  }
 }
 
 export async function GET(req: Request) {
@@ -212,8 +229,16 @@ export async function GET(req: Request) {
     ) as ReportType
 
     if (reportType === 'model') {
-      const modelRows = await buildModelCostList()
-      return NextResponse.json({ reportType, rows: modelRows, bomSummary: [] })
+      const modelReport = await buildModelCostList()
+      return NextResponse.json({
+        reportType,
+        fiscal_year: modelReport.fiscal_year,
+        previous_fiscal_year: modelReport.previous_fiscal_year,
+        fiscal_year_label: formatFiscalYearLabel(modelReport.fiscal_year),
+        previous_fiscal_year_label: formatFiscalYearLabel(modelReport.previous_fiscal_year),
+        rows: modelReport.rows,
+        bomSummary: [],
+      })
     }
 
     if (reportType === 'line') {

@@ -1183,6 +1183,10 @@ export default function WorkOrdersPage() {
                 </button>
               </div>
             </form>
+            <p className="mb-3 text-xs text-slate-600">
+              一覧は選択した会計年度のD指令だけを表示します。前年度は年度を切り替えて呼び出します。
+              現在表示: {formatFiscalYearLabel(fiscalYear)}
+            </p>
 
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
@@ -1211,7 +1215,7 @@ export default function WorkOrdersPage() {
                   {orders.length === 0 && !isLoading ? (
                     <tr>
                       <td colSpan={10} className="py-6 text-center text-slate-400">
-                        D指令が未登録です
+                        {formatFiscalYearLabel(fiscalYear)}のD指令はまだありません
                       </td>
                     </tr>
                   ) : (
