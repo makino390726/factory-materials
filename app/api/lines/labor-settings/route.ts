@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
 import { fetchLineAccumulations } from '@/lib/line-work-accumulation'
 import {
   bulkRecalculateConfirmedAssignments,
@@ -51,6 +51,10 @@ export async function GET(req: NextRequest) {
     }
 
     const planId = req.nextUrl.searchParams.get('plan_id')?.trim() || null
+    const fiscalYear = parseFiscalYearParam(
+      req.nextUrl.searchParams.get('fiscal_year'),
+      getCurrentFiscalYear()
+    )
 
     const { data: assignments, error: assignmentError } = await supabase
       .from('line_part_assignments')
@@ -70,7 +74,7 @@ export async function GET(req: NextRequest) {
     if (lineError) throw lineError
 
     const lineMap = new Map((lines || []).map((line) => [line.id, line as LineRow]))
-    const accumulations = await fetchLineAccumulations(supabase, getCurrentFiscalYear()).catch(
+    const accumulations = await fetchLineAccumulations(supabase, fiscalYear).catch(
       () => new Map()
     )
     const rows = []
@@ -107,6 +111,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
+      fiscal_year: fiscalYear,
       total: rows.length,
       confirmed_count: rows.filter((row) => row.settings_confirmed).length,
       rows,
@@ -131,10 +136,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}))
     const planId = typeof body?.plan_id === 'string' ? body.plan_id : null
     const onlyConfirmed = body?.only_confirmed !== false
+    const fiscalYear = parseFiscalYearParam(body?.fiscal_year, getCurrentFiscalYear())
 
     const summary = await bulkRecalculateConfirmedAssignments(supabase, {
       planId,
       onlyConfirmed,
+      fiscalYear,
     })
 
     return NextResponse.json(summary)

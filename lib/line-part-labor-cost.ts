@@ -320,9 +320,10 @@ export async function recalculateAssignmentLabor(
 
 export async function bulkRecalculateConfirmedAssignments(
   supabase: SupabaseClient,
-  options?: { planId?: string | null; onlyConfirmed?: boolean }
+  options?: { planId?: string | null; onlyConfirmed?: boolean; fiscalYear?: number }
 ) {
   const onlyConfirmed = options?.onlyConfirmed !== false
+  const fiscalYear = options?.fiscalYear ?? getCurrentFiscalYear()
 
   const { data: assignments, error: assignmentError } = await supabase
     .from('line_part_assignments')
@@ -341,7 +342,7 @@ export async function bulkRecalculateConfirmedAssignments(
 
   const lineMap = new Map((lines || []).map((line) => [line.id, line as LineRow]))
   const durationCache = new Map<string, { minutes: number; note: string | null }>()
-  const accumulations = await fetchLineAccumulations(supabase, getCurrentFiscalYear()).catch(
+  const accumulations = await fetchLineAccumulations(supabase, fiscalYear).catch(
     () => new Map<string, LineAccumulation>()
   )
   const results: LaborRecalcResult[] = []

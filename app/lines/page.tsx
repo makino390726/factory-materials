@@ -345,18 +345,19 @@ export default function LinesPage() {
   useEffect(() => {
     fetchParts()
     fetchMonthlyDurations()
-    fetchLaborSettings()
   }, [])
 
   useEffect(() => {
     void fetchLines({ fiscalYear })
+    void fetchLaborSettings(fiscalYear)
   }, [fiscalYear])
 
-  const fetchLaborSettings = async () => {
+  const fetchLaborSettings = async (yearOverride?: number) => {
+    const year = yearOverride ?? fiscalYear
     setLaborSettingsLoading(true)
     setLaborSettingsError(null)
     try {
-      const response = await fetch('/api/lines/labor-settings')
+      const response = await fetch(`/api/lines/labor-settings?fiscal_year=${year}`)
       const data = await response.json()
       if (!response.ok) {
         throw new Error(data?.error || '労賃按分設定の取得に失敗しました')
@@ -403,7 +404,7 @@ export default function LinesPage() {
 
     if (
       !confirm(
-        `確認済み ${confirmedCount} 件の労賃を一括再計算します。\n制作所要時間 ÷ 製造計画部品数 で1個あたり工賃を算出し、パーツマスタ原価を更新します。よろしいですか？`
+        `確認済み ${confirmedCount} 件の労賃を一括再計算します（${formatFiscalYearLabel(fiscalYear)}）。\n制作所要時間 ÷ 完成個数 で1個あたり工賃を算出し、パーツマスタ原価を更新します。よろしいですか？`
       )
     ) {
       return
@@ -415,7 +416,7 @@ export default function LinesPage() {
       const response = await fetch('/api/lines/labor-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ only_confirmed: true }),
+        body: JSON.stringify({ only_confirmed: true, fiscal_year: fiscalYear }),
       })
       const data = await response.json()
       if (!response.ok) {
@@ -793,12 +794,19 @@ export default function LinesPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">労賃按分設定（共通部品）</h2>
               <p className="mt-1 text-sm text-slate-600">
-                900番台以外のL指令は、日報の所要時間 ÷ 完成個数で1個あたり所要時間を出し、
+                900番台以外のL指令は、選択年度の確定日報の所要時間 ÷ 完成個数で1個あたり所要時間を出し、
                 工費 = 所要時間 ÷ 480分 × ¥17,810、間接費 = 工費 × 30% をパーツ原価へ反映します。
-                作業日報の確定保存のたびに自動更新されます。900番台は対象外です。
+                作業日報の確定保存のたびに今年度分が自動更新されます。900番台は対象外です。
+                現在表示: {formatFiscalYearLabel(fiscalYear)}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <FiscalYearSelect
+                value={fiscalYear}
+                onChange={setFiscalYear}
+                className="w-44"
+                hint={false}
+              />
               <button
                 type="button"
                 onClick={() => void handleDetectCommonGroups()}
@@ -831,8 +839,8 @@ export default function LinesPage() {
                   <th className="px-3 py-2">L指令</th>
                   <th className="px-3 py-2">部品キー</th>
                   <th className="px-3 py-2">共通明細</th>
-                  <th className="px-3 py-2 text-right">制作所要</th>
-                  <th className="px-3 py-2 text-right">完成個数</th>
+                  <th className="px-3 py-2 text-right">制作所要（{formatFiscalYearLabel(fiscalYear)}）</th>
+                  <th className="px-3 py-2 text-right">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
                   <th className="px-3 py-2 text-right">1個あたり</th>
                   <th className="px-3 py-2 text-right">工費/個</th>
                   <th className="px-3 py-2 text-right">間接/個</th>
