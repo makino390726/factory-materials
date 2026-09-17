@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
     const category =
       typeof product_category === 'string' && product_category.trim()
         ? product_category.trim()
-        : '暖房機';
+        : 'すべて';
 
     // トランザクション的に処理（計画マスター→明細の順で保存）
     let planData: any = null;
@@ -221,7 +221,7 @@ export async function PUT(req: NextRequest) {
     const category =
       typeof product_category === 'string' && product_category.trim()
         ? product_category.trim()
-        : '暖房機';
+        : 'すべて';
 
     // 計画マスターを更新
     let planError: any = null;

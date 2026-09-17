@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
-  DEFAULT_PRODUCT_CATEGORY,
   PRODUCT_CATEGORIES,
   inferProductCategory,
+  isProductCategory,
   normalizeProductCategory,
   type ProductCategory,
 } from '@/lib/product-category';
@@ -53,6 +53,13 @@ type CategoryFilter = 'すべて' | ProductCategory;
 type SalesQtyMode = 'qty' | 'highQty';
 
 const SKIP_SALES_MACHINE_CODES = new Set(['lump', 'other', 'その他']);
+const ALL_MODELS_CATEGORY = 'すべて';
+
+function formatPlanCategoryLabel(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw || raw === ALL_MODELS_CATEGORY || raw === '全機種') return '全機種';
+  return isProductCategory(raw) ? raw : raw;
+}
 
 interface BomDetail {
   model: string;
@@ -113,8 +120,8 @@ export default function ManufacturingPlanPage() {
   const [response, setResponse] = useState<ManufacturingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(DEFAULT_PRODUCT_CATEGORY);
-  const [planListFilter, setPlanListFilter] = useState<CategoryFilter>('すべて');
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(ALL_MODELS_CATEGORY);
+  const [planListFilter, setPlanListFilter] = useState<CategoryFilter>(ALL_MODELS_CATEGORY);
 
   // 保存関連の状態
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
@@ -122,7 +129,6 @@ export default function ManufacturingPlanPage() {
   const [planName, setPlanName] = useState('');
   const [fiscalYear, setFiscalYear] = useState(() => String(getCurrentFiscalYear()));
   const [planPeriod, setPlanPeriod] = useState('');
-  const [planCategory, setPlanCategory] = useState<ProductCategory>(DEFAULT_PRODUCT_CATEGORY);
   const [notes, setNotes] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [salesQtyMode, setSalesQtyMode] = useState<SalesQtyMode>('qty');
@@ -219,34 +225,29 @@ export default function ManufacturingPlanPage() {
       salesQty: salesMap?.has(m.model) ? (salesMap.get(m.model) ?? null) : null,
     }));
 
-  const resolvePrimaryCategory = (items: ManufacturingPlanItem[]): ProductCategory => {
-    const counts = new Map<ProductCategory, number>();
-    for (const item of items) {
-      if (item.quantity <= 0) continue;
-      counts.set(item.productCategory, (counts.get(item.productCategory) || 0) + item.quantity);
-    }
-    let best: ProductCategory = planCategory || DEFAULT_PRODUCT_CATEGORY;
-    let bestQty = -1;
-    for (const [cat, qty] of counts) {
-      if (qty > bestQty) {
-        best = cat;
-        bestQty = qty;
-      }
-    }
-    return best;
-  };
-
   const visiblePlans = useMemo(() => {
-    if (categoryFilter === 'すべて') return plans;
+    if (categoryFilter === ALL_MODELS_CATEGORY) return plans;
     return plans.filter((p) => p.productCategory === categoryFilter);
   }, [plans, categoryFilter]);
 
   const filteredSavedPlans = useMemo(() => {
-    if (planListFilter === 'すべて') return savedPlans;
-    return savedPlans.filter(
-      (p) => normalizeProductCategory(p.product_category || '暖房機') === planListFilter
-    );
+    if (planListFilter === ALL_MODELS_CATEGORY) return savedPlans;
+    return savedPlans.filter((p) => {
+      const cat = String(p.product_category || '').trim();
+      if (!cat || cat === ALL_MODELS_CATEGORY || cat === '全機種') return false;
+      return cat === planListFilter;
+    });
   }, [savedPlans, planListFilter]);
+
+  const saveTargetSummary = useMemo(() => {
+    const targets = plans.filter((p) => p.quantity > 0);
+    const categories = new Set(targets.map((p) => p.productCategory));
+    return {
+      modelCount: targets.length,
+      totalQty: targets.reduce((sum, p) => sum + p.quantity, 0),
+      categoryCount: categories.size,
+    };
+  }, [plans]);
 
   const loadPlan = async (planId: string) => {
     try {
@@ -265,9 +266,7 @@ export default function ManufacturingPlanPage() {
       setFiscalYear(data.fiscal_year);
       setPlanPeriod(data.plan_period || '');
       setNotes(data.notes || '');
-      const loadedCategory = normalizeProductCategory(data.product_category || '暖房機');
-      setPlanCategory(loadedCategory);
-      setCategoryFilter(loadedCategory);
+      setCategoryFilter(ALL_MODELS_CATEGORY);
 
       const detailsMap = new Map<string, number>(
         data.details.map((d: { model: string; quantity: number }) => [
@@ -293,7 +292,7 @@ export default function ManufacturingPlanPage() {
             {
               model,
               name: null,
-              product_category: loadedCategory,
+              product_category: inferProductCategory(model),
             },
           ];
         }
@@ -334,7 +333,7 @@ export default function ManufacturingPlanPage() {
         setError('台数が1以上の機種がありません');
         return;
       }
-      const product_category = planCategory || resolvePrimaryCategory(plans);
+      const product_category = ALL_MODELS_CATEGORY;
 
       const method = currentPlanId ? 'PUT' : 'POST';
       const body: any = {
@@ -418,9 +417,7 @@ export default function ManufacturingPlanPage() {
     setPlanName('');
     setFiscalYear(String(getCurrentFiscalYear()));
     setPlanPeriod('');
-    setPlanCategory(
-      categoryFilter === 'すべて' ? DEFAULT_PRODUCT_CATEGORY : categoryFilter
-    );
+    setCategoryFilter(ALL_MODELS_CATEGORY);
     setNotes('');
     setPlans(plans.map((p) => ({ ...p, quantity: 0, salesQty: null })));
     setResponse(null);
@@ -513,27 +510,7 @@ export default function ManufacturingPlanPage() {
         };
       });
 
-      const counts = new Map<ProductCategory, number>();
-      for (const item of nextPlans) {
-        if ((item.salesQty || 0) <= 0) continue;
-        counts.set(
-          item.productCategory,
-          (counts.get(item.productCategory) || 0) + (item.salesQty || 0)
-        );
-      }
-      let best: ProductCategory | null = null;
-      let bestQty = -1;
-      for (const [cat, qty] of counts) {
-        if (qty > bestQty) {
-          best = cat;
-          bestQty = qty;
-        }
-      }
-      if (best) {
-        setCategoryFilter(best);
-        setPlanCategory(best);
-      }
-
+      setCategoryFilter(ALL_MODELS_CATEGORY);
       setPlans(nextPlans);
       setResponse(null);
 
@@ -630,9 +607,9 @@ export default function ManufacturingPlanPage() {
           <div className="mb-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setPlanListFilter('すべて')}
+              onClick={() => setPlanListFilter(ALL_MODELS_CATEGORY)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                planListFilter === 'すべて'
+                planListFilter === ALL_MODELS_CATEGORY
                   ? 'bg-slate-800 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
@@ -674,7 +651,7 @@ export default function ManufacturingPlanPage() {
                         {plan.fiscal_year}年度 {plan.plan_period && `/ ${plan.plan_period}`}
                       </p>
                       <p className="mt-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                        {normalizeProductCategory(plan.product_category || '暖房機')}
+                        {formatPlanCategoryLabel(plan.product_category)}
                       </p>
                     </button>
                     <button
@@ -701,14 +678,7 @@ export default function ManufacturingPlanPage() {
               {currentPlanId && <span className="text-sm text-blue-600 ml-2">（編集中: {planName}）</span>}
             </h2>
             <button
-              onClick={() => {
-                setPlanCategory(
-                  categoryFilter === 'すべて'
-                    ? resolvePrimaryCategory(plans)
-                    : categoryFilter
-                );
-                setShowSaveDialog(true);
-              }}
+              onClick={() => setShowSaveDialog(true)}
               disabled={plans.every((p) => p.quantity === 0)}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors"
             >
@@ -718,7 +688,7 @@ export default function ManufacturingPlanPage() {
           <p className="mb-3 text-sm text-slate-600">
             暖房機は部品BOM原価、それ以外（たばこ乾燥機・食品乾燥機・光合成促進装置など）は
             <span className="font-semibold text-rose-700"> D指令の原価計算結果</span>
-            を参照します。同一計画に複数カテゴリを含められます。機種が無い場合は
+            を参照します。保存はカテゴリを問わず全機種が対象です。表示の絞り込みにカテゴリを使えます。機種が無い場合は
             <Link href="/heater/models" className="mx-1 text-blue-600 underline">
               機種マスタ
             </Link>
@@ -727,14 +697,14 @@ export default function ManufacturingPlanPage() {
           <div className="mb-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setCategoryFilter('すべて')}
+              onClick={() => setCategoryFilter(ALL_MODELS_CATEGORY)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                categoryFilter === 'すべて'
+                categoryFilter === ALL_MODELS_CATEGORY
                   ? 'bg-amber-600 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              すべて ({plans.length})
+              全機種 ({plans.length})
             </button>
             {PRODUCT_CATEGORIES.map((cat) => {
               const count = plans.filter((p) => p.productCategory === cat).length;
@@ -742,10 +712,7 @@ export default function ManufacturingPlanPage() {
                 <button
                   key={`input-filter-${cat}`}
                   type="button"
-                  onClick={() => {
-                    setCategoryFilter(cat);
-                    setPlanCategory(cat);
-                  }}
+                  onClick={() => setCategoryFilter(cat)}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                     categoryFilter === cat
                       ? 'bg-amber-600 text-white'
@@ -1229,21 +1196,16 @@ export default function ManufacturingPlanPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    製品カテゴリ <span className="text-red-500">*</span>
+                    対象機種
                   </label>
-                  <select
-                    value={planCategory}
-                    onChange={(e) => setPlanCategory(normalizeProductCategory(e.target.value))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {PRODUCT_CATEGORIES.map((cat) => (
-                      <option key={`save-cat-${cat}`} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900">
+                    全機種
+                  </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    計画の主分類です。台数入力では複数カテゴリを同一計画に含められます。
+                    カテゴリを選ばず、製造台数が1以上の機種をすべて保存します。
+                    {saveTargetSummary.modelCount > 0
+                      ? ` 現在 ${saveTargetSummary.modelCount}機種 / ${saveTargetSummary.totalQty}台 / ${saveTargetSummary.categoryCount}カテゴリ。`
+                      : ''}
                   </p>
                 </div>
                 <div>
