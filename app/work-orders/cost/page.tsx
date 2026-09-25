@@ -1411,7 +1411,7 @@ export default function WorkOrderCostPage() {
           return
         }
         const rows = (await res.json()) as MonthlyDurationRow[]
-        const minutes = getMonthMinutes(rows)
+        const minutes = rows.reduce((sum, row) => sum + Number(row.duration_minutes || 0), 0)
         setMonthlyOrderMinutes(minutes > 0 ? minutes : null)
       } catch (err) {
         console.error('月別D指令実績の取得エラー:', err)
@@ -1653,25 +1653,27 @@ export default function WorkOrderCostPage() {
 
   const isOrderCompleted = selectedOrder?.status === '完了'
   const orderStandardMinutes = Number(selectedOrder?.standard_duration_minutes || 0)
-  const orderMonthlyMinutes = monthlyOrderMinutes ?? 0
+  const orderReportTotalMinutes = monthlyOrderMinutes ?? 0
+  const orderProductionQty = Math.max(1, Number(selectedOrder?.qty || 1))
 
   const effectiveDurationMinutes = useMemo(() => {
     if (mode === 'line') {
       if (!selectedPartKey) return null
       return perUnitDurationMinutes
     }
-    // D指令: 完了かつ月次実績ありなら実績優先。それ以外はD指令マスタの所要時間
-    if (isOrderCompleted && orderMonthlyMinutes > 0) return orderMonthlyMinutes
+    // D指令: 日報積算 ÷ 制作台数を1台当たりにする。日報が無いときはマスタ所要時間（すでに1台分）
+    if (orderReportTotalMinutes > 0) {
+      return Math.round((orderReportTotalMinutes / orderProductionQty) * 10) / 10
+    }
     if (orderStandardMinutes > 0) return orderStandardMinutes
-    if (orderMonthlyMinutes > 0) return orderMonthlyMinutes
     return null
   }, [
     mode,
     selectedPartKey,
     perUnitDurationMinutes,
-    isOrderCompleted,
     orderStandardMinutes,
-    orderMonthlyMinutes,
+    orderReportTotalMinutes,
+    orderProductionQty,
   ])
 
   const isAutoLaborMode =
@@ -4107,7 +4109,11 @@ export default function WorkOrderCostPage() {
                           所要時間未設定
                         </span>
                       )}
-                      {mode === 'order' && isAutoLaborMode && !isOrderCompleted && orderStandardMinutes > 0 && (
+                      {mode === 'order' &&
+                        isAutoLaborMode &&
+                        orderReportTotalMinutes <= 0 &&
+                        !isOrderCompleted &&
+                        orderStandardMinutes > 0 && (
                         <span className="text-xs font-semibold text-emerald-300 bg-emerald-900/60 px-2 py-1 rounded">
                           D指令マスタ {orderStandardMinutes.toLocaleString('ja-JP')}分
                         </span>
@@ -4117,6 +4123,12 @@ export default function WorkOrderCostPage() {
                   <td className="py-4 pr-4 font-medium text-rose-400">固定</td>
                   <td className="py-4 pr-4 text-rose-300 font-medium">
                     <div>{effectiveDurationMinutes ?? '-'} 分</div>
+                    {mode === 'order' && orderReportTotalMinutes > 0 && (
+                      <div className="mt-1 text-xs text-rose-200/80">
+                        日報 {orderReportTotalMinutes.toLocaleString('ja-JP')}分
+                        ÷ {orderProductionQty.toLocaleString('ja-JP')}台
+                      </div>
+                    )}
                     {mode === 'line' && selectedPartKey && (
                       <div className="mt-1 text-xs text-rose-200/80">
                         {lineLaborQuantity?.kind === 'work_report' ? (
