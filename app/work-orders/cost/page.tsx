@@ -317,6 +317,7 @@ export default function WorkOrderCostPage() {
   const [pastCostsLoading, setPastCostsLoading] = useState(false)
 
   useEffect(() => {
+    if (mode !== 'line') return
     const loadMonthlyLineMinutes = async () => {
       try {
         const res = await fetch('/api/work-reports/aggregations/monthly?category=line&all=1')
@@ -332,12 +333,15 @@ export default function WorkOrderCostPage() {
       }
     }
     loadMonthlyLineMinutes()
+  }, [mode])
 
+  useEffect(() => {
+    if (mode !== 'parts') return
     fetch('/api/heater/models')
       .then((r) => r.json())
       .then((d) => setHeaterModels(Array.isArray(d) ? d : []))
       .catch(() => setHeaterModels([]))
-  }, [])
+  }, [mode])
 
   const selectableGroupNames = useMemo(() => {
     const names = modelBomGroupDefs.map((g) => g.group_name)
@@ -1166,6 +1170,7 @@ export default function WorkOrderCostPage() {
       setSourceWorkOrderId('')
       return
     }
+    if (!reusePastCost) return
     const loadPastCosts = async () => {
       setPastCostsLoading(true)
       try {
@@ -1195,7 +1200,7 @@ export default function WorkOrderCostPage() {
       }
     }
     void loadPastCosts()
-  }, [mode])
+  }, [mode, reusePastCost])
 
   // L指令の貼付け画面: 選択パーツの原価明細を DB から復元
   // mode も依存に含め、製品パーツ一覧→同一パーツ再クリックでも再読込する
@@ -1322,27 +1327,6 @@ export default function WorkOrderCostPage() {
 
     loadLines()
   }, [mode, fiscalYear])
-
-  // 追加: ページ読み込み時に parts master を先読みしておく（L指令切替の遅延対策）
-  useEffect(() => {
-    const preload = async () => {
-      try {
-        const res = await fetch('/api/heater/parts-master')
-        if (!res.ok) return
-        const data = await res.json()
-        const mapped = (data || []).map((p: any, i: number) => ({
-          id: p.part_key || p.id || p.product_code || `pm-${i}`,
-          product_code: p.part_key || p.product_code || '',
-          name: p.part_name || p.name || '',
-          cost_price: p.cost_price || 0
-        }))
-        setPartsMaster(mapped)
-      } catch (err) {
-        console.error('parts master preload error', err)
-      }
-    }
-    preload()
-  }, [])
 
   // デバウンス用のタイマー
   useEffect(() => {
@@ -2323,8 +2307,16 @@ export default function WorkOrderCostPage() {
           .map((v) => String(v || '').trim())
           .filter((v, idx, arr) => v.length > 0 && arr.indexOf(v) === idx)
 
+        const headerHasBranchLines =
+          isBranchScopedOrder &&
+          Boolean(selectedOrder && selectedBranch) &&
+          (data.items || []).some((it: any) =>
+            branchOptions.some((branch) =>
+              itemBelongsToBranch(it, selectedOrder?.order_no || '', branch)
+            )
+          )
         let directBranchItems: any[] = []
-        if (isBranchScopedOrder && branchKeyCandidates.length > 0) {
+        if (isBranchScopedOrder && branchKeyCandidates.length > 0 && !headerHasBranchLines) {
           const directRes = await fetch(
             `/api/work-order-costs/items-by-master?master_id=${encodeURIComponent(branchKeyCandidates.join(','))}`
           )

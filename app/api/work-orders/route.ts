@@ -153,7 +153,10 @@ export async function GET(req: Request) {
           : null
     const inheritVisibleYears = forWorkReport || forSelect
 
-    let query = supabase.from('work_orders').select('*')
+    const selectColumns = forSelect
+      ? 'id, order_no, product_name, model, qty, standard_duration_minutes, status, cost_mode, bom_model, fiscal_year'
+      : '*'
+    let query = supabase.from('work_orders').select(selectColumns)
 
     if (forWorkReport) {
       query = query.eq('exclude_from_work_report', false)
