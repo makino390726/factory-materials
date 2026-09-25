@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { calcLaborIndirectFromLabor } from '@/lib/labor-indirect-rate'
 
 const LINE_MASTER_TYPE = 'ライン原価'
 
@@ -306,9 +307,9 @@ export function combineLineCostTotals(params: {
   material: number
   materialIndirect: number
   labor: number
+  fiscalYear?: number | null
 }) {
-  const laborIndirect =
-    Number.isFinite(params.labor) && params.labor > 0 ? Math.round(params.labor * 0.3) : 0
+  const laborIndirect = calcLaborIndirectFromLabor(params.labor, params.fiscalYear)
   return {
     total_material_cost: params.material,
     total_labor_cost: params.labor,

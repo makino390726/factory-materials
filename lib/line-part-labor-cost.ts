@@ -1,6 +1,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import {
+  calcLaborIndirectFromLabor,
+  LABOR_INDIRECT_RATE,
+  LABOR_INDIRECT_RATE_CHANGE_FISCAL_YEAR,
+  LABOR_INDIRECT_RATE_FROM_REIWA9,
+  laborIndirectRateForFiscalYear,
+} from '@/lib/labor-indirect-rate'
 import { fetchLineAccumulations, type LineAccumulation } from '@/lib/line-work-accumulation'
+
+export {
+  calcLaborIndirectFromLabor,
+  LABOR_INDIRECT_RATE,
+  LABOR_INDIRECT_RATE_CHANGE_FISCAL_YEAR,
+  LABOR_INDIRECT_RATE_FROM_REIWA9,
+  laborIndirectRateForFiscalYear,
+}
 import { combineLineCostTotals, loadLineCostForPartYear } from '@/lib/line-cost-carryover'
 import {
   calcPerUnitDurationMinutes,
@@ -11,8 +26,6 @@ import { resolveTargetStandardDurationMinutes } from '@/lib/process-management'
 
 export const UNIT_LABOR_COST = 17810
 export const UNIT_MINUTES = 480
-/** 機種工費に対する間接費率（工費 × 30%） */
-export const LABOR_INDIRECT_RATE = 0.3
 
 export type LinePartAssignmentRow = {
   id: string
@@ -70,12 +83,6 @@ export function calcLaborCostFromMinutes(minutes: number): number {
   return Math.round((minutes / UNIT_MINUTES) * UNIT_LABOR_COST)
 }
 
-/** 機種工費の間接費 = 工費 × 30% */
-export function calcLaborIndirectFromLabor(laborCost: number): number {
-  if (!Number.isFinite(laborCost) || laborCost <= 0) return 0
-  return Math.round(laborCost * LABOR_INDIRECT_RATE)
-}
-
 export function resolveLineDurationMinutes(line: LineRow): number {
   return Math.max(0, Number(line.standard_duration_minutes || 0))
 }
@@ -129,6 +136,7 @@ function buildPreviewFromMinutes(
     completed_qty?: number
     duration_source?: string | null
     uses_work_report?: boolean
+    fiscalYear?: number | null
   }
 ): LaborRecalcPreview {
   const perUnitMinutes = calcPerUnitDurationMinutes(totalDuration, divisorQty)
@@ -142,7 +150,7 @@ function buildPreviewFromMinutes(
     completed_qty: extras.completed_qty ?? 0,
     per_unit_duration_minutes: perUnitMinutes,
     per_unit_labor_cost: labor,
-    per_unit_indirect_cost: calcLaborIndirectFromLabor(labor),
+    per_unit_indirect_cost: calcLaborIndirectFromLabor(labor, extras.fiscalYear),
     settings_confirmed: Boolean(assignment.settings_confirmed),
     duration_source: extras.duration_source ?? null,
     uses_work_report: Boolean(extras.uses_work_report),
@@ -155,8 +163,10 @@ export async function buildLaborRecalcPreview(
   line: LineRow,
   planId?: string | null,
   durationCache?: Map<string, { minutes: number; note: string | null }>,
-  accumulation?: LineAccumulation | null
+  accumulation?: LineAccumulation | null,
+  fiscalYear?: number | null
 ): Promise<LaborRecalcPreview> {
+  const resolvedYear = fiscalYear ?? getCurrentFiscalYear()
   if (!isLine900Series(line.line_code) && accumulation && accumulation.completed_qty > 0) {
     const totalDuration = resolveAssignmentDurationMinutes(
       line,
@@ -167,6 +177,7 @@ export async function buildLaborRecalcPreview(
       completed_qty: accumulation.completed_qty,
       duration_source: '作業日報の所要時間 ÷ 完成個数',
       uses_work_report: true,
+      fiscalYear: resolvedYear,
     })
   }
 
@@ -189,6 +200,7 @@ export async function buildLaborRecalcPreview(
       planned_part_qty: planned.planned_part_qty,
       duration_source: duration.note,
       uses_work_report: false,
+      fiscalYear: resolvedYear,
     }
   )
 }
@@ -218,7 +230,8 @@ export async function recalculateAssignmentLabor(
     line,
     options?.planId,
     options?.durationCache,
-    options?.accumulation
+    options?.accumulation,
+    fiscalYear
   )
 
   if (options?.requireConfirmed && !assignment.settings_confirmed) {
@@ -266,6 +279,7 @@ export async function recalculateAssignmentLabor(
     material: materialTotal,
     materialIndirect,
     labor: headerLabor,
+    fiscalYear,
   })
   const totalCost = totals.total_cost + itemLaborTotal
 

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { calcLaborIndirectFromLabor } from '@/lib/labor-indirect-rate'
 
 export const runtime = 'nodejs'
 
@@ -84,16 +86,25 @@ export async function POST(req: Request) {
     if (action === 'sync') {
       const bom_model: string | undefined = body.bom_model
 
-      // work_orders から bom_model・order_no・所要時間を取得
-      const { data: woInfo } = await supabase
+      // work_orders から bom_model・order_no・所要時間・年度を取得
+      let woQuery = await supabase
         .from('work_orders')
-        .select('bom_model, order_no, standard_duration_minutes')
+        .select('bom_model, order_no, standard_duration_minutes, fiscal_year')
         .eq('id', work_order_id)
         .maybeSingle()
+      if (woQuery.error && hasMissingColumnError(woQuery.error, 'fiscal_year')) {
+        woQuery = await supabase
+          .from('work_orders')
+          .select('bom_model, order_no, standard_duration_minutes')
+          .eq('id', work_order_id)
+          .maybeSingle()
+      }
+      const woInfo = woQuery.data
 
       let model = bom_model ?? woInfo?.bom_model ?? undefined
       const orderNo = woInfo?.order_no ?? ''
       const stdMinutes = Number(woInfo?.standard_duration_minutes || 0)
+      const fiscalYear = Number(woInfo?.fiscal_year) || getCurrentFiscalYear()
 
       if (!model) {
         return NextResponse.json(
@@ -174,12 +185,11 @@ export async function POST(req: Request) {
 
       // 枝番 "00"（全体工賃）を先頭に自動生成
       // 数量 = standard_duration_minutes / 480（1日=480分）、単価 = ¥17,810
-      // 工賃 = 数量 × 単価、間接費 = 工賃 × 30%、小計 = 工賃 + 間接費
+      // 工賃 = 数量 × 単価、間接費 = 工賃 × 年度別率（令和9年度以降40%）、小計 = 工賃 + 間接費
       const LABOR_UNIT_PRICE = 17810
-      const INDIRECT_RATE = 0.3
       const laborQty = stdMinutes > 0 ? Math.round((stdMinutes / 480) * 1000) / 1000 : 0
       const laborCostAmt = Math.round(laborQty * LABOR_UNIT_PRICE)
-      const indirectCostAmt = Math.round(laborCostAmt * INDIRECT_RATE)
+      const indirectCostAmt = calcLaborIndirectFromLabor(laborCostAmt, fiscalYear)
       const laborBranch = {
         work_order_id,
         branch_no: '00',

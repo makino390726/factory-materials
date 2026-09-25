@@ -141,12 +141,15 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: 'header update failed' }, { status: 500 })
     }
 
-    // 明細は既存を削除して再挿入（簡易実装）
-    const { error: delError } = await supabase.from('work_order_cost_items').delete().eq('work_order_cost_id', ex.id)
-    if (delError) {
-      console.error('delete items error:', delError)
-      return NextResponse.json({ error: 'delete items failed' }, { status: 500 })
+    const { data: previousItems, error: previousError } = await supabase
+      .from('work_order_cost_items')
+      .select('id')
+      .eq('work_order_cost_id', ex.id)
+    if (previousError) {
+      console.error('load previous items error:', previousError)
+      return NextResponse.json({ error: 'previous items load failed' }, { status: 500 })
     }
+    const previousIds = (previousItems || []).map((row: { id: string }) => row.id)
 
     if (Array.isArray(items) && items.length > 0) {
       const itemsToInsert = items.map((it: any, idx: number) => ({
@@ -171,6 +174,17 @@ export async function PUT(req: Request) {
       if (itemsError) {
         console.error('insert items error:', itemsError)
         return NextResponse.json({ error: 'items insert failed' }, { status: 500 })
+      }
+    }
+
+    if (previousIds.length > 0) {
+      const { error: delError } = await supabase
+        .from('work_order_cost_items')
+        .delete()
+        .in('id', previousIds)
+      if (delError) {
+        console.error('delete items error:', delError)
+        return NextResponse.json({ error: 'delete items failed' }, { status: 500 })
       }
     }
 

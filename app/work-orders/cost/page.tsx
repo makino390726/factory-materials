@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggregation'
 import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
-import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
+import { formatFiscalYearLabel, getCurrentFiscalYear, parseFiscalYearLabel } from '@/lib/fiscal-year'
+import { laborIndirectRateForFiscalYear } from '@/lib/labor-indirect-rate'
 import { isLine900Series } from '@/lib/line-part-labor-cost'
 import {
   type BomGroupDefinition,
@@ -139,6 +140,37 @@ const buildOrderBranchMasterIdLegacy = (orderNo: string, branchNo: string): stri
   const stripped = String(branchNo || '').replace(/^[A-Za-z]+/, '').replace(/^0+/, '')
   const legacyBranchNo = stripped || String(branchNo || '').trim()
   return normalizedOrderNo && legacyBranchNo ? `${normalizedOrderNo}-${legacyBranchNo}` : normalizedOrderNo
+}
+
+const branchMasterIdKeys = (orderNo: string, branchNo: string): string[] => {
+  const normalizedOrderNo = String(orderNo || '').trim()
+  return [
+    buildOrderBranchMasterId(normalizedOrderNo, branchNo),
+    buildOrderBranchMasterIdLegacy(normalizedOrderNo, branchNo),
+    `${normalizedOrderNo}-${String(branchNo || '').trim()}`,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter((value, index, all) => value.length > 0 && value !== normalizedOrderNo && all.indexOf(value) === index)
+}
+
+const isOrderCostItem = (item: { master_type?: string | null }) => {
+  const masterType = String(item.master_type || '').trim()
+  return !masterType || masterType === '指令原価'
+}
+
+/** 枝番はその指令BOMの1部品。明細の part_key か、枝番付き master_id で所属を判定する。 */
+const itemBelongsToBranch = (
+  item: { master_type?: string | null; master_id?: string | null; part_key?: string | null },
+  orderNo: string,
+  branch: { branch_no: string; part_key: string }
+) => {
+  if (!isOrderCostItem(item)) return false
+  const masterId = String(item.master_id || '').trim()
+  const partKey = String(item.part_key || '').trim()
+  const branchPartKey = String(branch.part_key || '').trim()
+  if (masterId && branchMasterIdKeys(orderNo, branch.branch_no).includes(masterId)) return true
+  if (branchPartKey && partKey === branchPartKey) return true
+  return false
 }
 
 export default function WorkOrderCostPage() {
@@ -604,6 +636,12 @@ export default function WorkOrderCostPage() {
       }
     })
   }, [modelBomParts, realtimeCostActive, realtimeCostInfo])
+
+  const appliedLaborIndirectPercent = Math.round(
+    laborIndirectRateForFiscalYear(
+      parseFiscalYearLabel(realtimeCostInfo?.fiscal_year_label) ?? fiscalYear
+    ) * 100
+  )
 
   const displayModelBomGrandTotal = useMemo(() => {
     if (!realtimeCostActive || !realtimeCostInfo) return modelBomGrandTotal
@@ -1680,10 +1718,9 @@ export default function WorkOrderCostPage() {
         }))
         setBranchOptions(mapped)
         setSelectedBranchId((prev) => {
-          // direct 原価は枝番で絞り込まない。BOM のときだけ既定枝番を選ぶ
+          if (prev && mapped.some((branch) => branch.id === prev)) return prev
           const order = workOrders.find((item) => item.id === selectedWorkOrderId)
           if (order?.cost_mode !== 'bom') return ''
-          if (prev && mapped.some((branch) => branch.id === prev)) return prev
           return mapped[0]?.id || ''
         })
       } catch (err) {
@@ -1990,13 +2027,13 @@ export default function WorkOrderCostPage() {
     }
   }
 
-    // 工賃（ヘッダ）の間接費を laborCostType と laborCost に応じて自動再計算
+    // 工賃（ヘッダ）の間接費。加工は工費×年度別率（令和9年度以降40%）、直接は5%
     useEffect(() => {
       const laborVal = isAutoLaborMode ? calculateAutoLaborCost() : toNumber(laborCost)
-      const pct = laborCostType === '加' ? 0.3 : 0.05
+      const pct = laborCostType === '加' ? laborIndirectRateForFiscalYear(fiscalYear) : 0.05
       const indirect = Math.round(laborVal * pct)
       setLaborIndirectCost(String(indirect))
-    }, [laborCost, laborCostType, selectedWorkOrderId, isAutoLaborMode, effectiveDurationMinutes])
+    }, [laborCost, laborCostType, fiscalYear, selectedWorkOrderId, isAutoLaborMode, effectiveDurationMinutes])
 
   const handleUpdateCostPrice = async (rowId: string) => {
     const row = partRows.find((r) => r.id === rowId)
@@ -2236,6 +2273,7 @@ export default function WorkOrderCostPage() {
 
   // 選択したD指令（または準用元）の原価データをロードする
   useEffect(() => {
+    let cancelled = false
     const load = async () => {
       if (mode !== 'order') return
       if (!costLoadWorkOrderId) {
@@ -2260,7 +2298,6 @@ export default function WorkOrderCostPage() {
         const isBranchScopedOrder =
           !reusePastCost &&
           mode === 'order' &&
-          selectedOrder?.cost_mode === 'bom' &&
           Boolean(selectedBranch)
         const branchOrderNo = loadOrder?.order_no || selectedOrder?.order_no || ''
         const branchCompositeKey =
@@ -2329,6 +2366,7 @@ export default function WorkOrderCostPage() {
           )
         })
 
+        if (cancelled) return
         if (data.found || directBranchItems.length > 0) {
           let usedBranchItems = false
           const filteredSourceItems = (() => {
@@ -2338,26 +2376,39 @@ export default function WorkOrderCostPage() {
                 return !masterType || masterType === '指令原価'
               })
             }
-            if (isBranchScopedOrder) {
-              if (directBranchItems.length > 0) {
+            if (isBranchScopedOrder && selectedOrder && selectedBranch) {
+              const headerMatches = (data.items || []).filter((it: any) =>
+                itemBelongsToBranch(it, selectedOrder.order_no, selectedBranch)
+              )
+              if (headerMatches.length > 0) {
                 usedBranchItems = true
-                return directBranchItems
+                return headerMatches
               }
-              const groupedByMasterId = new Map<string, any[]>()
-              for (const it of data.items || []) {
-                const key = String(it.master_id || '').trim()
-                const list = groupedByMasterId.get(key) ?? []
-                list.push(it)
-                groupedByMasterId.set(key, list)
+              const directMatches = directBranchItems.filter((it: any) =>
+                itemBelongsToBranch(it, selectedOrder.order_no, selectedBranch)
+              )
+              if (directMatches.length > 0) {
+                usedBranchItems = true
+                return directMatches
               }
-              for (const key of branchKeyCandidates) {
-                const matched = groupedByMasterId.get(key)
-                if (matched && matched.length > 0) {
-                  usedBranchItems = true
-                  return matched
-                }
+              const branchPartKeys = new Set(
+                branchOptions
+                  .map((branch) => String(branch.part_key || '').trim())
+                  .filter(Boolean)
+              )
+              const orderHasBranchLines = (data.items || []).some((it: any) => {
+                if (!isOrderCostItem(it)) return false
+                const partKey = String(it.part_key || '').trim()
+                if (partKey && branchPartKeys.has(partKey)) return true
+                const masterId = String(it.master_id || '').trim()
+                return branchOptions.some((branch) =>
+                  branchMasterIdKeys(selectedOrder.order_no, branch.branch_no).includes(masterId)
+                )
+              })
+              if (orderHasBranchLines) {
+                usedBranchItems = true
+                return []
               }
-              // 枝番に一致しない場合でも、指令の原価明細があれば表示を空にしない
               if (orderLevelItems.length > 0) return orderLevelItems
               return data.items || []
             }
@@ -2408,7 +2459,7 @@ export default function WorkOrderCostPage() {
                     ? savedHeaderIndirect
                     : indirectFromItems > 0
                       ? indirectFromItems
-                      : Math.round(autoLabor * (laborCostType === '加' ? 0.3 : 0.05))
+                      : Math.round(autoLabor * (laborCostType === '加' ? laborIndirectRateForFiscalYear(fiscalYear) : 0.05))
                 )
               )
             } else {
@@ -2440,6 +2491,9 @@ export default function WorkOrderCostPage() {
     }
 
     load()
+    return () => {
+      cancelled = true
+    }
   }, [loadCostDepsKey])
 
   const saveLineCostRows = async (rows: PartRow[]) => {
@@ -2552,24 +2606,57 @@ export default function WorkOrderCostPage() {
     }
 
     const itemPartKey = mode === 'line' ? selectedPartKey : ''
+    const orderNoForBranch = selectedOrder?.order_no || ''
     const orderMasterId = selectedBranch
-      ? buildOrderBranchMasterId(selectedOrder?.order_no || '', selectedBranch.branch_no)
-      : (selectedOrder?.order_no || '')
-    const itemsPayload = partRows.map((r, idx) => ({
+      ? buildOrderBranchMasterId(orderNoForBranch, selectedBranch.branch_no)
+      : orderNoForBranch
+    const toSavedItem = (row: {
+      component_name?: string | null
+      product_code?: string | null
+      part_name?: string | null
+      spec?: string | null
+      quantity?: string | number | null
+      unit_price?: string | number | null
+      material_cost?: string | number | null
+      labor_cost?: string | number | null
+      indirect_cost?: string | number | null
+      cost_type?: string | null
+      master_type?: string | null
+      master_id?: string | null
+      part_key?: string | null
+    }) => ({
+      component_name: row.component_name || null,
+      product_code: row.product_code || '',
+      part_name: row.part_name || '',
+      spec: row.spec || '',
+      quantity: Number(row.quantity),
+      unit_price: Number(row.unit_price),
+      material_cost: Number(row.material_cost),
+      labor_cost: Number(row.labor_cost),
+      indirect_cost: Number(row.indirect_cost),
+      cost_type: row.cost_type || '加',
+      line_total: Number(row.material_cost) + Number(row.labor_cost) + Number(row.indirect_cost),
+      master_type: row.master_type || (mode === 'order' ? '指令原価' : 'ライン原価'),
+      master_id: row.master_id || (mode === 'order' ? orderMasterId : itemPartKey),
+      part_key: row.part_key ?? null,
+    })
+    const visibleBranchRows = partRows.filter(
+      (row) =>
+        String(row.component_name || '').trim() ||
+        String(row.product_code || '').trim() ||
+        String(row.part_name || '').trim() ||
+        toNumber(row.material_cost) !== 0 ||
+        toNumber(row.labor_cost) !== 0 ||
+        toNumber(row.indirect_cost) !== 0
+    )
+    const itemsPayload = (mode === 'order' && selectedBranch ? visibleBranchRows : partRows).map((row, idx) => ({
       line_no: idx + 1,
-      component_name: r.component_name || null,
-      product_code: r.product_code,
-      part_name: r.part_name,
-      spec: r.spec,
-      quantity: Number(r.quantity),
-      unit_price: Number(r.unit_price),
-      material_cost: Number(r.material_cost),
-      labor_cost: Number(r.labor_cost),
-      indirect_cost: Number(r.indirect_cost),
-      cost_type: r.cost_type || '加',
-      line_total: Number(r.material_cost) + Number(r.labor_cost) + Number(r.indirect_cost),
-      master_type: mode === 'order' ? '指令原価' : 'ライン原価',
-      master_id: mode === 'order' ? orderMasterId : itemPartKey,
+      ...toSavedItem({
+        ...row,
+        master_type: mode === 'order' ? '指令原価' : 'ライン原価',
+        master_id: mode === 'order' ? orderMasterId : itemPartKey,
+        part_key: mode === 'order' ? selectedBranch?.part_key || null : itemPartKey || null,
+      }),
     }))
 
     try {
@@ -2637,12 +2724,57 @@ export default function WorkOrderCostPage() {
         const checkRes = await fetch(`/api/work-order-costs?work_order_id=${encodeURIComponent(selectedWorkOrderId)}`)
         const checkJson = await checkRes.json()
 
+        const savingOneBranch =
+          mode === 'order' && !reusePastCost && Boolean(selectedBranch)
+        let itemsToSave = itemsPayload
+        let headerToSave = headerPayload
+        if (savingOneBranch && selectedBranch && checkJson.found) {
+          const branchPartKeys = new Set(
+            branchOptions.map((branch) => String(branch.part_key || '').trim()).filter(Boolean)
+          )
+          const hasBranchLinkage = (checkJson.items || []).some((item: any) => {
+            if (!isOrderCostItem(item)) return false
+            const partKey = String(item.part_key || '').trim()
+            const masterId = String(item.master_id || '').trim()
+            if (partKey && branchPartKeys.has(partKey)) return true
+            return branchOptions.some((branch) =>
+              branchMasterIdKeys(orderNoForBranch, branch.branch_no).includes(masterId)
+            )
+          })
+          if (hasBranchLinkage) {
+            const kept = (checkJson.items || []).filter(
+              (item: { master_type?: string | null; master_id?: string | null; part_key?: string | null }) =>
+                !itemBelongsToBranch(item, orderNoForBranch, selectedBranch)
+            )
+            const merged = [...kept.map((item: any) => toSavedItem(item)), ...itemsPayload].map((item, idx) => ({
+              ...item,
+              line_no: idx + 1,
+            }))
+            const material = merged.reduce((sum, item) => sum + Number(item.material_cost || 0), 0)
+            const lineSum = merged.reduce((sum, item) => sum + Number(item.line_total || 0), 0)
+            const keepOrderLabor = selectedBranch.branch_no !== '00'
+            const labor = keepOrderLabor
+              ? Number(checkJson.header?.total_labor_cost || 0)
+              : effectiveLaborCost
+            const indirect = keepOrderLabor
+              ? Number(checkJson.header?.total_indirect_cost || 0)
+              : toNumber(laborIndirectCost)
+            itemsToSave = merged
+            headerToSave = {
+              total_material_cost: material,
+              total_labor_cost: labor,
+              total_indirect_cost: indirect,
+              total_cost: labor + indirect + lineSum,
+            }
+          }
+        }
+
         if (checkJson.found) {
           // 更新
           const res = await fetch('/api/work-order-costs', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ work_order_id: selectedWorkOrderId, header: headerPayload, items: itemsPayload }),
+            body: JSON.stringify({ work_order_id: selectedWorkOrderId, header: headerToSave, items: itemsToSave }),
           })
           const text = await res.text()
           console.debug('work-order-costs PUT', res.status, text)
@@ -3159,7 +3291,7 @@ export default function WorkOrderCostPage() {
                         {realtimeCostInfo.fiscal_year_label ? `${realtimeCostInfo.fiscal_year_label} ` : ''}
                         1台当たり制作時間 {realtimeCostInfo.st_minutes.toLocaleString('ja-JP')} 分
                         {realtimeCostInfo.formula ? ` → 工費 ${realtimeCostInfo.formula}` : ''}
-                        {' ／ 工費間接費 = 工費 × 30%'}
+                        {` ／ 工費間接費 = 工費 × ${appliedLaborIndirectPercent}%`}
                       </p>
                       {realtimeCostInfo.work_groups.length > 0 && (
                         <ul className="mt-1 space-y-0.5 text-xs text-amber-100/80">
@@ -3282,7 +3414,7 @@ export default function WorkOrderCostPage() {
                           </p>
                         </div>
                         <div className="rounded-2xl border border-orange-500/40 bg-orange-950/30 p-4">
-                          <p className="text-xs text-orange-200/80">工費間接費（30%）</p>
+                          <p className="text-xs text-orange-200/80">工費間接費（{appliedLaborIndirectPercent}%）</p>
                           <p className="mt-1 text-xl font-bold text-orange-200">
                             ¥{Math.round(realtimeCostInfo.indirect_cost).toLocaleString()}
                           </p>

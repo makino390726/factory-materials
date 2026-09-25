@@ -89,7 +89,8 @@ export async function GET(req: NextRequest) {
         line,
         planId,
         undefined,
-        accumulations.get(line.id) || null
+        accumulations.get(line.id) || null,
+        fiscalYear
       )
 
       rows.push({

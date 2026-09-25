@@ -36,6 +36,15 @@ export function formatFiscalYearLabel(fiscalYear: number) {
   return `${shortYear}年度`
 }
 
+/** 「27年度」「2027年度」を当社年度（4桁）に戻す */
+export function parseFiscalYearLabel(label: string | null | undefined): number | null {
+  const match = String(label || '').match(/(\d{2,4})\s*年度/)
+  if (!match) return null
+  const parsed = Number(match[1])
+  if (!Number.isFinite(parsed)) return null
+  return parsed >= 100 ? parsed : 2000 + parsed
+}
+
 /** 表示用ラベル（例: 26年度 1月）※月は暦月 */
 export function formatFiscalMonthLabel(calendarYear: number, month: number) {
   return `${formatFiscalYearLabel(getFiscalYear(calendarYear, month))} ${month}月`

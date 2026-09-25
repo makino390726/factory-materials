@@ -165,7 +165,7 @@ function toCandidate(
 ): RealtimeCostCandidate {
   const minutes = Math.round(resolved.minutes)
   const laborCost = calcLaborCostFromMinutes(minutes)
-  const indirectCost = calcLaborIndirectFromLabor(laborCost)
+  const indirectCost = calcLaborIndirectFromLabor(laborCost, resolved.fiscal_year)
   const specKey = resolved.spec_key || ''
   const specNote = specKey ? `出庫伝票の${formatSpecLabel(specKey)}区分で集計` : null
   return {
