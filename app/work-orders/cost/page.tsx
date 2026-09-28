@@ -6,7 +6,7 @@ import { getMonthMinutes, type MonthlyDurationRow } from '@/lib/work-report-aggr
 import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
 import { formatFiscalYearLabel, getCurrentFiscalYear, parseFiscalYearLabel } from '@/lib/fiscal-year'
-import { laborIndirectRateForFiscalYear } from '@/lib/labor-indirect-rate'
+import { calcLaborIndirectFromLabor, laborIndirectRateForFiscalYear } from '@/lib/labor-indirect-rate'
 import { isLine900Series } from '@/lib/line-part-labor-cost'
 import {
   type BomGroupDefinition,
@@ -180,7 +180,6 @@ export default function WorkOrderCostPage() {
   const [error, setError] = useState<string | null>(null)
   const [laborCost, setLaborCost] = useState('0')
   const [laborIndirectCost, setLaborIndirectCost] = useState('0')
-  const [laborCostType, setLaborCostType] = useState<'加' | '直'>('加')
   const [partRows, setPartRows] = useState<PartRow[]>([createPartRow()])
   const [sortColumn, setSortColumn] = useState<string>('order_no')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
@@ -2013,13 +2012,11 @@ export default function WorkOrderCostPage() {
     }
   }
 
-    // 工賃（ヘッダ）の間接費。加工は工費×年度別率（令和9年度以降40%）、直接は5%
+    // 工賃の間接費。区分に関係なく、工賃 × 年度率（27年度以降は40%）
     useEffect(() => {
       const laborVal = isAutoLaborMode ? calculateAutoLaborCost() : toNumber(laborCost)
-      const pct = laborCostType === '加' ? laborIndirectRateForFiscalYear(fiscalYear) : 0.05
-      const indirect = Math.round(laborVal * pct)
-      setLaborIndirectCost(String(indirect))
-    }, [laborCost, laborCostType, fiscalYear, selectedWorkOrderId, isAutoLaborMode, effectiveDurationMinutes])
+      setLaborIndirectCost(String(calcLaborIndirectFromLabor(laborVal, fiscalYear)))
+    }, [laborCost, fiscalYear, selectedWorkOrderId, isAutoLaborMode, effectiveDurationMinutes])
 
   const handleUpdateCostPrice = async (rowId: string) => {
     const row = partRows.find((r) => r.id === rowId)
@@ -2430,50 +2427,28 @@ export default function WorkOrderCostPage() {
               (sum: number, it: any) => sum + Number(it.labor_cost || 0),
               0
             )
-            const indirectFromItems = filteredSourceItems.reduce(
-              (sum: number, it: any) => sum + Number(it.indirect_cost || 0),
-              0
-            )
             const autoLabor = calculateAutoLaborCost()
             if (selectedBranch.branch_no === '00') {
               const savedHeaderLabor = Number(data.header?.total_labor_cost || 0)
-              setLaborCost(
-                String(
-                  savedHeaderLabor > 0
-                    ? savedHeaderLabor
-                    : laborFromItems > 0
-                      ? laborFromItems
-                      : autoLabor
-                )
-              )
-              const savedHeaderIndirect = Number(data.header?.total_indirect_cost || 0)
-              setLaborIndirectCost(
-                String(
-                  savedHeaderIndirect > 0
-                    ? savedHeaderIndirect
-                    : indirectFromItems > 0
-                      ? indirectFromItems
-                      : Math.round(autoLabor * (laborCostType === '加' ? laborIndirectRateForFiscalYear(fiscalYear) : 0.05))
-                )
-              )
+              const labor =
+                savedHeaderLabor > 0 ? savedHeaderLabor : laborFromItems > 0 ? laborFromItems : autoLabor
+              setLaborCost(String(labor))
+              setLaborIndirectCost(String(calcLaborIndirectFromLabor(labor, fiscalYear)))
             } else {
               setLaborCost(String(laborFromItems))
-              setLaborIndirectCost(String(indirectFromItems))
+              setLaborIndirectCost(String(calcLaborIndirectFromLabor(laborFromItems, fiscalYear)))
             }
           } else if (data.header) {
-            setLaborIndirectCost(String(data.header.total_indirect_cost || 0))
             const savedLabor = Number(data.header.total_labor_cost || 0)
             const autoLabor = reusePastCost ? savedLabor : calculateAutoLaborCost()
-            setLaborCost(String(savedLabor > 0 ? savedLabor : autoLabor))
-            if (data.header.labor_cost_type) {
-              setLaborCostType(data.header.labor_cost_type)
-            }
+            const labor = savedLabor > 0 ? savedLabor : autoLabor
+            setLaborCost(String(labor))
+            setLaborIndirectCost(String(calcLaborIndirectFromLabor(labor, fiscalYear)))
           }
         } else if (!reusePastCost) {
           setPartRows([createPartRow()])
           setLaborIndirectCost('0')
           setLaborCost(String(calculateAutoLaborCost()))
-          setLaborCostType('加')
         } else {
           alert(
             `過去指令 ${branchOrderNo || costLoadWorkOrderId} に原価データが見つかりませんでした`
@@ -4177,23 +4152,17 @@ export default function WorkOrderCostPage() {
                       }`}
                     />
                   </td>
-                  <td className="py-4 pr-4">
-                    <select
-                      value={laborCostType}
-                      onChange={(e) => setLaborCostType(e.target.value as '加' | '直')}
-                      className="w-20 rounded-lg border-2 border-slate-600 bg-slate-800 text-slate-100 px-2 py-2 font-medium shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-500/50 focus:outline-none"
-                    >
-                      <option value="加">加</option>
-                      <option value="直">直</option>
-                    </select>
+                  <td className="py-4 pr-4 text-rose-300 font-medium">
+                    {Math.round(laborIndirectRateForFiscalYear(fiscalYear) * 100)}%
                   </td>
                   <td className="py-4 pr-4">
                     <input
                       type="number"
                       min="0"
                       value={laborIndirectCost}
-                      onChange={(event) => setLaborIndirectCost(event.target.value)}
-                      className="w-24 rounded-lg border-2 border-rose-600 bg-slate-800 text-slate-100 px-3 py-2 text-right font-medium shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      readOnly
+                      title="工賃×年度率で自動計算（27年度以降は40%）"
+                      className="w-24 rounded-lg border-2 border-rose-600 bg-slate-800 text-rose-200 px-3 py-2 text-right font-medium shadow-sm cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                   </td>
                   <td className="py-4 pr-4 font-bold text-lg text-rose-300">
