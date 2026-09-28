@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
-import { listAnnualModelCosts } from '@/lib/heater-model-annual-cost'
+import { formatFiscalYearLabel, getCurrentFiscalYear, parseFiscalYearParam } from '@/lib/fiscal-year'
+import {
+  calcHeaderLaborIndirect,
+  costMethodLabel,
+  repriceLine,
+  usesNewCostMethod,
+} from '@/lib/fiscal-cost-method'
 import {
   applyModelRealtimeOverlay,
   isLaborFeePartLabel,
@@ -23,7 +28,93 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-async function buildModelCostList() {
+async function loadCostItemsByHeader(headerIds: string[]) {
+  const map = new Map<
+    string,
+    Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }>
+  >()
+  for (let i = 0; i < headerIds.length; i += 150) {
+    const chunk = headerIds.slice(i, i + 150)
+    const { data, error } = await supabase
+      .from('work_order_cost_items')
+      .select('work_order_cost_id, material_cost, labor_cost, indirect_cost, line_total')
+      .in('work_order_cost_id', chunk)
+    if (error) throw error
+    for (const row of data || []) {
+      const id = String(row.work_order_cost_id || '')
+      if (!id) continue
+      const list = map.get(id) || []
+      list.push({
+        material_cost: toNumber(row.material_cost),
+        labor_cost: toNumber(row.labor_cost),
+        indirect_cost: toNumber(row.indirect_cost),
+        line_total: toNumber(row.line_total),
+      })
+      map.set(id, list)
+    }
+  }
+  return map
+}
+
+function orderDisplayCost(
+  header: {
+    total_material_cost?: unknown
+    total_labor_cost?: unknown
+    total_indirect_cost?: unknown
+    total_cost?: unknown
+  },
+  items: Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }> | undefined,
+  fiscalYear: number
+) {
+  if (!usesNewCostMethod(fiscalYear)) {
+    return {
+      material_cost: toNumber(header.total_material_cost),
+      labor_cost: toNumber(header.total_labor_cost),
+      indirect_cost: toNumber(header.total_indirect_cost),
+      total_cost: toNumber(header.total_cost),
+    }
+  }
+  if (!items || items.length === 0) {
+    const priced = repriceLine(
+      fiscalYear,
+      toNumber(header.total_material_cost),
+      toNumber(header.total_labor_cost),
+      toNumber(header.total_indirect_cost),
+      toNumber(header.total_cost)
+    )
+    return {
+      material_cost: priced.material,
+      labor_cost: priced.labor,
+      indirect_cost: priced.indirect,
+      total_cost: priced.total,
+    }
+  }
+
+  let lineMaterial = 0
+  let lineLabor = 0
+  let lineIndirect = 0
+  for (const item of items) {
+    const priced = repriceLine(fiscalYear, item.material_cost, item.labor_cost, item.indirect_cost, item.line_total)
+    lineMaterial += priced.material
+    lineLabor += priced.labor
+    lineIndirect += priced.indirect
+  }
+  const headerLabor = Math.round(toNumber(header.total_labor_cost))
+  const headerMaterial = Math.round(toNumber(header.total_material_cost))
+  const laborAlreadyInLines = headerLabor > 0 && Math.abs(headerLabor - lineLabor) < 1
+  const labor = laborAlreadyInLines ? headerLabor : headerLabor + lineLabor
+  const laborIndirect = laborAlreadyInLines ? 0 : calcHeaderLaborIndirect(headerLabor, '加', fiscalYear)
+  const material = headerMaterial > 0 ? headerMaterial : lineMaterial
+  const indirect = lineIndirect + laborIndirect
+  return {
+    material_cost: material,
+    labor_cost: labor,
+    indirect_cost: indirect,
+    total_cost: material + labor + indirect,
+  }
+}
+
+async function buildModelCostList(fiscalYear: number) {
   const { data: models, error: modelsError } = await supabase
     .from('heater_models')
     .select('model, name')
@@ -132,16 +223,17 @@ async function buildModelCostList() {
       : costPrice
     // 製品パーツ計算・部品表と同じ: L指令合計が0なら parts_master.cost_price にフォールバック
     const unitCost = totalUnit || costPrice
+    const priced = repriceLine(fiscalYear, materialUnit, laborUnit, indirectUnit, unitCost)
 
-    row.material_cost += materialUnit * qty
-    row.labor_cost += laborUnit * qty
-    row.indirect_cost += indirectUnit * qty
-    row.total_cost += unitCost * qty
+    row.material_cost += priced.material * qty
+    row.labor_cost += priced.labor * qty
+    row.indirect_cost += priced.indirect * qty
+    row.total_cost += priced.total * qty
     row.part_count += 1
     if (isLaborFeePartLabel(item.part_key, item.part_name, fallback?.part_name)) {
       row.has_labor_fee_row = true
-      row.fee_labor_cost += laborUnit * qty
-      row.fee_indirect_cost += indirectUnit * qty
+      row.fee_labor_cost += priced.labor * qty
+      row.fee_indirect_cost += priced.indirect * qty
     }
   }
 
@@ -163,30 +255,20 @@ async function buildModelCostList() {
     })
   }
 
-  const currentFiscalYear = getCurrentFiscalYear()
-  const previousFiscalYear = currentFiscalYear - 1
-  const [savedMap, previousYearMap, currentYearMap] = await Promise.all([
-    listSavedModelRealtimeCosts(supabase),
-    listAnnualModelCosts(supabase, previousFiscalYear),
-    listAnnualModelCosts(supabase, currentFiscalYear),
-  ])
+  const savedRealtime = await listSavedModelRealtimeCosts(supabase)
 
   return {
-    fiscal_year: currentFiscalYear,
-    previous_fiscal_year: previousFiscalYear,
+    fiscal_year: fiscalYear,
     rows: Array.from(map.values())
       .map((row) => {
-        const current = {
-          material_cost: Math.round(row.material_cost),
-          labor_cost: Math.round(row.labor_cost),
-          indirect_cost: Math.round(row.indirect_cost),
-          total_cost: Math.round(row.total_cost),
-        }
-        const saved = savedMap.get(row.model) || null
-        const realtime = saved
+        const saved = savedRealtime.get(row.model) || null
+        const overlaid = saved
           ? applyModelRealtimeOverlay(
               {
-                ...current,
+                material_cost: row.material_cost,
+                labor_cost: row.labor_cost,
+                indirect_cost: row.indirect_cost,
+                total_cost: row.total_cost,
                 fee_labor_cost: row.fee_labor_cost,
                 fee_indirect_cost: row.fee_indirect_cost,
                 has_labor_fee_row: row.has_labor_fee_row,
@@ -194,26 +276,17 @@ async function buildModelCostList() {
               saved
             )
           : null
-        const previous = previousYearMap.get(row.model) || null
-        const currentYear = currentYearMap.get(row.model) || null
+        const shown = overlaid || row
         return {
           model: row.model,
           display_name: row.display_name,
           part_count: row.part_count,
-          previous_year_available: Boolean(previous),
-          previous_material_cost: previous?.material_cost ?? current.material_cost,
-          previous_labor_cost: previous?.labor_cost ?? current.labor_cost,
-          previous_indirect_cost: previous?.indirect_cost ?? current.indirect_cost,
-          previous_total_cost: previous?.total_cost ?? current.total_cost,
+          material_cost: Math.round(shown.material_cost),
+          labor_cost: Math.round(shown.labor_cost),
+          indirect_cost: Math.round(shown.indirect_cost),
+          total_cost: Math.round(shown.total_cost),
           realtime_applied: Boolean(saved),
           realtime_label: saved?.applied_label || null,
-          realtime_st_minutes: saved?.st_minutes ?? null,
-          realtime_material_cost: realtime?.material_cost ?? current.material_cost,
-          realtime_labor_cost: realtime?.labor_cost ?? null,
-          realtime_indirect_cost: realtime?.indirect_cost ?? null,
-          realtime_total_cost: realtime?.total_cost ?? null,
-          current_year_applied: Boolean(currentYear),
-          current_year_updated_at: currentYear?.updated_at ?? null,
         }
       })
       .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true })),
@@ -227,15 +300,19 @@ export async function GET(req: Request) {
     const reportType = (
       typeParam === 'line' ? 'line' : typeParam === 'model' ? 'model' : 'order'
     ) as ReportType
+    const fiscalYear = parseFiscalYearParam(searchParams.get('fiscal_year'), getCurrentFiscalYear())
+    const methodPayload = {
+      fiscal_year: fiscalYear,
+      fiscal_year_label: formatFiscalYearLabel(fiscalYear),
+      formula_label: costMethodLabel(fiscalYear),
+      uses_new_method: usesNewCostMethod(fiscalYear),
+    }
 
     if (reportType === 'model') {
-      const modelReport = await buildModelCostList()
+      const modelReport = await buildModelCostList(fiscalYear)
       return NextResponse.json({
         reportType,
-        fiscal_year: modelReport.fiscal_year,
-        previous_fiscal_year: modelReport.previous_fiscal_year,
-        fiscal_year_label: formatFiscalYearLabel(modelReport.fiscal_year),
-        previous_fiscal_year_label: formatFiscalYearLabel(modelReport.previous_fiscal_year),
+        ...methodPayload,
         rows: modelReport.rows,
         bomSummary: [],
       })
@@ -283,12 +360,38 @@ export async function GET(req: Request) {
         if (!current.product_name && item.part_name) current.product_name = String(item.part_name)
         if (!current.spec && item.spec) current.spec = String(item.spec)
 
-        current.material_cost += toNumber(item.material_cost)
-        current.labor_cost += toNumber(item.labor_cost)
-        current.indirect_cost += toNumber(item.indirect_cost)
-        current.total_cost += toNumber(item.line_total)
+        const priced = repriceLine(
+          fiscalYear,
+          toNumber(item.material_cost),
+          toNumber(item.labor_cost),
+          toNumber(item.indirect_cost),
+          toNumber(item.line_total)
+        )
+        current.material_cost += priced.material
+        current.labor_cost += priced.labor
+        current.indirect_cost += priced.indirect
+        current.total_cost += priced.total
 
         grouped.set(masterId, current)
+      }
+
+      if (usesNewCostMethod(fiscalYear) && grouped.size > 0) {
+        const unitMap = await buildLinePartCostUnitMap(supabase, Array.from(grouped.keys()))
+        for (const [partKey, row] of grouped) {
+          const unit = unitMap.get(partKey)
+          if (!unit) continue
+          const priced = repriceLine(
+            fiscalYear,
+            Number(unit.material_unit || 0),
+            Number(unit.labor_unit || 0),
+            Number(unit.indirect_unit || 0),
+            Number(unit.total_unit || 0)
+          )
+          row.material_cost = priced.material
+          row.labor_cost = priced.labor
+          row.indirect_cost = priced.indirect
+          row.total_cost = priced.total
+        }
       }
 
       const rows = Array.from(grouped.values())
@@ -350,6 +453,7 @@ export async function GET(req: Request) {
 
       return NextResponse.json({
         reportType,
+        ...methodPayload,
         rows,
         bomSummary: Array.from(bomSummary.values()).sort((a, b) => a.model.localeCompare(b.model, 'ja-JP')),
       })
@@ -367,15 +471,33 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: headerError.message }, { status: 500 })
     }
 
-    const latestByWorkOrder = new Map<string, any>()
+    type OrderCostHeader = {
+      id: string
+      work_order_id: string | null
+      order_no: string | null
+      total_material_cost: number | null
+      total_labor_cost: number | null
+      total_indirect_cost: number | null
+      total_cost: number | null
+    }
+    type WorkOrderRow = {
+      id: string
+      order_no: string | null
+      product_name: string | null
+      model: string | null
+      bom_model: string | null
+      qty: number | null
+    }
+
+    const latestByWorkOrder = new Map<string, OrderCostHeader>()
     for (const header of headers || []) {
       const workOrderId = String(header.work_order_id || '').trim()
       if (!workOrderId || latestByWorkOrder.has(workOrderId)) continue
-      latestByWorkOrder.set(workOrderId, header)
+      latestByWorkOrder.set(workOrderId, header as OrderCostHeader)
     }
 
     const workOrderIds = Array.from(latestByWorkOrder.keys())
-    let workOrderMap = new Map<string, any>()
+    let workOrderMap = new Map<string, WorkOrderRow>()
 
     if (workOrderIds.length > 0) {
       const { data: workOrders, error: workOrderError } = await supabase
@@ -388,27 +510,35 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: workOrderError.message }, { status: 500 })
       }
 
-      workOrderMap = new Map((workOrders || []).map((w) => [String(w.id), w]))
+      workOrderMap = new Map((workOrders || []).map((w) => [String(w.id), w as WorkOrderRow]))
     }
+
+    const itemsByHeader = usesNewCostMethod(fiscalYear)
+      ? await loadCostItemsByHeader(
+          Array.from(latestByWorkOrder.values())
+            .map((header) => String(header.id || ''))
+            .filter(Boolean)
+        )
+      : new Map<
+          string,
+          Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }>
+        >()
 
     const rows = Array.from(latestByWorkOrder.values())
       .map((header) => {
         const workOrder = workOrderMap.get(String(header.work_order_id))
+        const priced = orderDisplayCost(header, itemsByHeader.get(String(header.id || '')), fiscalYear)
+        const qty = Math.max(0, toNumber(workOrder?.qty))
         return {
           order_no: String(workOrder?.order_no || header.order_no || ''),
           product_name: String(workOrder?.product_name || ''),
           spec: String(workOrder?.model || ''),
-          quantity: Math.max(0, toNumber(workOrder?.qty)),
-          unit_cost: (() => {
-            const qty = Math.max(0, toNumber(workOrder?.qty))
-            const total = toNumber(header.total_cost)
-            if (qty <= 0) return 0
-            return total / qty
-          })(),
-          material_cost: toNumber(header.total_material_cost),
-          labor_cost: toNumber(header.total_labor_cost),
-          indirect_cost: toNumber(header.total_indirect_cost),
-          total_cost: toNumber(header.total_cost),
+          quantity: qty,
+          unit_cost: qty > 0 ? priced.total_cost / qty : 0,
+          material_cost: priced.material_cost,
+          labor_cost: priced.labor_cost,
+          indirect_cost: priced.indirect_cost,
+          total_cost: priced.total_cost,
         }
       })
       .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))
@@ -466,11 +596,18 @@ export async function GET(req: Request) {
         for (const row of lineCostRows) {
           const partKey = String(row.master_id || '').trim()
           if (!partKey) continue
+          const priced = repriceLine(
+            fiscalYear,
+            toNumber(row.material_cost),
+            toNumber(row.labor_cost),
+            toNumber(row.indirect_cost),
+            toNumber(row.line_total)
+          )
           lineCostMap.set(partKey, {
-            material: toNumber(row.material_cost),
-            labor: toNumber(row.labor_cost),
-            indirect: toNumber(row.indirect_cost),
-            total: toNumber(row.line_total),
+            material: priced.material,
+            labor: priced.labor,
+            indirect: priced.indirect,
+            total: priced.total,
           })
         }
 
@@ -514,6 +651,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       reportType,
+      ...methodPayload,
       rows,
       bomSummary: Array.from(bomSummary.values()).sort((a, b) => a.model.localeCompare(b.model, 'ja-JP')),
     })
