@@ -43,7 +43,7 @@ async function loadCostItemsByHeader(headerIds: string[]) {
     const chunk = headerIds.slice(i, i + 150)
     const { data, error } = await supabase
       .from('work_order_cost_items')
-      .select('work_order_cost_id, material_cost, labor_cost, indirect_cost, line_total, master_id, part_key')
+      .select('work_order_cost_id, material_cost, labor_cost, indirect_cost, line_total, master_id')
       .in('work_order_cost_id', chunk)
     if (error) throw error
     for (const row of data || []) {
@@ -56,7 +56,8 @@ async function loadCostItemsByHeader(headerIds: string[]) {
         indirect_cost: toNumber(row.indirect_cost),
         line_total: toNumber(row.line_total),
         master_id: String(row.master_id || '').trim(),
-        part_key: String(row.part_key || '').trim(),
+        // 明細テーブルに part_key 列がない環境がある。枝番数量は master_id で対応する。
+        part_key: '',
       })
       map.set(id, list)
     }
