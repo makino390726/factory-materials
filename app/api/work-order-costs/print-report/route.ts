@@ -28,16 +28,22 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+type ReportCostItem = {
+  material_cost: number
+  labor_cost: number
+  indirect_cost: number
+  line_total: number
+  master_id: string
+  part_key: string
+}
+
 async function loadCostItemsByHeader(headerIds: string[]) {
-  const map = new Map<
-    string,
-    Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }>
-  >()
+  const map = new Map<string, ReportCostItem[]>()
   for (let i = 0; i < headerIds.length; i += 150) {
     const chunk = headerIds.slice(i, i + 150)
     const { data, error } = await supabase
       .from('work_order_cost_items')
-      .select('work_order_cost_id, material_cost, labor_cost, indirect_cost, line_total')
+      .select('work_order_cost_id, material_cost, labor_cost, indirect_cost, line_total, master_id, part_key')
       .in('work_order_cost_id', chunk)
     if (error) throw error
     for (const row of data || []) {
@@ -49,6 +55,8 @@ async function loadCostItemsByHeader(headerIds: string[]) {
         labor_cost: toNumber(row.labor_cost),
         indirect_cost: toNumber(row.indirect_cost),
         line_total: toNumber(row.line_total),
+        master_id: String(row.master_id || '').trim(),
+        part_key: String(row.part_key || '').trim(),
       })
       map.set(id, list)
     }
@@ -64,7 +72,11 @@ function orderDisplayCost(
     total_cost?: unknown
   },
   items: Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }> | undefined,
-  fiscalYear: number
+  fiscalYear: number,
+  options?: {
+    materialFromItems?: boolean
+    unscaledItems?: Array<{ material_cost: number; labor_cost: number }>
+  }
 ) {
   if (!usesNewCostMethod(fiscalYear)) {
     return {
@@ -101,10 +113,22 @@ function orderDisplayCost(
   }
   const headerLabor = Math.round(toNumber(header.total_labor_cost))
   const headerMaterial = Math.round(toNumber(header.total_material_cost))
-  const laborAlreadyInLines = headerLabor > 0 && Math.abs(headerLabor - lineLabor) < 1
+  const unscaledLabor = options?.unscaledItems
+    ? options.unscaledItems.reduce((sum, item) => sum + item.labor_cost, 0)
+    : lineLabor
+  const unscaledMaterial = options?.unscaledItems
+    ? options.unscaledItems.reduce((sum, item) => sum + item.material_cost, 0)
+    : lineMaterial
+  const laborAlreadyInLines = headerLabor > 0 && Math.abs(headerLabor - unscaledLabor) < 1
   const labor = laborAlreadyInLines ? headerLabor : headerLabor + lineLabor
   const laborIndirect = laborAlreadyInLines ? 0 : calcHeaderLaborIndirect(headerLabor, '加', fiscalYear)
-  const material = headerMaterial > 0 ? headerMaterial : lineMaterial
+  const headerMaterialExtra = Math.max(0, headerMaterial - Math.round(unscaledMaterial))
+  const material =
+    options?.materialFromItems && lineMaterial > 0
+      ? lineMaterial + headerMaterialExtra
+      : headerMaterial > 0
+        ? headerMaterial
+        : lineMaterial
   const indirect = lineIndirect + laborIndirect
   return {
     material_cost: material,
@@ -112,6 +136,51 @@ function orderDisplayCost(
     indirect_cost: indirect,
     total_cost: material + labor + indirect,
   }
+}
+
+type BranchQtyRow = {
+  work_order_id: string
+  branch_no: string
+  part_key: string
+  bom_quantity: number
+}
+
+function formatBranchNo(branchNo: string): string {
+  const stripped = String(branchNo || '').replace(/^[A-Za-z]+/, '').replace(/^0+/, '')
+  if (!stripped) return String(branchNo || '')
+  return String(parseInt(stripped, 10)).padStart(2, '0')
+}
+
+/** 枝番00は工賃。それ以外は構成パーツ数量。明細は1セット分。 */
+function constituentMultiplier(orderNo: string, item: ReportCostItem, branches: BranchQtyRow[]): number {
+  const masterId = item.master_id
+  const partKey = item.part_key
+  for (const branch of branches) {
+    if (String(branch.branch_no || '') === '00') continue
+    const qty = Number(branch.bom_quantity)
+    if (!Number.isFinite(qty) || qty <= 0 || qty === 1) continue
+    const branchPartKey = String(branch.part_key || '').trim()
+    if (partKey && branchPartKey && partKey === branchPartKey) return qty
+    const branchNo = String(branch.branch_no || '').trim()
+    const stripped = branchNo.replace(/^[A-Za-z]+/, '').replace(/^0+/, '') || branchNo
+    const keys = [`${orderNo}-${formatBranchNo(branchNo)}`, `${orderNo}-${stripped}`, `${orderNo}-${branchNo}`, branchPartKey]
+    if (masterId && keys.includes(masterId)) return qty
+  }
+  return 1
+}
+
+function scaleItemsByBranchQty(items: ReportCostItem[], orderNo: string, branches: BranchQtyRow[]): ReportCostItem[] {
+  return items.map((item) => {
+    const qty = constituentMultiplier(orderNo, item, branches)
+    if (qty === 1) return item
+    return {
+      ...item,
+      material_cost: item.material_cost * qty,
+      labor_cost: item.labor_cost * qty,
+      indirect_cost: item.indirect_cost * qty,
+      line_total: item.line_total * qty,
+    }
+  })
 }
 
 async function buildModelCostList(fiscalYear: number) {
@@ -513,21 +582,58 @@ export async function GET(req: Request) {
       workOrderMap = new Map((workOrders || []).map((w) => [String(w.id), w as WorkOrderRow]))
     }
 
-    const itemsByHeader = usesNewCostMethod(fiscalYear)
-      ? await loadCostItemsByHeader(
-          Array.from(latestByWorkOrder.values())
-            .map((header) => String(header.id || ''))
-            .filter(Boolean)
-        )
-      : new Map<
-          string,
-          Array<{ material_cost: number; labor_cost: number; indirect_cost: number; line_total: number }>
-        >()
+    const itemsByHeader = await loadCostItemsByHeader(
+      Array.from(latestByWorkOrder.values())
+        .map((header) => String(header.id || ''))
+        .filter(Boolean)
+    )
+
+    const branchesByWorkOrder = new Map<string, BranchQtyRow[]>()
+    if (workOrderIds.length > 0) {
+      const { data: branchRows, error: branchError } = await supabase
+        .from('work_order_branches')
+        .select('work_order_id, branch_no, part_key, bom_quantity')
+        .in('work_order_id', workOrderIds)
+      if (branchError) {
+        console.error('print report branches fetch error:', branchError)
+        return NextResponse.json({ error: branchError.message }, { status: 500 })
+      }
+      for (const row of branchRows || []) {
+        const workOrderId = String(row.work_order_id || '')
+        if (!workOrderId) continue
+        const list = branchesByWorkOrder.get(workOrderId) || []
+        list.push({
+          work_order_id: workOrderId,
+          branch_no: String(row.branch_no || ''),
+          part_key: String(row.part_key || ''),
+          bom_quantity: toNumber(row.bom_quantity),
+        })
+        branchesByWorkOrder.set(workOrderId, list)
+      }
+    }
 
     const rows = Array.from(latestByWorkOrder.values())
       .map((header) => {
         const workOrder = workOrderMap.get(String(header.work_order_id))
-        const priced = orderDisplayCost(header, itemsByHeader.get(String(header.id || '')), fiscalYear)
+        const orderNo = String(workOrder?.order_no || header.order_no || '')
+        const rawItems = itemsByHeader.get(String(header.id || '')) || []
+        const scaledItems = scaleItemsByBranchQty(
+          rawItems,
+          orderNo,
+          branchesByWorkOrder.get(String(header.work_order_id || '')) || []
+        )
+        const priced = orderDisplayCost(header, scaledItems, fiscalYear, {
+          materialFromItems: usesNewCostMethod(fiscalYear) && scaledItems.length > 0,
+          unscaledItems: rawItems,
+        })
+        if (!usesNewCostMethod(fiscalYear) && rawItems.length > 0) {
+          const sum = (items: ReportCostItem[], key: 'material_cost' | 'labor_cost' | 'indirect_cost' | 'line_total') =>
+            items.reduce((total, item) => total + item[key], 0)
+          priced.material_cost += sum(scaledItems, 'material_cost') - sum(rawItems, 'material_cost')
+          priced.labor_cost += sum(scaledItems, 'labor_cost') - sum(rawItems, 'labor_cost')
+          priced.indirect_cost += sum(scaledItems, 'indirect_cost') - sum(rawItems, 'indirect_cost')
+          priced.total_cost = priced.material_cost + priced.labor_cost + priced.indirect_cost
+        }
         const qty = Math.max(0, toNumber(workOrder?.qty))
         return {
           order_no: String(workOrder?.order_no || header.order_no || ''),

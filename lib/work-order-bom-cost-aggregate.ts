@@ -442,12 +442,25 @@ export async function aggregateWorkOrderSavedCost(
     })
   }
 
+  let extraMaterial = 0
+  let extraLabor = 0
+  let extraIndirect = 0
+  for (const branch of branchResults) {
+    const qty = branchCostItemMultiplier(branch)
+    if (qty === 1) continue
+    for (const item of branch.cost_items || []) {
+      extraMaterial += item.material_cost * (qty - 1)
+      extraLabor += item.labor_cost * (qty - 1)
+      extraIndirect += item.indirect_cost * (qty - 1)
+    }
+  }
+
   return {
     branches: branchResults,
-    material_total: Number(header.total_material_cost || 0),
-    labor_total: Number(header.total_labor_cost || 0),
-    indirect_total: Number(header.total_indirect_cost || 0),
-    grand_total: Number(header.total_cost || 0),
+    material_total: Number(header.total_material_cost || 0) + extraMaterial,
+    labor_total: Number(header.total_labor_cost || 0) + extraLabor,
+    indirect_total: Number(header.total_indirect_cost || 0) + extraIndirect,
+    grand_total: Number(header.total_cost || 0) + extraMaterial + extraLabor + extraIndirect,
     has_saved_cost: true,
     cost_saved_at: header.updated_at || header.created_at || null,
   }

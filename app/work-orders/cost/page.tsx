@@ -30,6 +30,7 @@ type BranchOption = {
   branch_no: string
   part_key: string
   part_name: string | null
+  bom_quantity: number
 }
 
 type Product = {
@@ -156,6 +157,15 @@ const branchMasterIdKeys = (orderNo: string, branchNo: string): string[] => {
 const isOrderCostItem = (item: { master_type?: string | null }) => {
   const masterType = String(item.master_type || '').trim()
   return !masterType || masterType === '指令原価'
+}
+
+/** 枝番00は工賃（数量は工数）。それ以外の構成パーツ数量を原価に掛ける。 */
+const constituentPartQuantity = (branch: Pick<BranchOption, 'branch_no' | 'bom_quantity'> | null): number => {
+  if (!branch) return 1
+  if (String(branch.branch_no || '') === '00') return 1
+  const qty = Number(branch.bom_quantity)
+  if (!Number.isFinite(qty) || qty <= 0) return 1
+  return qty
 }
 
 /** 枝番はその指令BOMの1部品。明細の part_key か、枝番付き master_id で所属を判定する。 */
@@ -1700,6 +1710,7 @@ export default function WorkOrderCostPage() {
           branch_no: String(branch.branch_no || ''),
           part_key: String(branch.part_key || ''),
           part_name: branch.part_name || null,
+          bom_quantity: Number(branch.bom_quantity ?? 1),
         }))
         setBranchOptions(mapped)
         setSelectedBranchId((prev) => {
@@ -1810,6 +1821,20 @@ export default function WorkOrderCostPage() {
           const priceNum = toNumber(String(unitPrice))
           if (!Number.isFinite(qtyNum) || !Number.isFinite(priceNum)) {
             return updated
+          }
+          // 単価が無いパーツ原価は、数量の比率で材料・工賃・間接費をまとめて掛ける
+          if (!(priceNum > 0) && key === 'quantity') {
+            const oldQty = toNumber(row.quantity)
+            const baseQty = oldQty > 0 ? oldQty : 1
+            if (qtyNum < 0) return updated
+            const ratio = qtyNum / baseQty
+            const scale = (amount: string) => String(Math.round(toNumber(amount) * ratio))
+            return {
+              ...updated,
+              material_cost: scale(row.material_cost),
+              labor_cost: scale(row.labor_cost),
+              indirect_cost: scale(row.indirect_cost),
+            }
           }
           const material = Math.round(qtyNum * priceNum)
           const laborNum = toNumber(String(updated.labor_cost))
@@ -1928,13 +1953,15 @@ export default function WorkOrderCostPage() {
                 if (toNumber(row.unit_price) > 0 || toNumber(row.material_cost) > 0) {
                   return row
                 }
+                const qtyNum = toNumber(row.quantity) || 1
                 return {
                   ...row,
                   product_code: codeTrim,
                   part_name: partMatch.name || '',
                   unit_price: '',
-                  material_cost: String(materialTotal),
-                  indirect_cost: String(indirectTotal),
+                  quantity: String(qtyNum),
+                  material_cost: String(Math.round(materialTotal * qtyNum)),
+                  indirect_cost: String(Math.round(indirectTotal * qtyNum)),
                 }
               })
             )
@@ -3033,14 +3060,15 @@ export default function WorkOrderCostPage() {
   const partMaterialTotal = partRows.reduce((sum, row) => sum + toNumber(row.material_cost), 0)
   const partLaborTotal = partRows.reduce((sum, row) => sum + toNumber(row.labor_cost), 0)
   const partIndirectTotal = partRows.reduce((sum, row) => sum + toNumber(row.indirect_cost), 0)
-  const materialTotal = partMaterialTotal
-  const laborTotal = headerLaborCost + partLaborTotal
-  const indirectTotal = toNumber(laborIndirectCost) + partIndirectTotal
-  const grandTotal = materialTotal + laborTotal + indirectTotal
-
   const productionQty = mode === 'order'
     ? Math.max(1, Number(selectedOrder?.qty || 1))
     : 1
+  const constituentQty = mode === 'order' ? constituentPartQuantity(selectedBranch) : 1
+
+  const materialTotal = Math.round(partMaterialTotal * constituentQty)
+  const laborTotal = headerLaborCost + Math.round(partLaborTotal * constituentQty)
+  const indirectTotal = toNumber(laborIndirectCost) + Math.round(partIndirectTotal * constituentQty)
+  const grandTotal = materialTotal + laborTotal + indirectTotal
 
   const qtyMaterialTotal = Math.round(materialTotal * productionQty)
   const qtyLaborTotal = Math.round(laborTotal * productionQty)
@@ -3943,7 +3971,11 @@ export default function WorkOrderCostPage() {
                     ) : (
                       branchOptions.map((branch) => (
                         <option key={branch.id} value={branch.id}>
-                          {`${selectedOrder?.order_no || ''}-${branch.branch_no}-${branch.part_name || '部品名未設定'}`}
+                          {`${selectedOrder?.order_no || ''}-${branch.branch_no}-${branch.part_name || '部品名未設定'}${
+                            constituentPartQuantity(branch) === 1
+                              ? ''
+                              : ` ×${constituentPartQuantity(branch)}`
+                          }`}
                         </option>
                       ))
                     )}
@@ -4043,6 +4075,9 @@ export default function WorkOrderCostPage() {
                     {(selectedOrder?.cost_mode === 'bom' || branchOptions.length > 0) && (
                       <p className="text-sm text-violet-300">
                         枝番: {selectedBranch ? `${selectedBranch.branch_no} / ${selectedBranch.part_name || '部品名未設定'}` : '未選択'}
+                        {selectedBranch && constituentPartQuantity(selectedBranch) !== 1
+                          ? `（構成数量 ${constituentPartQuantity(selectedBranch)}）`
+                          : ''}
                       </p>
                     )}
                   </>
@@ -4332,7 +4367,11 @@ export default function WorkOrderCostPage() {
               <p className="text-[28px] text-cyan-400 uppercase tracking-[0.3em] font-semibold">原価合計額</p>
               <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-lg border border-cyan-700/40 bg-slate-900/60 p-3">
-                  <p className="text-xs text-cyan-300 mb-2">内訳合計（単価ベース）</p>
+                  <p className="text-xs text-cyan-300 mb-2">
+                    {constituentQty === 1
+                      ? '内訳合計（単価ベース）'
+                      : `内訳合計（1台・構成数量 ${constituentQty.toLocaleString()}）`}
+                  </p>
                   <div className="grid grid-cols-[1fr_auto] gap-y-1 text-sm text-slate-200">
                     <span>材料費計</span><span>¥{materialTotal.toLocaleString()}</span>
                     <span>工賃計</span><span>¥{laborTotal.toLocaleString()}</span>
