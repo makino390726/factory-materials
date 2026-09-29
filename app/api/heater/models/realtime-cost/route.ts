@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
-import {
-  calcLaborCostFromMinutes,
-  calcLaborIndirectFromLabor,
-  UNIT_LABOR_COST,
-  UNIT_MINUTES,
-} from '@/lib/line-part-labor-cost'
+import { quoteLaborFromStMinutes } from '@/lib/line-part-labor-cost'
 import {
   getSavedModelRealtimeCost,
   saveModelRealtimeCost,
@@ -163,9 +158,7 @@ function toCandidate(
     spec_key: string
   }
 ): RealtimeCostCandidate {
-  const minutes = Math.round(resolved.minutes)
-  const laborCost = calcLaborCostFromMinutes(minutes)
-  const indirectCost = calcLaborIndirectFromLabor(laborCost, resolved.fiscal_year)
+  const quote = quoteLaborFromStMinutes(resolved.minutes, resolved.fiscal_year)
   const specKey = resolved.spec_key || ''
   const specNote = specKey ? `出庫伝票の${formatSpecLabel(specKey)}区分で集計` : null
   return {
@@ -175,12 +168,12 @@ function toCandidate(
     target_name: targetName,
     fiscal_year: resolved.fiscal_year,
     fiscal_year_label: formatFiscalYearLabel(resolved.fiscal_year),
-    st_minutes: minutes,
-    labor_cost: laborCost,
-    indirect_cost: indirectCost,
-    model_labor_total: laborCost + indirectCost,
+    st_minutes: quote.st_minutes,
+    labor_cost: quote.labor_cost,
+    indirect_cost: quote.indirect_cost,
+    model_labor_total: quote.labor_cost + quote.indirect_cost,
     annual_completed_qty: Number(resolved.summary.annual_completed_qty || 0),
-    formula: `(${minutes}分 ÷ ${UNIT_MINUTES}) × ¥${UNIT_LABOR_COST.toLocaleString('ja-JP')}`,
+    formula: quote.formula,
     relation,
     relation_label: relationLabel(relation),
     spec_key: specKey,
@@ -431,23 +424,17 @@ export async function GET(request: NextRequest) {
       listRealtimeCostCandidates(model),
       getSavedModelRealtimeCost(supabase, model),
     ])
-    if (candidates.length === 0 && !saved) {
-      return NextResponse.json(
-        {
-          error: `機種 ${model} に関連する工程管理対象で、平均STがあるものがありません`,
-          model,
-          candidates: [],
-          saved: null,
-        },
-        { status: 404 }
-      )
-    }
+    const hasMatchingAverageSt = candidates.some((row) => row.relation !== 'other')
 
     return NextResponse.json({
       model,
       display_only: false,
       candidates,
       saved,
+      manual_entry: !hasMatchingAverageSt,
+      notice: hasMatchingAverageSt
+        ? null
+        : `機種 ${model} に該当する平均STがありません。平均ST（分/台）を入力すると工費と工費間接費に反映できます。`,
     })
   } catch (error) {
     console.error('realtime-cost GET error:', error)

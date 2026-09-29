@@ -7,7 +7,7 @@ import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
 import { formatFiscalYearLabel, getCurrentFiscalYear, parseFiscalYearLabel } from '@/lib/fiscal-year'
 import { calcLaborIndirectFromLabor, laborIndirectRateForFiscalYear } from '@/lib/labor-indirect-rate'
-import { isLine900Series } from '@/lib/line-part-labor-cost'
+import { isLine900Series, quoteLaborFromStMinutes } from '@/lib/line-part-labor-cost'
 import {
   type BomGroupDefinition,
   UNCATEGORIZED_BOM_GROUP,
@@ -260,6 +260,9 @@ export default function WorkOrderCostPage() {
     }>
   >([])
   const [selectedRealtimeCostId, setSelectedRealtimeCostId] = useState<string | null>(null)
+  const [realtimeCostPanelOpen, setRealtimeCostPanelOpen] = useState(false)
+  const [realtimeCostNotice, setRealtimeCostNotice] = useState<string | null>(null)
+  const [manualStInput, setManualStInput] = useState('')
   const [realtimeCostSaving, setRealtimeCostSaving] = useState(false)
   const [realtimeCostPersisted, setRealtimeCostPersisted] = useState(false)
   const [realtimeCostInfo, setRealtimeCostInfo] = useState<{
@@ -401,6 +404,9 @@ export default function WorkOrderCostPage() {
       setRealtimeCostInfo(null)
       setRealtimeCostCandidates([])
       setSelectedRealtimeCostId(null)
+      setRealtimeCostPanelOpen(false)
+      setRealtimeCostNotice(null)
+      setManualStInput('')
       setRealtimeCostPersisted(false)
       return
     }
@@ -410,6 +416,9 @@ export default function WorkOrderCostPage() {
     setRealtimeCostInfo(null)
     setRealtimeCostCandidates([])
     setSelectedRealtimeCostId(null)
+    setRealtimeCostPanelOpen(false)
+    setRealtimeCostNotice(null)
+    setManualStInput('')
     setRealtimeCostPersisted(false)
     try {
       await loadModelBomGroupDefs(modelCode)
@@ -446,6 +455,9 @@ export default function WorkOrderCostPage() {
         const savedJson = await savedRes.json()
         if (savedRes.ok && savedJson?.saved) {
           applySavedRealtimeCost(savedJson.saved)
+          if (savedJson.saved.target_type === 'manual') {
+            setManualStInput(String(savedJson.saved.st_minutes || ''))
+          }
         }
       } catch {
         // 帳票用の保存値がなくても BOM 表示は継続
@@ -592,6 +604,12 @@ export default function WorkOrderCostPage() {
         ? json.candidates
         : []
       setRealtimeCostCandidates(candidates)
+      const hasMatchingAverageSt = candidates.some((c) => c.relation !== 'other')
+      setRealtimeCostPanelOpen(true)
+      setRealtimeCostNotice(hasMatchingAverageSt ? null : String(json.notice || '該当する平均STがありません。平均STを入力してください。'))
+      if (json.saved?.target_type === 'manual') {
+        setManualStInput(String(json.saved.st_minutes || ''))
+      }
       if (json.saved) {
         applySavedRealtimeCost(json.saved)
         const match = candidates.find(
@@ -600,17 +618,16 @@ export default function WorkOrderCostPage() {
             c.target_code === json.saved.target_code &&
             Number(c.st_minutes || 0) === Number(json.saved.st_minutes || 0)
         )
-        setSelectedRealtimeCostId(match?.id || null)
+        setSelectedRealtimeCostId(match?.id || (json.saved.target_type === 'manual' ? `manual:${selectedHeaterModel}` : null))
       } else {
         setSelectedRealtimeCostId(null)
         setRealtimeCostActive(false)
         setRealtimeCostInfo(null)
         setRealtimeCostPersisted(false)
       }
-      if (candidates.length === 0 && !json.saved) {
-        throw new Error('平均STがある工程管理対象がありません')
-      }
     } catch (e) {
+      setRealtimeCostPanelOpen(false)
+      setRealtimeCostNotice(null)
       setRealtimeCostActive(false)
       setRealtimeCostInfo(null)
       setRealtimeCostCandidates([])
@@ -620,11 +637,48 @@ export default function WorkOrderCostPage() {
     }
   }
 
+  const applyManualAverageSt = async () => {
+    if (!selectedHeaterModel) {
+      setPartsCostError('機種を選択してください')
+      return
+    }
+    const quote = quoteLaborFromStMinutes(Number(manualStInput), fiscalYear)
+    if (quote.st_minutes <= 0) {
+      setPartsCostError('平均ST（分/台）を入力してください')
+      return
+    }
+    const fiscalYearLabel = formatFiscalYearLabel(fiscalYear)
+    await applyRealtimeCostCandidate({
+      id: `manual:${selectedHeaterModel}:${quote.st_minutes}`,
+      target_type: 'manual',
+      target_code: selectedHeaterModel,
+      target_name: selectedHeaterModel,
+      fiscal_year_label: fiscalYearLabel,
+      st_minutes: quote.st_minutes,
+      labor_cost: quote.labor_cost,
+      indirect_cost: quote.indirect_cost,
+      annual_completed_qty: 0,
+      formula: quote.formula,
+      relation: 'manual',
+      relation_label: '手入力',
+      applied_label: `手入力 平均ST ${quote.st_minutes.toLocaleString('ja-JP')}分`,
+      note: `${fiscalYearLabel}の工費間接費率で算出（工程管理に該当する平均STがないため手入力）`,
+      work_groups: [],
+    })
+  }
+
   const clearRealtimeCost = () => {
     setRealtimeCostActive(false)
     setRealtimeCostInfo(null)
     setSelectedRealtimeCostId(null)
   }
+
+  const manualStQuote = quoteLaborFromStMinutes(Number(manualStInput), fiscalYear)
+  const manualIndirectPercent = Math.round(laborIndirectRateForFiscalYear(fiscalYear) * 100)
+  const modelHasOwnAverageSt = realtimeCostCandidates.some(
+    (candidate) => candidate.relation === 'self' && candidate.target_code === selectedHeaterModel
+  )
+  const showManualAverageSt = realtimeCostPanelOpen && !modelHasOwnAverageSt
 
   const displayModelBomParts = useMemo(() => {
     if (!realtimeCostActive || !realtimeCostInfo) return modelBomParts
@@ -3169,7 +3223,7 @@ export default function WorkOrderCostPage() {
                     disabled={realtimeCostLoading || partsCostLoading}
                     onClick={() => void handleApplyRealtimeCost()}
                     className="rounded-xl bg-amber-600 px-5 py-3 text-sm font-bold text-white hover:bg-amber-500 disabled:opacity-50"
-                    title="工程管理表で平均STがある対象を一覧し、選んだ1件を機種工費に適用します"
+                    title="工程管理表の平均STを機種工費に適用します。該当がなければ平均STを手入力できます"
                   >
                     {realtimeCostLoading ? '平均STを検索中…' : 'リアルタイム原価'}
                   </button>
@@ -3186,14 +3240,63 @@ export default function WorkOrderCostPage() {
                 )}
               </div>
 
-              {realtimeCostCandidates.length > 0 && (
+              {(realtimeCostPanelOpen || realtimeCostCandidates.length > 0) && (
                 <div className="rounded-2xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100 space-y-3">
+                  {realtimeCostCandidates.length > 0 && (
                   <div>
                     <p className="font-bold text-amber-200">平均STがある工程から選択</p>
                     <p className="mt-1 text-xs text-slate-400">
                       機種・関連D指令・ロット実績がある対象のうち、年平均STがあるものだけを表示します。行の「適用」で機種工費に反映し、原価帳票の機種別一覧にも保存されます。
                     </p>
                   </div>
+                  )}
+                  {showManualAverageSt && (
+                    <div className="rounded-xl border border-sky-500/40 bg-sky-950/40 px-3 py-3 space-y-3">
+                      <div>
+                        <p className="font-bold text-sky-100">平均STを手入力</p>
+                        <p className="mt-1 text-xs text-slate-300">
+                          {realtimeCostNotice ||
+                            '選択中の機種自体の平均STがありません。下の一覧は関連指令や別機種です。この機種の1台あたり平均ST（分）を入力すると、工費と工費間接費に反映します。'}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <label className="block text-xs text-slate-300">
+                          平均ST（分/台）
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            inputMode="decimal"
+                            value={manualStInput}
+                            onChange={(e) => setManualStInput(e.target.value)}
+                            placeholder="例: 960"
+                            className="mt-1 w-40 rounded-lg border border-sky-500/40 bg-slate-900 px-3 py-2 text-sm text-white"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void applyManualAverageSt()}
+                          disabled={realtimeCostSaving || manualStQuote.st_minutes <= 0}
+                          className="rounded-lg bg-sky-600 px-4 py-2 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50"
+                        >
+                          {realtimeCostSaving && selectedRealtimeCostId?.startsWith('manual:')
+                            ? '保存中…'
+                            : '工費に反映'}
+                        </button>
+                      </div>
+                      {manualStQuote.st_minutes > 0 && (
+                        <p className="text-xs text-sky-100/90">
+                          {formatFiscalYearLabel(fiscalYear)} 工費 {manualStQuote.formula}
+                          {' ＝ '}¥{manualStQuote.labor_cost.toLocaleString('ja-JP')}
+                          {' ／ 工費間接費 = 工費 × '}
+                          {manualIndirectPercent}%
+                          {' ＝ ¥'}
+                          {manualStQuote.indirect_cost.toLocaleString('ja-JP')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {realtimeCostCandidates.length > 0 && (
                   <div className="overflow-x-auto rounded-xl border border-amber-500/20">
                     <table className="min-w-full text-left text-xs">
                       <thead className="bg-amber-950/60 text-amber-100/80">
@@ -3278,6 +3381,7 @@ export default function WorkOrderCostPage() {
                       </tbody>
                     </table>
                   </div>
+                  )}
                   {realtimeCostActive && realtimeCostInfo && (
                     <div className="rounded-xl border border-amber-400/30 bg-slate-950/40 px-3 py-2">
                       <p className="font-bold text-amber-200">

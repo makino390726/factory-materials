@@ -83,6 +83,22 @@ export function calcLaborCostFromMinutes(minutes: number): number {
   return Math.round((minutes / UNIT_MINUTES) * UNIT_LABOR_COST)
 }
 
+/** 1台あたり平均ST（分）から工費・工費間接費を算出する */
+export function quoteLaborFromStMinutes(minutes: number, fiscalYear?: number | null) {
+  const stMinutes = Math.round(Number(minutes))
+  if (!Number.isFinite(stMinutes) || stMinutes <= 0) {
+    return { st_minutes: 0, labor_cost: 0, indirect_cost: 0, formula: '' }
+  }
+  const laborCost = calcLaborCostFromMinutes(stMinutes)
+  const indirectCost = calcLaborIndirectFromLabor(laborCost, fiscalYear)
+  return {
+    st_minutes: stMinutes,
+    labor_cost: laborCost,
+    indirect_cost: indirectCost,
+    formula: `(${stMinutes}分 ÷ ${UNIT_MINUTES}) × ¥${UNIT_LABOR_COST.toLocaleString('ja-JP')}`,
+  }
+}
+
 export function resolveLineDurationMinutes(line: LineRow): number {
   return Math.max(0, Number(line.standard_duration_minutes || 0))
 }
