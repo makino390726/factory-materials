@@ -7,6 +7,7 @@ import {
   repriceLine,
   usesNewCostMethod,
 } from '@/lib/fiscal-cost-method'
+import { listAnnualModelCosts } from '@/lib/heater-model-annual-cost'
 import {
   applyModelRealtimeOverlay,
   isLaborFeePartLabel,
@@ -184,6 +185,29 @@ function scaleItemsByBranchQty(items: ReportCostItem[], orderNo: string, branche
   })
 }
 
+/** L指令原価（ライン原価）が保存されている部品キー */
+async function loadSavedLinePartKeys() {
+  const keys = new Set<string>()
+  let from = 0
+  const pageSize = 1000
+  while (true) {
+    const { data, error } = await supabase
+      .from('work_order_cost_items')
+      .select('master_id')
+      .eq('master_type', 'ライン原価')
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    for (const row of data) {
+      const id = String(row.master_id || '').trim()
+      if (id) keys.add(id)
+    }
+    if (data.length < pageSize) break
+    from += pageSize
+  }
+  return keys
+}
+
 async function buildModelCostList(fiscalYear: number) {
   const { data: models, error: modelsError } = await supabase
     .from('heater_models')
@@ -247,6 +271,8 @@ async function buildModelCostList(fiscalYear: number) {
   const lineCostMap = await buildLinePartCostUnitMap(supabase, partKeys, partsFallbackMap)
   const nameByModel = new Map((models || []).map((m) => [String(m.model), String(m.name || '').trim()]))
 
+  const calculatedPartKeys = await loadSavedLinePartKeys()
+
   type Agg = {
     model: string
     display_name: string
@@ -255,6 +281,7 @@ async function buildModelCostList(fiscalYear: number) {
     indirect_cost: number
     total_cost: number
     part_count: number
+    calculated_part_count: number
     fee_labor_cost: number
     fee_indirect_cost: number
     has_labor_fee_row: boolean
@@ -274,6 +301,7 @@ async function buildModelCostList(fiscalYear: number) {
         indirect_cost: 0,
         total_cost: 0,
         part_count: 0,
+        calculated_part_count: 0,
         fee_labor_cost: 0,
         fee_indirect_cost: 0,
         has_labor_fee_row: false,
@@ -300,6 +328,7 @@ async function buildModelCostList(fiscalYear: number) {
     row.indirect_cost += priced.indirect * qty
     row.total_cost += priced.total * qty
     row.part_count += 1
+    if (calculatedPartKeys.has(item.part_key)) row.calculated_part_count += 1
     if (isLaborFeePartLabel(item.part_key, item.part_name, fallback?.part_name)) {
       row.has_labor_fee_row = true
       row.fee_labor_cost += priced.labor * qty
@@ -319,6 +348,7 @@ async function buildModelCostList(fiscalYear: number) {
       indirect_cost: 0,
       total_cost: 0,
       part_count: 0,
+      calculated_part_count: 0,
       fee_labor_cost: 0,
       fee_indirect_cost: 0,
       has_labor_fee_row: false,
@@ -326,12 +356,14 @@ async function buildModelCostList(fiscalYear: number) {
   }
 
   const savedRealtime = await listSavedModelRealtimeCosts(supabase)
+  const annualCosts = await listAnnualModelCosts(supabase, fiscalYear)
 
   return {
     fiscal_year: fiscalYear,
     rows: Array.from(map.values())
       .map((row) => {
         const saved = savedRealtime.get(row.model) || null
+        const annualSaved = annualCosts.has(row.model)
         const overlaid = saved
           ? applyModelRealtimeOverlay(
               {
@@ -357,6 +389,10 @@ async function buildModelCostList(fiscalYear: number) {
           total_cost: Math.round(shown.total_cost),
           realtime_applied: Boolean(saved),
           realtime_label: saved?.applied_label || null,
+          cost_calculated:
+            Boolean(saved) ||
+            annualSaved ||
+            (row.part_count > 0 && row.calculated_part_count >= row.part_count),
         }
       })
       .sort((a, b) => a.model.localeCompare(b.model, 'ja', { numeric: true })),
@@ -468,6 +504,7 @@ export async function GET(req: Request) {
         .map((row) => ({
           ...row,
           unit_cost: row.total_cost,
+          cost_calculated: true,
         }))
         .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))
 
@@ -646,6 +683,7 @@ export async function GET(req: Request) {
           labor_cost: priced.labor_cost,
           indirect_cost: priced.indirect_cost,
           total_cost: priced.total_cost,
+          cost_calculated: true,
         }
       })
       .sort((a, b) => a.order_no.localeCompare(b.order_no, 'ja-JP'))

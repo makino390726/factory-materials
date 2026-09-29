@@ -238,6 +238,19 @@ export default function Home() {
             <span className="text-emerald-300">製品パーツ計算</span>
           </p>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {/* D指令・L指令・機種別原価計算結果一覧 */}
+            <Link href="/work-orders/cost-reports" className="md:col-span-2 block">
+              <div className="group relative h-32 cursor-pointer">
+                <div className="absolute inset-0 bg-gradient-to-br from-red-600 to-red-800 rounded-2xl border-2 border-red-300 group-hover:border-red-100 group-hover:shadow-[0_0_28px_rgba(239,68,68,0.75)] transition-all duration-300" />
+                <div className="relative h-full flex flex-col items-center justify-center p-4 space-y-2">
+                  <div className="text-4xl">🖨️</div>
+                  <h3 className="text-center text-base sm:text-lg font-bold leading-snug text-white group-hover:text-red-50 transition">
+                    D指令・L指令・機種別原価計算結果一覧
+                  </h3>
+                </div>
+              </div>
+            </Link>
+
             {/* 製造計画・原価管理 */}
             <Link href="/heater/manufacturing-plan">
               <div className="group relative h-32 cursor-pointer">
@@ -315,19 +328,6 @@ export default function Home() {
                     商品コード別使用機種
                   </h3>
                   <p className="text-[10px] text-teal-200/70">部材統一・横断抽出</p>
-                </div>
-              </div>
-            </Link>
-
-            {/* 原価帳票印刷 */}
-            <Link href="/work-orders/cost-reports">
-              <div className="group relative h-32 cursor-pointer">
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/20 to-emerald-900/20 rounded-2xl border-2 border-emerald-400 group-hover:border-emerald-300 group-hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all duration-300" />
-                <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
-                  <div className="text-4xl">🖨️</div>
-                  <h3 className="text-lg font-bold text-emerald-300 group-hover:text-emerald-200 transition">
-                    原価帳票印刷
-                  </h3>
                 </div>
               </div>
             </Link>

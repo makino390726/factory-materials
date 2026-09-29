@@ -17,6 +17,7 @@ type CostReportRow = {
   labor_cost: number
   indirect_cost: number
   total_cost: number
+  cost_calculated?: boolean
 }
 
 type BomSummaryRow = {
@@ -39,6 +40,29 @@ type ModelReportRow = {
   total_cost: number
   realtime_applied?: boolean
   realtime_label?: string | null
+  cost_calculated?: boolean
+}
+
+function CalculatedMark({ title = '原価計算済' }: { title?: string }) {
+  return (
+    <span
+      title={title}
+      className="inline-flex items-center gap-0.5 rounded-full border border-emerald-400/50 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-200 print:border-emerald-700 print:bg-white print:text-emerald-800"
+    >
+      <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <path
+          d="M4.5 8.2 6.8 10.4 11.5 5.6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      計算済
+    </span>
+  )
 }
 
 const currency = (value: number) => `\u00a5${Math.round(value || 0).toLocaleString('ja-JP')}`
@@ -165,7 +189,7 @@ export default function CostReportsPage() {
               </span>
               <span className="text-sm text-slate-400">原価帳票出力</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white">原価帳票印刷</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold leading-snug text-white">D指令・L指令・機種別原価計算結果一覧</h1>
             <p className="mt-2 text-sm text-slate-400">出力帳票を選択してPDF印刷を実行します。</p>
           </div>
           <div className="flex items-center gap-3">
@@ -241,6 +265,7 @@ export default function CostReportsPage() {
                 {formulaLabel || '選択年度の算出方法で表示します。'}
                 工賃は各パーツの工賃（構成明細の工賃と、パーツに付いている制作工賃）を部品表の数量で足しています。
                 27年度以降の間接費は、パーツごとに材料費の5%と工賃の40%を計算してから合計します。
+                「計算済」は、構成パーツのL指令原価がすべて保存されているか、リアルタイム原価・本年原価を保存済みの機種です。
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -270,7 +295,18 @@ export default function CostReportsPage() {
                     return (
                       <tr key={row.model} className={baseRowClass}>
                         <td className="border-t border-slate-800 px-4 py-3 print:border-slate-200">
-                          <div className="font-semibold text-white print:text-slate-900">{row.display_name}</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-white print:text-slate-900">{row.display_name}</span>
+                            {row.cost_calculated && (
+                              <CalculatedMark
+                                title={
+                                  row.realtime_applied
+                                    ? 'リアルタイム原価を適用済み'
+                                    : '構成パーツのL指令原価を保存済み'
+                                }
+                              />
+                            )}
+                          </div>
                           {row.display_name !== row.model && (
                             <div className="mt-0.5 font-mono text-[11px] text-slate-500 print:text-slate-600">
                               {row.model}
@@ -394,6 +430,7 @@ export default function CostReportsPage() {
                 <p className="text-xs text-slate-400">
                   {formulaLabel || '選択年度の算出方法で表示します。'}
                   工賃は各明細・各パーツに入っている工賃を使います。
+                  「計算済」は原価を保存済みの{reportType === 'line' ? 'L指令' : 'D指令'}です。
                 </p>
               </div>
 
@@ -401,7 +438,7 @@ export default function CostReportsPage() {
                 <table className="min-w-full table-fixed text-sm print:text-xs">
                   <thead className="bg-slate-800 text-slate-300 print:bg-slate-100 print:text-slate-700">
                     <tr>
-                      <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">{firstColumnTitle}</th>
+                      <th className="w-[220px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">{firstColumnTitle}</th>
                       <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">製品名</th>
                       <th className="w-[200px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">規格</th>
                       <th className="w-[130px] border-b border-slate-700 px-4 py-3 text-left print:border-slate-300">区分</th>
@@ -431,7 +468,12 @@ export default function CostReportsPage() {
                       return (
                         <Fragment key={`${reportType}-${row.order_no}-${row.product_name}-${row.spec}`}>
                           <tr className={baseRowClass}>
-                            <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top font-semibold text-cyan-300 print:border-slate-200 print:text-slate-800">{row.order_no}</td>
+                            <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top font-semibold text-cyan-300 print:border-slate-200 print:text-slate-800">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>{row.order_no}</span>
+                                <CalculatedMark />
+                              </div>
+                            </td>
                             <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-200 print:border-slate-200 print:text-slate-800">{row.product_name || '—'}</td>
                             <td rowSpan={2} className="border-t border-slate-800 px-4 py-3 align-top text-slate-300 print:border-slate-200 print:text-slate-700">{row.spec || '—'}</td>
                             <td className="border-t border-slate-800 px-4 py-2 text-slate-300 print:border-slate-200 print:text-slate-700">1個当たり</td>
