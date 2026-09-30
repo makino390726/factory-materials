@@ -21,11 +21,27 @@ type StaffInfo = {
   work_group_code?: string | null
 }
 
+type LinePartAssignment = {
+  part_key: string
+  part_name?: string | null
+  branch_no?: string | null
+  bom_quantity?: number | null
+}
+
 type LineItem = {
   id: string
   line_code: string
   name: string
   is_active: boolean
+  part_assignments?: LinePartAssignment[]
+}
+
+type PartOutputForm = {
+  part_key: string
+  part_name: string
+  branch_no: string
+  required_qty: number
+  produced_qty: string
 }
 
 type WorkOrderOption = {
@@ -69,6 +85,7 @@ type WorkItem = {
   instruction_text: string
   line_id: string
   completed_qty: string
+  part_outputs: PartOutputForm[]
   model: string
   machine: string
   notes: string
@@ -92,6 +109,7 @@ const createItem = (): WorkItem => ({
   instruction_text: '',
   line_id: '',
   completed_qty: '',
+  part_outputs: [],
   model: '',
   machine: '',
   notes: '',
@@ -110,6 +128,40 @@ const toLocalDateInputValue = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const buildPartOutputs = (
+  line: LineItem | undefined,
+  existing: Array<{
+    part_key?: string
+    part_name?: string
+    branch_no?: string
+    required_qty?: number
+    produced_qty?: string | number | null
+  }> = []
+): PartOutputForm[] => {
+  const entered = new Map(
+    existing.map((row) => [String(row.part_key || ''), row.produced_qty == null ? '' : String(row.produced_qty)])
+  )
+  const assignments = line?.part_assignments || []
+  if (assignments.length === 0) {
+    return existing
+      .filter((row) => String(row.part_key || '').trim())
+      .map((row) => ({
+        part_key: String(row.part_key),
+        part_name: row.part_name || String(row.part_key),
+        branch_no: row.branch_no || '',
+        required_qty: Number(row.required_qty || 1) || 1,
+        produced_qty: entered.get(String(row.part_key)) ?? '',
+      }))
+  }
+  return assignments.map((assignment, index) => ({
+    part_key: assignment.part_key,
+    part_name: assignment.part_name || assignment.part_key,
+    branch_no: assignment.branch_no || `B${String(index + 1).padStart(2, '0')}`,
+    required_qty: Number(assignment.bom_quantity ?? 1) || 1,
+    produced_qty: entered.get(assignment.part_key) ?? '',
+  }))
 }
 
 const isSelectableWorkOrder = (order: WorkOrderOption) => {
@@ -478,16 +530,43 @@ export default function WorkReportsPage() {
         }
         if (key === 'line_id') {
           const lineId = value as string
+          const line = lines.find((candidate) => candidate.id === lineId)
           return {
             ...item,
             line_id: lineId,
             completed_qty: lineId ? item.completed_qty : '',
+            part_outputs: lineId ? buildPartOutputs(line, item.part_outputs) : [],
           }
         }
         return { ...item, [key]: value }
       })
     )
   }
+
+  const handlePartOutputChange = (itemId: string, partKey: string, value: string) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item
+        return {
+          ...item,
+          part_outputs: item.part_outputs.map((output) =>
+            output.part_key === partKey ? { ...output, produced_qty: value } : output
+          ),
+        }
+      })
+    )
+  }
+
+  useEffect(() => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (!item.line_id) return item
+        const line = lines.find((candidate) => candidate.id === item.line_id)
+        if (!line) return item
+        return { ...item, part_outputs: buildPartOutputs(line, item.part_outputs) }
+      })
+    )
+  }, [lines])
 
   const loadExistingReport = async (staffId: string, date: string) => {
     setIsLoading(true)
@@ -518,6 +597,10 @@ export default function WorkReportsPage() {
             item.completed_qty !== undefined && item.completed_qty !== null && item.completed_qty !== ''
               ? String(item.completed_qty)
               : '',
+          part_outputs: buildPartOutputs(
+            lines.find((line) => line.id === item.line_id),
+            Array.isArray((item as WorkItem).part_outputs) ? (item as WorkItem).part_outputs : []
+          ),
           model: item.model || '',
           machine: item.machine || '',
           notes: item.notes || '',
@@ -590,6 +673,14 @@ export default function WorkReportsPage() {
           instruction_text: item.instruction_text.trim(),
           line_id: item.line_id || null,
           completed_qty: item.line_id && item.completed_qty.trim() !== '' ? item.completed_qty.trim() : null,
+          part_outputs: item.line_id
+            ? item.part_outputs
+                .filter((output) => output.produced_qty.trim() !== '')
+                .map((output) => ({
+                  part_key: output.part_key,
+                  produced_qty: output.produced_qty.trim(),
+                }))
+            : [],
           model: item.model.trim(),
           machine: item.machine.trim(),
           notes: item.notes.trim(),
@@ -985,10 +1076,10 @@ export default function WorkReportsPage() {
                       </select>
                     </div>
                     {item.line_id ? (
-                      <div>
+                      <div className="sm:col-span-2">
                         <label className="text-sm font-bold text-slate-900">
                           今日の完成個数
-                          <span className="ml-1 text-xs font-normal text-slate-500">（任意）</span>
+                          <span className="ml-1 text-xs font-normal text-slate-500">（任意・組み上がった数）</span>
                         </label>
                         <input
                           type="number"
@@ -1002,6 +1093,46 @@ export default function WorkReportsPage() {
                           placeholder="完成工程のときだけ入力"
                           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                         />
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-sm font-bold text-slate-900">今日のパーツ制作数</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            作り置きはここに個数だけ入れます。作業時間はL指令の所要時間のままです。
+                          </p>
+                          {item.part_outputs.length === 0 ? (
+                            <p className="mt-2 text-xs text-slate-500">
+                              このL指令に構成パーツがありません。L指令マスタで登録すると入力できます。
+                            </p>
+                          ) : (
+                            <div className="mt-2 space-y-2">
+                              {item.part_outputs.map((output) => (
+                                <div
+                                  key={output.part_key}
+                                  className="grid grid-cols-[1fr_72px_96px] items-center gap-2"
+                                >
+                                  <div className="text-sm text-slate-800">
+                                    <span className="text-xs text-slate-500">{output.branch_no}</span>{' '}
+                                    {output.part_name}
+                                  </div>
+                                  <div className="text-right text-xs text-slate-500">
+                                    必要 {output.required_qty}
+                                  </div>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    inputMode="numeric"
+                                    value={output.produced_qty}
+                                    onChange={(event) =>
+                                      handlePartOutputChange(item.id, output.part_key, event.target.value)
+                                    }
+                                    placeholder="制作数"
+                                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm text-slate-900"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ) : null}
                     <div>
@@ -1284,7 +1415,7 @@ export default function WorkReportsPage() {
                       <li>• D指令は、作業日の会計年度（9/1〜翌8/31）の未完了一覧から選んでください。年度の切替操作は不要です。</li>
                       <li>• D指令 KR9-0001 は機種指令です。日報ではD指令として選べますが、工程管理表の入庫は「機種指令」で登録してください。</li>
                       <li>• L指令は事前にL指令マスタで登録します。</li>
-                      <li>• L指令を選んだ行では、今日の完成個数を入力できます。完成する工程のときだけ入力し、必須ではありません。D指令は制作台数が決まっているため不要です。</li>
+                      <li>• L指令を選んだ行では、今日の完成個数と、構成パーツごとの制作数を入力できます。どちらも任意です。作業時間はL指令の合計のままで、パーツごとの時間は入れません。</li>
                       <li>• 作業区分（直接・間接）の選択が必要です。</li>
                       <li>• 作業区分が「直接」の行は、D指令・L指令のいずれかも選択してください（直接費のため）。</li>
                       <li>• 作業区分が「間接」の行は、D指令・L指令は未入力でも保存できます。</li>

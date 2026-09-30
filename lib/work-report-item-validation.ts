@@ -36,6 +36,29 @@ export const WORK_TARGET_VALIDATION_MESSAGE =
 export const COMPLETED_QTY_VALIDATION_MESSAGE =
   '完成個数は0以上の整数で入力してください'
 
+export const PART_OUTPUT_QTY_VALIDATION_MESSAGE =
+  'パーツの制作数は0以上の整数で入力してください'
+
+export function parsePartOutputs(
+  value: unknown,
+  hasLine: boolean
+): Array<{ part_key: string; produced_qty: number }> {
+  if (!hasLine || !Array.isArray(value)) return []
+  const rows: Array<{ part_key: string; produced_qty: number }> = []
+  for (const row of value) {
+    const partKey = String((row as { part_key?: unknown })?.part_key || '').trim()
+    if (!partKey) continue
+    const raw = (row as { produced_qty?: unknown })?.produced_qty
+    if (raw === null || raw === undefined || raw === '') continue
+    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim())
+    if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+      throw new Error(PART_OUTPUT_QTY_VALIDATION_MESSAGE)
+    }
+    rows.push({ part_key: partKey, produced_qty: parsed })
+  }
+  return rows
+}
+
 /** L指令がある行だけ完成個数を受け付ける。未入力は null（任意） */
 export function parseOptionalCompletedQty(
   value: unknown,
@@ -55,6 +78,7 @@ export function validateWorkReportItem(item: {
   line_id?: unknown
   work_type?: unknown
   completed_qty?: unknown
+  part_outputs?: unknown
 }): string | null {
   if (!isDirectOrIndirectWorkType(item.work_type)) {
     return WORK_TYPE_VALIDATION_MESSAGE
@@ -75,6 +99,11 @@ export function validateWorkReportItem(item: {
     } catch (error) {
       return error instanceof Error ? error.message : COMPLETED_QTY_VALIDATION_MESSAGE
     }
+  }
+  try {
+    parsePartOutputs(item.part_outputs, Boolean(lineId))
+  } catch (error) {
+    return error instanceof Error ? error.message : PART_OUTPUT_QTY_VALIDATION_MESSAGE
   }
   return null
 }

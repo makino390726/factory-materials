@@ -14,6 +14,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const work_order_id = url.searchParams.get('work_order_id')
     const order_no = url.searchParams.get('order_no')
+    const fiscalYearRaw = url.searchParams.get('fiscal_year')
 
     let header: any = null
 
@@ -27,14 +28,28 @@ export async function GET(req: Request) {
         .limit(1)
       if (data && data.length > 0) header = data[0]
     } else if (order_no) {
-      const { data } = await supabase
+      let orderQuery = supabase
         .from('work_order_costs')
         .select('*')
         .eq('order_no', order_no)
         .order('updated_at', { ascending: false })
         .order('created_at', { ascending: false })
-        .limit(1)
-      if (data && data.length > 0) header = data[0]
+      if (fiscalYearRaw) {
+        orderQuery = orderQuery.eq('fiscal_year', Number(fiscalYearRaw))
+      }
+      const { data, error } = await orderQuery.limit(1)
+      if (error && fiscalYearRaw && String(error.message || '').includes('fiscal_year')) {
+        const fallback = await supabase
+          .from('work_order_costs')
+          .select('*')
+          .eq('order_no', order_no)
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+        if (fallback.data && fallback.data.length > 0) header = fallback.data[0]
+      } else if (data && data.length > 0) {
+        header = data[0]
+      }
     }
 
     if (!header) {
@@ -58,10 +73,68 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { order_no, work_order_id, header, items } = body
+    const { order_no, work_order_id, header, items, upsert_order_no } = body
 
-    if (!work_order_id && !order_no) {
+    if (!work_order_id && !order_no && !upsert_order_no) {
       return NextResponse.json({ error: 'work_order_id or order_no required' }, { status: 400 })
+    }
+
+    const mapItems = (costId: string, source: any[]) =>
+      source.map((it: any, idx: number) => ({
+        work_order_cost_id: costId,
+        line_no: it.line_no ?? idx + 1,
+        component_name: it.component_name ?? null,
+        product_code: it.product_code,
+        part_name: it.part_name,
+        spec: it.spec,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        material_cost: it.material_cost,
+        labor_cost: it.labor_cost,
+        indirect_cost: it.indirect_cost,
+        line_total: it.line_total,
+        cost_type: it.cost_type ?? '加',
+        master_type: it.master_type,
+        master_id: it.master_id,
+        part_key: it.part_key ?? null,
+      }))
+
+    if (upsert_order_no) {
+      const year = header?.fiscal_year
+      let existingQuery = supabase
+        .from('work_order_costs')
+        .select('*')
+        .eq('order_no', upsert_order_no)
+        .order('updated_at', { ascending: false })
+      if (year) existingQuery = existingQuery.eq('fiscal_year', year)
+      const existingResult = await existingQuery.limit(1)
+      const existingHeader = existingResult.data?.[0]
+      if (existingHeader) {
+        const { error: updateError } = await supabase
+          .from('work_order_costs')
+          .update(header)
+          .eq('id', existingHeader.id)
+        if (updateError) {
+          return NextResponse.json({ error: 'header update failed' }, { status: 500 })
+        }
+        const { data: previousItems } = await supabase
+          .from('work_order_cost_items')
+          .select('id')
+          .eq('work_order_cost_id', existingHeader.id)
+        if (Array.isArray(items) && items.length > 0) {
+          const { error: itemsError } = await supabase
+            .from('work_order_cost_items')
+            .insert(mapItems(existingHeader.id, items))
+          if (itemsError) {
+            return NextResponse.json({ error: itemsError.message || 'items insert failed' }, { status: 500 })
+          }
+        }
+        const previousIds = (previousItems || []).map((row: { id: string }) => row.id)
+        if (previousIds.length > 0) {
+          await supabase.from('work_order_cost_items').delete().in('id', previousIds)
+        }
+        return NextResponse.json({ success: true, id: existingHeader.id })
+      }
     }
 
     // ヘッダ作成
@@ -77,25 +150,9 @@ export async function POST(req: Request) {
     }
 
     if (Array.isArray(items) && items.length > 0) {
-      const itemsToInsert = items.map((it: any, idx: number) => ({
-        work_order_cost_id: createdHeader.id,
-        line_no: it.line_no ?? idx + 1,
-        component_name: it.component_name ?? null,
-        product_code: it.product_code,
-        part_name: it.part_name,
-        spec: it.spec,
-        quantity: it.quantity,
-        unit_price: it.unit_price,
-        material_cost: it.material_cost,
-        labor_cost: it.labor_cost,
-        indirect_cost: it.indirect_cost,
-        line_total: it.line_total,
-        cost_type: it.cost_type ?? '加',
-        master_type: it.master_type,
-        master_id: it.master_id
-      }))
-
-      const { error: itemsError } = await supabase.from('work_order_cost_items').insert(itemsToInsert)
+      const { error: itemsError } = await supabase
+        .from('work_order_cost_items')
+        .insert(mapItems(createdHeader.id, items))
       if (itemsError) {
         console.error('insert items error:', itemsError)
         return NextResponse.json({ error: 'items insert failed' }, { status: 500 })
@@ -167,7 +224,8 @@ export async function PUT(req: Request) {
         line_total: it.line_total,
         cost_type: it.cost_type ?? '加',
         master_type: it.master_type,
-        master_id: it.master_id
+        master_id: it.master_id,
+        part_key: it.part_key ?? null,
       }))
 
       const { error: itemsError } = await supabase.from('work_order_cost_items').insert(itemsToInsert)

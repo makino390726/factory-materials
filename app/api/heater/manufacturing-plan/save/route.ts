@@ -59,7 +59,21 @@ async function runLaborSyncAfterPlanSave(planId: string) {
   }
 }
 
-function summarizeLaborSync(labor_sync: Awaited<ReturnType<typeof runLaborSyncAfterPlanSave>>) {
+function summarizeLaborSync(
+  labor_sync: {
+    results?: Array<{
+      success?: boolean
+      skipped?: boolean
+      part_key?: string
+      line_code?: string
+      reason?: string
+    }>
+    total: number
+    success_count: number
+    skipped_count: number
+    failed_count: number
+  } | null
+) {
   if (!labor_sync) return null;
   const failures = (labor_sync.results || [])
     .filter((row: { success?: boolean; skipped?: boolean }) => !row.success && !row.skipped)

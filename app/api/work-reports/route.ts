@@ -9,6 +9,7 @@ import {
 } from '@/lib/work-report-time'
 import {
   parseOptionalCompletedQty,
+  parsePartOutputs,
   validateWorkReportItem,
 } from '@/lib/work-report-item-validation'
 import { getFiscalYearFromDate } from '@/lib/fiscal-year'
@@ -39,6 +40,7 @@ type WorkItemInput = {
   start_time?: string
   end_time?: string
   completed_qty?: number | string | null
+  part_outputs?: Array<{ part_key?: string; produced_qty?: number | string | null }>
 }
 
 type MachineTimeConfirmationInput = {
@@ -117,6 +119,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: itemError.message }, { status: 500 })
     }
 
+    const itemIds = (items || []).map((item) => item.id).filter(Boolean)
+    const outputsByItem = new Map<string, Array<{ part_key: string; produced_qty: number }>>()
+    if (itemIds.length > 0) {
+      const { data: outputs, error: outputError } = await supabase
+        .from('work_report_part_outputs')
+        .select('report_item_id, part_key, produced_qty')
+        .in('report_item_id', itemIds)
+      if (outputError && !String(outputError.message || '').includes('work_report_part_outputs')) {
+        console.error('Supabaseエラー:', outputError)
+        return NextResponse.json({ error: outputError.message }, { status: 500 })
+      }
+      for (const output of outputs || []) {
+        const itemId = String(output.report_item_id || '')
+        const list = outputsByItem.get(itemId) || []
+        list.push({
+          part_key: String(output.part_key || ''),
+          produced_qty: Number(output.produced_qty || 0),
+        })
+        outputsByItem.set(itemId, list)
+      }
+    }
+
     const { data: machineDurations, error: mdError } = await supabase
       .from('work_report_machine_durations')
       .select('machine, computed_duration_minutes, confirmed_duration_minutes')
@@ -130,7 +154,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       report,
-      items: items || [],
+      items: (items || []).map((item) => ({
+        ...item,
+        part_outputs: outputsByItem.get(String(item.id)) || [],
+      })),
       machine_durations: machineDurations || [],
     })
   } catch (error) {
@@ -193,6 +220,7 @@ export async function POST(request: NextRequest) {
     }
 
     let totalItemMinutes = 0
+    const partOutputsForItems: Array<Array<{ part_key: string; produced_qty: number }>> = []
     const normalizedItems = items.reduce<Array<Record<string, unknown>>>((acc, item) => {
       const hasRequiredFields = Boolean(
         item.work_type && item.start_time && item.end_time
@@ -234,6 +262,7 @@ export async function POST(request: NextRequest) {
       const lineId =
         typeof item.line_id === 'string' && item.line_id.trim() ? item.line_id.trim() : null
 
+      partOutputsForItems.push(parsePartOutputs(item.part_outputs, Boolean(lineId)))
       acc.push({
         is_support: item.is_support || false,
         support_work_group_code: item.support_work_group_code || null,
@@ -415,7 +444,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (normalizedItems.length > 0) {
-      const { error: itemInsertError } = await supabase
+      const { data: insertedItems, error: itemInsertError } = await supabase
         .from('work_report_items')
         .insert(
           normalizedItems.map((item) => ({
@@ -423,10 +452,39 @@ export async function POST(request: NextRequest) {
             ...item,
           }))
         )
+        .select('id')
 
       if (itemInsertError) {
         console.error('Supabaseエラー:', itemInsertError)
         return NextResponse.json({ error: itemInsertError.message }, { status: 500 })
+      }
+
+      const outputRows = (insertedItems || []).flatMap((row, index) => {
+        const lineId = normalizedItems[index]?.line_id
+        if (!lineId) return []
+        return (partOutputsForItems[index] || []).map((output) => ({
+          report_item_id: row.id,
+          line_id: lineId,
+          part_key: output.part_key,
+          produced_qty: output.produced_qty,
+        }))
+      })
+      if (outputRows.length > 0) {
+        const { error: outputError } = await supabase
+          .from('work_report_part_outputs')
+          .insert(outputRows)
+        if (outputError) {
+          console.error('Supabaseエラー:', outputError)
+          const missing = String(outputError.message || '').includes('work_report_part_outputs')
+          return NextResponse.json(
+            {
+              error: missing
+                ? 'パーツ制作数の保存には migrate-add-work-report-part-outputs.sql の実行が必要です'
+                : outputError.message,
+            },
+            { status: 500 }
+          )
+        }
       }
     }
 

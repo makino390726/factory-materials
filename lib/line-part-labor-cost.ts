@@ -16,7 +16,6 @@ export {
   LABOR_INDIRECT_RATE_FROM_REIWA9,
   laborIndirectRateForFiscalYear,
 }
-import { combineLineCostTotals, loadLineCostForPartYear } from '@/lib/line-cost-carryover'
 import {
   calcPerUnitDurationMinutes,
   getPlannedPartQuantity,
@@ -221,17 +220,12 @@ export async function buildLaborRecalcPreview(
   )
 }
 
-function buildLineOrderNo(partKey: string) {
-  const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
-  return `LINE-${partKey}-${timestamp}`
-}
-
 /** 1件のL指令パーツ割り当てについて労賃を再計算して保存 */
 export async function recalculateAssignmentLabor(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   assignment: LinePartAssignmentRow,
   line: LineRow,
-  options?: {
+  _options?: {
     planId?: string | null
     requireConfirmed?: boolean
     durationCache?: Map<string, { minutes: number; note: string | null }>
@@ -239,146 +233,20 @@ export async function recalculateAssignmentLabor(
     fiscalYear?: number
   }
 ): Promise<LaborRecalcResult> {
-  const fiscalYear = options?.fiscalYear ?? getCurrentFiscalYear()
-  const preview = await buildLaborRecalcPreview(
-    supabase,
-    assignment,
-    line,
-    options?.planId,
-    options?.durationCache,
-    options?.accumulation,
-    fiscalYear
-  )
-
-  if (options?.requireConfirmed && !assignment.settings_confirmed) {
-    return { ...preview, success: false, skipped: true, reason: '設定未確認' }
-  }
-
-  const hasQty = preview.uses_work_report
-    ? preview.completed_qty > 0
-    : preview.planned_part_qty > 0
-  if (!preview.per_unit_duration_minutes || !hasQty) {
-    return {
-      ...preview,
-      success: false,
-      skipped: true,
-      reason: preview.uses_work_report
-        ? '作業日報の所要時間または完成個数が未設定'
-        : '制作所要時間または製造計画部品数が未設定',
-    }
-  }
-
-  let bundle = await loadLineCostForPartYear(supabase, assignment.part_key, fiscalYear)
-  const currentYearHeader =
-    bundle?.header.id && Number(bundle.header.fiscal_year) === fiscalYear ? bundle : null
-  if (!currentYearHeader) {
-    const previous = await loadLineCostForPartYear(supabase, assignment.part_key, fiscalYear - 1)
-    if (previous?.items.length) bundle = previous
-  }
-  const existingItems = bundle?.items || []
-
-  const materialTotal = existingItems.reduce(
-    (sum, row) => sum + Number(row.material_cost || 0),
-    0
-  )
-  const materialIndirect = existingItems.reduce(
-    (sum, row) => sum + Number(row.indirect_cost || 0),
-    0
-  )
-  const itemLaborTotal = existingItems.reduce(
-    (sum, row) => sum + Number(row.labor_cost || 0),
-    0
-  )
-
-  const headerLabor = preview.per_unit_labor_cost
-  const totals = combineLineCostTotals({
-    material: materialTotal,
-    materialIndirect,
-    labor: headerLabor,
-    fiscalYear,
-  })
-  const totalCost = totals.total_cost + itemLaborTotal
-
-  const existingHeaderId =
-    currentYearHeader?.header.id ? String(currentYearHeader.header.id) : null
-
-  const headerPayload = {
-    total_material_cost: totals.total_material_cost,
-    total_labor_cost: totals.total_labor_cost,
-    total_indirect_cost: totals.total_indirect_cost,
-    total_cost: totalCost,
-    fiscal_year: fiscalYear,
-    updated_at: new Date().toISOString(),
-  }
-
-  if (existingHeaderId) {
-    const { error: updateHeaderError } = await supabase
-      .from('work_order_costs')
-      .update(headerPayload)
-      .eq('id', existingHeaderId)
-
-    if (updateHeaderError) throw updateHeaderError
-  } else {
-    const { data: created, error: insertHeaderError } = await supabase
-      .from('work_order_costs')
-      .insert({
-        order_no: buildLineOrderNo(assignment.part_key),
-        work_order_id: null,
-        ...headerPayload,
-      })
-      .select('id')
-      .single()
-
-    if (insertHeaderError) throw insertHeaderError
-
-    if (created?.id && existingItems.length > 0) {
-      const { error: insertItemsError } = await supabase.from('work_order_cost_items').insert(
-        existingItems.map((row, index) => ({
-          work_order_cost_id: created.id,
-          line_no: Number(row.line_no || index + 1),
-          component_name: row.component_name ?? null,
-          product_code: row.product_code ?? null,
-          part_name: row.part_name ?? null,
-          spec: row.spec ?? null,
-          quantity: row.quantity ?? 0,
-          unit_price: row.unit_price ?? 0,
-          material_cost: Math.round(Number(row.material_cost || 0)),
-          labor_cost: 0,
-          indirect_cost: Math.round(Number(row.indirect_cost || 0)),
-          line_total:
-            Math.round(Number(row.material_cost || 0)) + Math.round(Number(row.indirect_cost || 0)),
-          cost_type: row.cost_type || '加',
-          master_type: 'ライン原価',
-          master_id: assignment.part_key,
-          part_key: row.part_key || assignment.part_key,
-        }))
-      )
-      if (insertItemsError) throw insertItemsError
-    }
-  }
-
-  const { error: partUpdateError } = await supabase
-    .from('heater_parts_master')
-    .update({
-      cost_price: totalCost,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('part_key', assignment.part_key)
-
-  if (partUpdateError) throw partUpdateError
-
-  const now = new Date().toISOString()
-  const { error: assignmentUpdateError } = await supabase
-    .from('line_part_assignments')
-    .update({ labor_recalc_at: now, updated_at: now })
-    .eq('id', assignment.id)
-
-  if (assignmentUpdateError) throw assignmentUpdateError
-
   return {
-    ...preview,
-    success: true,
-    total_cost: totalCost,
+    part_key: assignment.part_key,
+    line_code: line.line_code,
+    common_group_label: assignment.common_group_label ?? null,
+    total_duration_minutes: 0,
+    planned_part_qty: 0,
+    completed_qty: 0,
+    per_unit_duration_minutes: null,
+    per_unit_labor_cost: 0,
+    per_unit_indirect_cost: 0,
+    settings_confirmed: Boolean(assignment.settings_confirmed),
+    success: false,
+    skipped: true,
+    reason: 'L指令の工費は日報の指令コード単位で全体計上するため、パーツ別には計算しません',
   }
 }
 

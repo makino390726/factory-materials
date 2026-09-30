@@ -1,13 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { bulkRecalculateConfirmedAssignments } from '@/lib/line-part-labor-cost'
 
-/** 製造計画保存後、確認済みの共通部品労賃按分を再計算する */
+/** L指令の工費は日報の指令コード単位で全体計上する。パーツ別の労賃按分は行わない。 */
 export async function syncConfirmedLaborFromManufacturingPlan(
-  supabase: SupabaseClient,
-  planId: string
+  _supabase: SupabaseClient,
+  _planId: string
 ) {
-  return bulkRecalculateConfirmedAssignments(supabase, {
-    planId,
-    onlyConfirmed: true,
-  })
+  return null
 }

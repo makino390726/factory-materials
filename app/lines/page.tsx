@@ -21,6 +21,9 @@ type LineItem = {
     id: string
     line_id: string
     part_key: string
+    branch_no?: string | null
+    part_name?: string | null
+    bom_quantity?: number | null
   }>
 }
 
@@ -31,7 +34,10 @@ type Part = {
 }
 
 type PartAssignment = {
+  branch_no: string
   part_key: string
+  part_name: string
+  bom_quantity: string
 }
 
 type MonthlyDurationHistory = {
@@ -422,11 +428,7 @@ export default function LinesPage() {
 
       const saved = await response.json()
       const lineId = editingId || saved.id
-
-      // 割り当てを保存
-      if (currentAssignments.length > 0 || (editingId && (lines.find((l) => l.id === editingId)?.part_assignments || []).length > 0)) {
-        await savePartAssignments(lineId)
-      }
+      await savePartAssignments(lineId, formData.line_code.trim())
 
       if (editingId && (monthlyEdits.length > 0 || deletedMonthlyMonths.size > 0)) {
         await saveMonthlyDurations(formData.line_code.trim())
@@ -451,70 +453,105 @@ export default function LinesPage() {
       is_active: line.is_active ?? true,
     })
     setCurrentAssignments(
-      (line.part_assignments || []).map((a) => ({
-        part_key: a.part_key,
+      (line.part_assignments || []).map((assignment, index) => ({
+        branch_no: assignment.branch_no || `B${String(index + 1).padStart(2, '0')}`,
+        part_key: assignment.part_key,
+        part_name:
+          assignment.part_name ||
+          parts.find((part) => part.part_key === assignment.part_key)?.part_name ||
+          '',
+        bom_quantity: String(assignment.bom_quantity ?? 1),
       }))
     )
     void loadMonthlyEdits(line.line_code)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleAddPartAssignment = () => {
+  const handleAddEmptyPart = () => {
+    setCurrentAssignments((prev) => [
+      ...prev,
+      {
+        branch_no: `B${String(prev.length + 1).padStart(2, '0')}`,
+        part_key: '',
+        part_name: '',
+        bom_quantity: '1',
+      },
+    ])
+  }
+
+  const handleAddPartFromMaster = () => {
     if (!newPartKey.trim()) {
       setError('部品キーを選択してください')
       return
     }
-
-    if (currentAssignments.some((a) => a.part_key === newPartKey)) {
+    if (currentAssignments.some((assignment) => assignment.part_key === newPartKey)) {
       setError('この部品キーは既に追加されています')
       return
     }
-
-    setCurrentAssignments([...currentAssignments, { part_key: newPartKey }])
+    const master = parts.find((part) => part.part_key === newPartKey)
+    setCurrentAssignments((prev) => [
+      ...prev,
+      {
+        branch_no: `B${String(prev.length + 1).padStart(2, '0')}`,
+        part_key: newPartKey,
+        part_name: master?.part_name || '',
+        bom_quantity: '1',
+      },
+    ])
     setNewPartKey('')
+    setError(null)
   }
 
-  const handleDeletePartAssignment = (partKey: string) => {
-    setCurrentAssignments(currentAssignments.filter((a) => a.part_key !== partKey))
+  const handlePartAssignmentChange = (
+    index: number,
+    key: keyof PartAssignment,
+    value: string
+  ) => {
+    setCurrentAssignments((prev) =>
+      prev.map((assignment, currentIndex) => {
+        if (currentIndex !== index) return assignment
+        const next = { ...assignment, [key]: value }
+        if (key === 'part_key') {
+          const master = parts.find((part) => part.part_key === value)
+          if (master && !assignment.part_name.trim()) {
+            next.part_name = master.part_name
+          }
+        }
+        return next
+      })
+    )
   }
 
-  const savePartAssignments = async (lineId: string) => {
-    try {
-      // 既存の割り当てを削除
-      const existingLine = lines.find((l) => l.id === lineId)
-      const existing = existingLine?.part_assignments || []
+  const handleDeletePartAssignment = (index: number) => {
+    setCurrentAssignments((prev) =>
+      prev
+        .filter((_, currentIndex) => currentIndex !== index)
+        .map((assignment, rowIndex) => ({
+          ...assignment,
+          branch_no: `B${String(rowIndex + 1).padStart(2, '0')}`,
+        }))
+    )
+  }
 
-      // 削除対象: 既存だが新規にない
-      for (const existing_a of existing) {
-        if (!currentAssignments.some((a) => a.part_key === existing_a.part_key)) {
-          const res = await fetch(
-            `/api/lines/${lineId}/part-assignments?part_key=${encodeURIComponent(existing_a.part_key)}`,
-            { method: 'DELETE' }
-          )
-          if (!res.ok) console.error('delete assignment failed', res.statusText)
-        }
-      }
-
-      // 追加・更新対象
-      for (const assignment of currentAssignments) {
-        const isNew = !existing.some((a) => a.part_key === assignment.part_key)
-
-        const res = await fetch(`/api/lines/${lineId}/part-assignments`, {
-          method: isNew ? 'POST' : 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            part_key: assignment.part_key,
-            ratio: 100,
-          }),
-        })
-
-        if (!res.ok) {
-          const result = await res.json()
-          console.error('assignment save failed:', result?.error || res.statusText)
-        }
-      }
-    } catch (err) {
-      console.error('part assignments save error:', err)
+  const savePartAssignments = async (lineId: string, lineCode: string) => {
+    const response = await fetch(`/api/lines/${lineId}/branches`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        line_code: lineCode,
+        parts: currentAssignments
+          .filter((assignment) => assignment.part_key.trim() || assignment.part_name.trim())
+          .map((assignment, index) => ({
+            branch_no: `B${String(index + 1).padStart(2, '0')}`,
+            part_key: assignment.part_key.trim(),
+            part_name: assignment.part_name.trim(),
+            bom_quantity: Number(assignment.bom_quantity || 1),
+          })),
+      }),
+    })
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}))
+      throw new Error(result?.error || '構成パーツの保存に失敗しました')
     }
   }
 
@@ -579,7 +616,7 @@ export default function LinesPage() {
         )}
 
         <div className="grid grid-cols-[500px_1fr] gap-6">
-          <div id="line-edit-form" className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit sticky top-8">
+          <div id="line-edit-form" className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit max-h-[calc(100vh-4rem)] overflow-y-auto sticky top-8">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
               {editingId ? 'L指令を編集' : '新しいL指令を追加'}
             </h2>
@@ -633,14 +670,14 @@ export default function LinesPage() {
               </div>
 
               <div className="border-t border-slate-200 pt-4">
-                <h3 className="text-sm font-semibold text-slate-900 mb-1">対象パーツ</h3>
+                <h3 className="text-sm font-semibold text-slate-900 mb-1">構成パーツ</h3>
                 <p className="mb-3 text-[11px] text-slate-500">
-                  原価画面でこのL指令を選んだときに表示するパーツです。材料費の年度繰越にも使います。
+                  D指令と同じく、このL指令を構成するパーツを登録します。日報はL指令コードだけなので、工費はパーツに分けず原価画面で指令全体として計算します。
                 </p>
                 <div className="space-y-3">
-                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-2">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">部品キー</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">部品マスタから追加</label>
                       <select
                         value={newPartKey}
                         onChange={(e) => setNewPartKey(e.target.value)}
@@ -655,47 +692,112 @@ export default function LinesPage() {
                             </option>
                           ))}
                       </select>
-                      <p className="mt-1 text-xs text-slate-500">部品件数: {parts.length}</p>
                     </div>
                     <div className="flex items-end">
                       <button
                         type="button"
-                        onClick={handleAddPartAssignment}
+                        onClick={handleAddPartFromMaster}
                         className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition"
                       >
                         追加
                       </button>
                     </div>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={handleAddEmptyPart}
+                        className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg transition"
+                      >
+                        空行
+                      </button>
+                    </div>
                   </div>
 
-                  {currentAssignments.length > 0 && (
-                    <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50">
-                          <tr>
-                            <th className="px-3 py-2 text-left font-medium text-slate-700">部品キー</th>
-                            <th className="px-3 py-2 text-center font-medium text-slate-700">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {currentAssignments.map((assignment) => (
-                            <tr key={assignment.part_key} className="border-t border-slate-100">
-                              <td className="px-3 py-2 text-slate-900">{assignment.part_key}</td>
-                              <td className="px-3 py-2 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeletePartAssignment(assignment.part_key)}
-                                  className="text-rose-600 hover:text-rose-700 text-xs font-medium"
-                                >
-                                  削除
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  {currentAssignments.length === 0 ? (
+                    <p className="text-sm text-slate-500">構成パーツはまだありません。</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {currentAssignments.map((assignment, index) => (
+                        <div
+                          key={`${assignment.branch_no}-${index}`}
+                          className="space-y-2 rounded-md border border-slate-200 bg-white p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-600">
+                              構成パーツ {index + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePartAssignment(index)}
+                              className="px-3 py-1 rounded-md bg-rose-100 hover:bg-rose-200 text-rose-700 text-xs font-medium"
+                            >
+                              削除
+                            </button>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">枝番</label>
+                            <input
+                              type="text"
+                              value={assignment.branch_no}
+                              onChange={(event) =>
+                                handlePartAssignmentChange(index, 'branch_no', event.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                              placeholder="B01"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">部品キー</label>
+                            <input
+                              type="text"
+                              value={assignment.part_key}
+                              onChange={(event) =>
+                                handlePartAssignmentChange(index, 'part_key', event.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                              placeholder="パーツマスタのキー。空欄なら自動採番"
+                              list="line-part-keys"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">構成パーツ名</label>
+                            <input
+                              type="text"
+                              value={assignment.part_name}
+                              onChange={(event) =>
+                                handlePartAssignmentChange(index, 'part_name', event.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                              placeholder="例: ギア"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              必要数（完成1個あたり）
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={assignment.bom_quantity}
+                              onChange={(event) =>
+                                handlePartAssignmentChange(index, 'bom_quantity', event.target.value)
+                              }
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                              placeholder="1"
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
+                  <datalist id="line-part-keys">
+                    {parts.map((part) => (
+                      <option key={part.id} value={part.part_key}>
+                        {part.part_name}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
@@ -894,6 +996,7 @@ export default function LinesPage() {
                   <tr>
                     <th className="py-3 px-3 font-semibold">コード</th>
                     <th className="py-3 px-3 font-semibold">L指令名</th>
+                    <th className="py-3 px-3 font-semibold">構成パーツ</th>
                     <th className="py-3 px-3 font-semibold">制作時間（{formatFiscalYearLabel(fiscalYear)}）</th>
                     <th className="py-3 px-3 font-semibold">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
                     <th className="py-3 px-3 font-semibold">有効</th>
@@ -903,7 +1006,7 @@ export default function LinesPage() {
                 <tbody className="text-black">
                   {lines.length === 0 && !isLoading ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-slate-400">
+                      <td colSpan={7} className="py-6 text-center text-slate-400">
                         L指令が未登録です
                       </td>
                     </tr>
@@ -914,6 +1017,11 @@ export default function LinesPage() {
                           {line.line_code}
                         </td>
                         <td className="py-3 px-3 text-black">{line.name}</td>
+                        <td className="py-3 px-3 text-black whitespace-nowrap">
+                          {(line.part_assignments || []).length > 0
+                            ? `${(line.part_assignments || []).length}件`
+                            : '—'}
+                        </td>
                         <td className="py-3 px-3 text-black whitespace-nowrap">
                           {(line.accumulated_duration_minutes || 0) > 0 ? (
                             <span className="inline-block rounded border border-sky-400/40 bg-sky-950 px-1.5 py-0.5 text-[11px] font-medium text-sky-100">
