@@ -556,7 +556,7 @@ export default function LinesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-sky-950 to-slate-950 relative overflow-hidden p-8">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-sky-950 to-slate-950 relative overflow-x-auto p-4 sm:p-6">
       <div className="absolute inset-0 opacity-10">
         <svg className="w-full h-full" viewBox="0 0 1200 800">
           <pattern id="circuit-line" x="0" y="0" width="220" height="220" patternUnits="userSpaceOnUse">
@@ -590,8 +590,8 @@ export default function LinesPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(760px,1.15fr)_1fr] gap-6">
-          <div id="line-edit-form" className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit max-h-[calc(100vh-4rem)] overflow-y-auto sticky top-8">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+          <div id="line-edit-form" className="min-w-0 bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur h-fit max-h-[calc(100vh-4rem)] overflow-y-auto sticky top-8">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
               {editingId ? 'L指令を編集' : '新しいL指令を追加'}
             </h2>
@@ -664,8 +664,8 @@ export default function LinesPage() {
                 {currentAssignments.length === 0 ? (
                   <p className="text-sm text-slate-500">パーツはまだありません。パーツ追加から登録してください。</p>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-[72px_1fr_1.4fr_72px_64px] gap-2 px-2 text-[11px] font-medium text-slate-500">
+                  <div className="space-y-2 overflow-x-auto">
+                    <div className="grid min-w-[32rem] grid-cols-[72px_1fr_1.4fr_72px_64px] gap-2 px-2 text-[11px] font-medium text-slate-500">
                       <span>枝番</span>
                       <span>部品キー</span>
                       <span>パーツ名</span>
@@ -675,7 +675,7 @@ export default function LinesPage() {
                     {currentAssignments.map((assignment, index) => (
                       <div
                         key={`${assignment.branch_no}-${index}`}
-                        className="grid grid-cols-[72px_1fr_1.4fr_72px_64px] gap-2 items-center rounded-md border border-slate-200 bg-white p-2"
+                        className="grid min-w-[32rem] grid-cols-[72px_1fr_1.4fr_72px_64px] gap-2 items-center rounded-md border border-slate-200 bg-white p-2"
                       >
                         <input
                           type="text"
@@ -852,7 +852,7 @@ export default function LinesPage() {
             </form>
           </div>
 
-          <div className="bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur">
+          <div className="min-w-0 bg-white/95 rounded-2xl shadow-xl border border-sky-100 p-6 backdrop-blur">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-slate-900">登録L指令一覧</h2>
               <div className="text-sm text-slate-500">
@@ -860,26 +860,26 @@ export default function LinesPage() {
               </div>
             </div>
 
-            <form onSubmit={handleSearchSubmit} className="mb-4 grid grid-cols-1 md:grid-cols-[160px_1fr_1fr_auto] gap-3 items-end">
+            <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-end gap-2">
               <FiscalYearSelect
                 value={fiscalYear}
                 onChange={setFiscalYear}
-                className="md:col-span-1"
+                className="w-40"
                 hint={false}
               />
               <input
                 type="text"
                 value={searchLineCode}
                 onChange={(event) => setSearchLineCode(event.target.value)}
-                placeholder="L指令コードで検索"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                placeholder="L指令コード"
+                className="w-36 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <input
                 type="text"
                 value={searchLineName}
                 onChange={(event) => setSearchLineName(event.target.value)}
-                placeholder="L指令名で検索（あいまい）"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                placeholder="L指令名"
+                className="w-40 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <div className="flex flex-wrap gap-2">
                 <button
@@ -929,13 +929,13 @@ export default function LinesPage() {
               <table className="w-full text-xs">
                 <thead className="text-left text-black sticky top-0 bg-white/95">
                   <tr>
-                    <th className="py-3 px-3 font-semibold">コード</th>
-                    <th className="py-3 px-3 font-semibold">L指令名</th>
-                    <th className="py-3 px-3 font-semibold">部品キー</th>
-                    <th className="py-3 px-3 font-semibold">制作時間（{formatFiscalYearLabel(fiscalYear)}）</th>
-                    <th className="py-3 px-3 font-semibold">完成個数（{formatFiscalYearLabel(fiscalYear)}）</th>
-                    <th className="py-3 px-3 font-semibold">有効</th>
-                    <th className="py-3 px-3 font-semibold">操作</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">コード</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">L指令名</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">部品キー</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">制作時間</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">完成個数</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">有効</th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap">操作</th>
                   </tr>
                 </thead>
                 <tbody className="text-black">
@@ -956,7 +956,7 @@ export default function LinesPage() {
                           {(line.part_assignments || []).length > 0 ? (
                             <div className="space-y-0.5">
                               {(line.part_assignments || []).map((assignment) => (
-                                <div key={assignment.id || assignment.part_key} className="whitespace-nowrap">
+                                <div key={assignment.id || assignment.part_key} className="break-all">
                                   {assignment.branch_no ? `${assignment.branch_no} ` : ''}
                                   {assignment.part_key}
                                   {assignment.part_name ? ` ${assignment.part_name}` : ''}
