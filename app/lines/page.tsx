@@ -296,7 +296,7 @@ export default function LinesPage() {
       params.set('fiscal_year', String(year))
 
       const query = params.toString()
-      const response = await fetch(`/api/lines${query ? `?${query}` : ''}`)
+      const response = await fetch(`/api/lines${query ? `?${query}` : ''}`, { cache: 'no-store' })
       if (!response.ok) throw new Error('Failed to fetch lines')
       const data = await response.json()
       setLines(data || [])
@@ -442,6 +442,24 @@ export default function LinesPage() {
     }
   }
 
+  const toPartAssignmentForm = (
+    assignment: {
+      branch_no?: string | null
+      part_key?: string | null
+      part_name?: string | null
+      bom_quantity?: number | null
+    },
+    index: number
+  ): PartAssignment => ({
+    branch_no: assignment.branch_no || `B${String(index + 1).padStart(2, '0')}`,
+    part_key: assignment.part_key || '',
+    part_name:
+      assignment.part_name ||
+      parts.find((part) => part.part_key === assignment.part_key)?.part_name ||
+      '',
+    bom_quantity: String(assignment.bom_quantity ?? 1),
+  })
+
   const handleEdit = (line: LineItem) => {
     setEditingId(line.id)
     setFormData({
@@ -450,19 +468,20 @@ export default function LinesPage() {
       sort_order: line.sort_order ?? 0,
       is_active: line.is_active ?? true,
     })
-    setCurrentAssignments(
-      (line.part_assignments || []).map((assignment, index) => ({
-        branch_no: assignment.branch_no || `B${String(index + 1).padStart(2, '0')}`,
-        part_key: assignment.part_key,
-        part_name:
-          assignment.part_name ||
-          parts.find((part) => part.part_key === assignment.part_key)?.part_name ||
-          '',
-        bom_quantity: String(assignment.bom_quantity ?? 1),
-      }))
-    )
+    setCurrentAssignments((line.part_assignments || []).map((assignment, index) => toPartAssignmentForm(assignment, index)))
     void loadMonthlyEdits(line.line_code)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+    void (async () => {
+      try {
+        const response = await fetch(`/api/lines/${line.id}/part-assignments`, { cache: 'no-store' })
+        if (!response.ok) return
+        const data = await response.json()
+        if (!Array.isArray(data)) return
+        setCurrentAssignments(data.map((assignment, index) => toPartAssignmentForm(assignment, index)))
+      } catch (loadError) {
+        console.error('part assignments reload error:', loadError)
+      }
+    })()
   }
 
   const handleAddEmptyPart = () => {
@@ -515,18 +534,21 @@ export default function LinesPage() {
       body: JSON.stringify({
         line_code: lineCode,
         parts: currentAssignments
-          .filter((assignment) => assignment.part_key.trim() || assignment.part_name.trim())
+          .filter((assignment) => (assignment.part_key || '').trim() || (assignment.part_name || '').trim())
           .map((assignment, index) => ({
             branch_no: `B${String(index + 1).padStart(2, '0')}`,
-            part_key: assignment.part_key.trim(),
-            part_name: assignment.part_name.trim(),
+            part_key: (assignment.part_key || '').trim(),
+            part_name: (assignment.part_name || '').trim(),
             bom_quantity: Number(assignment.bom_quantity || 1),
           })),
       }),
     })
+    const result = await response.json().catch(() => ({}))
     if (!response.ok) {
-      const result = await response.json().catch(() => ({}))
       throw new Error(result?.error || '構成パーツの保存に失敗しました')
+    }
+    if (result?.warning) {
+      window.alert(result.warning)
     }
   }
 

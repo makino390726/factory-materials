@@ -60,9 +60,14 @@ export async function GET(req: Request) {
 
         const accumulation = accumulations.get(line.id)
         
+        const partAssignments = [...(assignments || [])].sort((a, b) => {
+          const branch = String(a.branch_no || '').localeCompare(String(b.branch_no || ''), 'ja')
+          if (branch !== 0) return branch
+          return String(a.part_key || '').localeCompare(String(b.part_key || ''), 'ja')
+        })
         return {
           ...line,
-          part_assignments: assignments || [],
+          part_assignments: partAssignments,
           accumulated_duration_minutes: accumulation?.duration_minutes || 0,
           accumulated_completed_qty: accumulation?.completed_qty || 0,
         }
@@ -162,7 +167,9 @@ export async function PUT(req: Request) {
       name,
       sort_order: typeof sort_order === 'number' ? sort_order : 0,
       is_active: typeof is_active === 'boolean' ? is_active : true,
-      part_key: part_key || null,
+    }
+    if (part_key !== undefined) {
+      updatePayload.part_key = part_key || null
     }
     if (standard_duration_minutes !== undefined) {
       updatePayload.standard_duration_minutes = parseStandardDuration(standard_duration_minutes)

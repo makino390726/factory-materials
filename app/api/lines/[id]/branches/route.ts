@@ -20,8 +20,13 @@ function branchNoFor(index: number) {
   return `B${String(index + 1).padStart(2, '0')}`
 }
 
-function hasMissingColumnError(error: { message?: string } | null, column: string) {
-  return Boolean(error?.message && error.message.includes(column))
+function missingColumnName(error: { message?: string } | null): string | null {
+  const message = error?.message || ''
+  const schemaCache = message.match(/'([A-Za-z0-9_]+)' column/)
+  if (schemaCache) return schemaCache[1]
+  const postgres = message.match(/column "([A-Za-z0-9_]+)"/)
+  if (postgres) return postgres[1]
+  return null
 }
 
 /**
@@ -95,27 +100,42 @@ export async function PUT(
       }
     })
 
-    if (rows.length > 0) {
-      const upserted = await supabase
-        .from('line_part_assignments')
-        .upsert(rows, { onConflict: 'line_id,part_key' })
-        .select()
-      if (
-        upserted.error &&
-        (hasMissingColumnError(upserted.error, 'branch_no') ||
-          hasMissingColumnError(upserted.error, 'part_name') ||
-          hasMissingColumnError(upserted.error, 'bom_quantity'))
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              '構成パーツの列が未作成です。migrate-add-line-part-branch-fields.sql を実行してください。',
-          },
-          { status: 500 }
-        )
-      }
-      if (upserted.error) {
-        return NextResponse.json({ error: upserted.error.message }, { status: 500 })
+    let payload = rows.map((row) => ({ ...row }))
+    const strippedColumns: string[] = []
+    if (payload.length > 0) {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const upserted = await supabase
+          .from('line_part_assignments')
+          .upsert(payload, { onConflict: 'line_id,part_key' })
+          .select()
+        if (!upserted.error) break
+        const conflictMessage = upserted.error.message || ''
+        if (/ON CONFLICT|unique or exclusion|42P10/i.test(conflictMessage)) {
+          const removed = await supabase.from('line_part_assignments').delete().eq('line_id', lineId)
+          if (removed.error) {
+            console.error('line branches replace delete error:', removed.error)
+            return NextResponse.json({ error: removed.error.message }, { status: 500 })
+          }
+          const inserted = await supabase.from('line_part_assignments').insert(payload).select()
+          if (!inserted.error) break
+          console.error('line branches replace insert error:', inserted.error)
+          return NextResponse.json({ error: inserted.error.message }, { status: 500 })
+        }
+        const column = missingColumnName(upserted.error)
+        if (!column || column === 'line_id' || column === 'part_key' || !payload.some((row) => column in row)) {
+          console.error('line branches upsert error:', upserted.error)
+          return NextResponse.json({ error: upserted.error.message }, { status: 500 })
+        }
+        strippedColumns.push(column)
+        payload = payload.map((row) => {
+          const next = { ...row }
+          delete next[column as keyof typeof next]
+          return next
+        })
+        if (attempt === 11) {
+          console.error('line branches upsert error:', upserted.error)
+          return NextResponse.json({ error: upserted.error.message }, { status: 500 })
+        }
       }
     }
 
@@ -135,7 +155,15 @@ export async function PUT(
       }
     }
 
-    return NextResponse.json({ parts: rows })
+    const lostDetail = ['branch_no', 'part_name', 'bom_quantity'].filter((column) =>
+      strippedColumns.includes(column)
+    )
+    return NextResponse.json({
+      parts: payload,
+      warning: lostDetail.length
+        ? '部品キーは保存しました。部品名・必要数を残す列がデータベースに無いため、そこは保存できていません。Supabaseで migrate-add-line-part-branch-fields.sql を実行してください。'
+        : null,
+    })
   } catch (err) {
     console.error('line branches put error:', err)
     return NextResponse.json({ error: '構成パーツの保存に失敗しました' }, { status: 500 })
