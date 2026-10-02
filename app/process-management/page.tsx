@@ -138,6 +138,13 @@ const formatSt = (value: number | null) => {
   return `${value.toFixed(1)}分/台`
 }
 
+/** 表示中の作業グループ平均STを足した1台当たりST */
+function sumWorkGroupAverageSt(values: Array<number | null | undefined>) {
+  const minutes = values.filter((value): value is number => value != null && value > 0)
+  if (minutes.length === 0) return null
+  return Math.round(minutes.reduce((sum, value) => sum + value, 0) * 10) / 10
+}
+
 const formatVariation = (value: number | null) => {
   if (value === null) return '—'
   const sign = value > 0 ? '+' : ''
@@ -1496,63 +1503,125 @@ function ProcessManagementContent() {
                     </button>
                   ))}
                 </div>
-                <p className="text-sm text-slate-700 mb-4">
-                  {fiscalSpecKey === '__ALL__' ? '年間' : `${fiscalSpecKey || '規格なし'} `}
-                  制作台数:{' '}
-                  <span className="font-semibold">{displayedFiscalSummary.annual_completed_qty}台</span>
-                  {displayedFiscalSummary.annual_completed_qty <= 0 && (
-                    <span className="text-amber-700 ml-2">
-                      ※入庫ロットを登録すると平均STが算出されます
-                    </span>
-                  )}
-                </p>
-                <table className="min-w-full text-sm text-black">
-                  <thead className="text-left border-b border-slate-200">
-                    <tr>
-                      <th className="py-2 pr-4">作業グループ</th>
-                      <th className="py-2 pr-4">名称</th>
-                      <th className="py-2 pr-4 text-right">所要時間</th>
-                      <th className="py-2 pr-4 text-right">
-                        {displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF'
-                          ? '平均ST（UF=DF+UF）'
-                          : '平均ST'}
-                      </th>
-                      {(displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF') && (
-                        <>
-                          <th className="py-2 pr-4 text-right">DF基準</th>
-                          <th className="py-2 pr-4 text-right">UF差分</th>
-                        </>
-                      )}
-                      <th className="py-2 text-right">時間</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedFiscalSummary.rows.map((row) => (
-                      <tr key={row.work_group_code} className="border-t border-slate-100">
-                        <td className="py-3 pr-4 font-mono">{row.work_group_code}</td>
-                        <td className="py-3 pr-4">{row.work_group_name}</td>
-                        <td className="py-3 pr-4 text-right">{formatMinutes(row.total_minutes)}</td>
-                        <td className="py-3 pr-4 text-right font-semibold text-indigo-700">
-                          {formatSt(row.avg_st_minutes)}
-                        </td>
-                        {(displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF') && (
-                          <>
-                            <td className="py-3 pr-4 text-right text-slate-300">
-                              {formatSt(row.avg_st_df_base_minutes ?? null)}
+                {(() => {
+                  const showUfBreakdown =
+                    displayedFiscalSummary.uf_composed || fiscalSpecKey === 'UF'
+                  const unitStMinutes = sumWorkGroupAverageSt(
+                    displayedFiscalSummary.rows.map((row) => row.avg_st_minutes)
+                  )
+                  const unitStLabel =
+                    selectionMode === 'model' && modelCode
+                      ? `${modelCode} の1台当たりST`
+                      : '1台当たりST'
+                  return (
+                    <>
+                      <div className="mb-4 flex flex-wrap items-stretch gap-3">
+                        <div className="min-w-[14rem] rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                          <p className="text-xs font-semibold text-indigo-800">{unitStLabel}</p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-indigo-950">
+                            {formatSt(unitStMinutes)}
+                          </p>
+                          <p className="mt-1 text-xs text-indigo-700">
+                            表示中の作業グループ平均STの合計
+                          </p>
+                        </div>
+                        <p className="self-center text-sm text-slate-700">
+                          {fiscalSpecKey === '__ALL__' ? '年間' : `${fiscalSpecKey || '規格なし'} `}
+                          制作台数:{' '}
+                          <span className="font-semibold">
+                            {displayedFiscalSummary.annual_completed_qty}台
+                          </span>
+                          {displayedFiscalSummary.annual_completed_qty <= 0 && (
+                            <span className="ml-2 text-amber-700">
+                              ※入庫ロットを登録すると平均STが算出されます
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <table className="min-w-full text-sm text-black">
+                        <thead className="text-left border-b border-slate-200">
+                          <tr>
+                            <th className="py-2 pr-4">作業グループ</th>
+                            <th className="py-2 pr-4">名称</th>
+                            <th className="py-2 pr-4 text-right">所要時間</th>
+                            <th className="py-2 pr-4 text-right">
+                              {showUfBreakdown ? '平均ST（UF=DF+UF）' : '平均ST'}
+                            </th>
+                            {showUfBreakdown && (
+                              <>
+                                <th className="py-2 pr-4 text-right">DF基準</th>
+                                <th className="py-2 pr-4 text-right">UF差分</th>
+                              </>
+                            )}
+                            <th className="py-2 text-right">時間</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedFiscalSummary.rows.map((row) => (
+                            <tr key={row.work_group_code} className="border-t border-slate-100">
+                              <td className="py-3 pr-4 font-mono">{row.work_group_code}</td>
+                              <td className="py-3 pr-4">{row.work_group_name}</td>
+                              <td className="py-3 pr-4 text-right">
+                                {formatMinutes(row.total_minutes)}
+                              </td>
+                              <td className="py-3 pr-4 text-right font-semibold text-indigo-700">
+                                {formatSt(row.avg_st_minutes)}
+                              </td>
+                              {showUfBreakdown && (
+                                <>
+                                  <td className="py-3 pr-4 text-right text-slate-600">
+                                    {formatSt(row.avg_st_df_base_minutes ?? null)}
+                                  </td>
+                                  <td className="py-3 pr-4 text-right text-violet-700">
+                                    {formatSt(row.avg_st_uf_delta_minutes ?? null)}
+                                  </td>
+                                </>
+                              )}
+                              <td className="py-3 text-right text-slate-600">{row.duration_hours}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-indigo-200 bg-indigo-50 font-semibold">
+                            <td className="py-3 pr-4" colSpan={3}>
+                              {unitStLabel}（平均STの合計）
                             </td>
-                            <td className="py-3 pr-4 text-right text-violet-200">
-                              {formatSt(row.avg_st_uf_delta_minutes ?? null)}
+                            <td className="py-3 pr-4 text-right text-indigo-900">
+                              {formatSt(unitStMinutes)}
                             </td>
-                          </>
-                        )}
-                        <td className="py-3 text-right text-slate-600">{row.duration_hours}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {showUfBreakdown && (
+                              <>
+                                <td className="py-3 pr-4 text-right text-slate-700">
+                                  {formatSt(
+                                    sumWorkGroupAverageSt(
+                                      displayedFiscalSummary.rows.map(
+                                        (row) => row.avg_st_df_base_minutes
+                                      )
+                                    )
+                                  )}
+                                </td>
+                                <td className="py-3 pr-4 text-right text-violet-800">
+                                  {formatSt(
+                                    sumWorkGroupAverageSt(
+                                      displayedFiscalSummary.rows.map(
+                                        (row) => row.avg_st_uf_delta_minutes
+                                      )
+                                    )
+                                  )}
+                                </td>
+                              </>
+                            )}
+                            <td />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </>
+                  )
+                })()}
                 <p className="mt-3 text-xs text-slate-600">
                   平均ST = 所要時間 ÷ 制作台数（{displayedFiscalSummary.period_start} 〜{' '}
                   {displayedFiscalSummary.period_end}）。
+                  1台当たりSTは、表示中の各作業グループ平均STを足した値です。
                   DFが工程ベース、UFは DF＋UF差分（UF変更に要した時間）です。
                 </p>
               </>
