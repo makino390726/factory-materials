@@ -55,6 +55,8 @@ export default function WorkOrdersPage() {
   const [togglingExcludeId, setTogglingExcludeId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [instructionChoice, setInstructionChoice] = useState<{ id: string; orderNo: string } | null>(null)
+  const [choosingInstruction, setChoosingInstruction] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [sortColumn, setSortColumn] = useState<string>('order_no')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
@@ -561,7 +563,6 @@ export default function WorkOrdersPage() {
   }
 
   const resetForm = () => {
-    setSuccessMessage(null)
     setBranches([])
     setFormData({
       order_no: '',
@@ -645,9 +646,27 @@ export default function WorkOrdersPage() {
       }
 
       await fetchOrders()
-      if (branchSavedCount > 0) {
-        setSuccessMessage(`${editingId ? 'D指令を更新' : 'D指令を登録'}し、構成パーツ${branchSavedCount}件を保存しました`)
+      const progress = savedOrder?.instruction_progress
+      const orderNo = savedOrder?.order_no || formData.order_no.trim()
+      if (!editingId && progress?.needsChoice && savedOrder?.id) {
+        setInstructionChoice({ id: savedOrder.id, orderNo })
+        setSuccessMessage(`D指令 ${orderNo} を登録しました。番号の頭2文字から反映先を判断できないため、追加先を選んでください。`)
+      } else if (branchSavedCount > 0) {
+        setInstructionChoice(null)
+        setSuccessMessage(
+          `${editingId ? 'D指令を更新' : 'D指令を登録'}し、構成パーツ${branchSavedCount}件を保存しました${
+            !editingId && progress?.attached
+              ? `。${progress.lInstruction ? '製作の年度先頭（L指令）' : progress.docType}に追加しました`
+              : ''
+          }`
+        )
+      } else if (!editingId && progress?.attached) {
+        setInstructionChoice(null)
+        setSuccessMessage(
+          `D指令 ${orderNo} を登録し、${progress.lInstruction ? '製作の年度先頭（L指令）' : progress.docType}に追加しました`
+        )
       } else {
+        setInstructionChoice(null)
         setSuccessMessage(editingId ? 'D指令を更新しました' : 'D指令を登録しました')
       }
       resetForm()
@@ -737,6 +756,47 @@ export default function WorkOrdersPage() {
         {successMessage && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 text-emerald-700">
             {successMessage}
+          </div>
+        )}
+
+        {instructionChoice && (
+          <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
+            <p className="mb-3 text-sm">
+              {instructionChoice.orderNo} をどの一覧に追加しますか？ DR は製作、LR は L指令（製作の年度先頭）、KR は切替、RR は修理です。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(['製作', '切替', '修理'] as const).map((docType) => (
+                <button
+                  key={docType}
+                  type="button"
+                  disabled={choosingInstruction}
+                  onClick={async () => {
+                    setChoosingInstruction(true)
+                    setError(null)
+                    try {
+                      const response = await fetch('/api/work-instructions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ work_order_id: instructionChoice.id, doc_type: docType }),
+                      })
+                      const result = await response.json()
+                      if (!response.ok || !result?.attached) {
+                        throw new Error(result?.error || '反映先の登録に失敗しました')
+                      }
+                      setSuccessMessage(`D指令 ${instructionChoice.orderNo} を${docType}に追加しました`)
+                      setInstructionChoice(null)
+                    } catch (choiceError) {
+                      setError(choiceError instanceof Error ? choiceError.message : '反映先の登録に失敗しました')
+                    } finally {
+                      setChoosingInstruction(false)
+                    }
+                  }}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
+                >
+                  {docType}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

@@ -871,7 +871,7 @@ export default function WorkReportSummaryPage() {
                               )}
                               className="text-indigo-600 hover:underline text-xs font-medium"
                             >
-                              工程管理表
+                              出庫伝票処理
                             </Link>
                           </td>
                         </tr>

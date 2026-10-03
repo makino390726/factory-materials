@@ -4,6 +4,7 @@ import { getCurrentFiscalYear, parseFiscalYearParam, workOrderFiscalYearOrFilter
 import {
   calcAssemblyLaborFromMinutes,
 } from '@/lib/work-order-assembly-labor'
+import { attachWorkOrderToInstructionProgress, syncWorkOrderInstructionNumber } from '@/lib/work-instruction-progress'
 
 export const runtime = 'nodejs'
 
@@ -339,12 +340,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'D指令登録結果が取得できませんでした' }, { status: 500 })
     }
 
+    const instructionProgress = await attachWorkOrderToInstructionProgress(supabase, {
+      id: saved.id,
+      order_no: saved.order_no,
+      product_name: saved.product_name,
+      model: saved.model,
+      qty: saved.qty,
+      fiscal_year: saved.fiscal_year ?? normalizedFiscalYear,
+    })
+
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
       const syncResult = await syncWorkOrderBranchesFromBom(saved.id, normalizedBomModel)
-      return NextResponse.json({ ...saved, branch_sync: syncResult })
+      return NextResponse.json({ ...saved, branch_sync: syncResult, instruction_progress: instructionProgress })
     }
 
-    return NextResponse.json(saved)
+    return NextResponse.json({ ...saved, instruction_progress: instructionProgress })
   } catch (error) {
     console.error('D指令登録エラー:', error)
     return NextResponse.json({ error: 'D指令登録に失敗しました' }, { status: 500 })
@@ -477,6 +487,15 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: 'D指令更新結果が取得できませんでした' }, { status: 500 })
     }
 
+    await syncWorkOrderInstructionNumber(supabase, {
+      id: saved.id,
+      order_no: saved.order_no,
+      product_name: saved.product_name,
+      model: saved.model,
+      qty: saved.qty,
+      fiscal_year: saved.fiscal_year ?? normalizedFiscalYear,
+    })
+
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
       const syncResult = await syncWorkOrderBranchesFromBom(id, normalizedBomModel)
       return NextResponse.json({ ...saved, branch_sync: syncResult })
@@ -548,6 +567,12 @@ export async function DELETE(req: Request) {
     if (!id) {
       return NextResponse.json({ error: 'IDが必要です' }, { status: 400 })
     }
+
+    await supabase
+      .from('work_instruction_progress')
+      .delete()
+      .eq('work_order_id', id)
+      .eq('source', 'work_order')
 
     const { error } = await supabase.from('work_orders').delete().eq('id', id)
 

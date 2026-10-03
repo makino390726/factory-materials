@@ -174,7 +174,7 @@ export default function ProductionValuePage() {
               href="/process-management"
               className="rounded-xl border border-slate-600 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
             >
-              工程管理へ
+              出庫伝票処理へ
             </Link>
             <Link
               href="/"

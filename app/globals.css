@@ -268,6 +268,16 @@ input[type="number"] {
   textarea::placeholder {
     color: #94a3b8 !important;
   }
+
+  /* 製作指図書の進捗文字は、暗色テーマの白文字変換より優先して黒にする */
+  .wi-progress {
+    color: #000000 !important;
+  }
+
+  .wi-progress-head {
+    background-color: #e2e8f0 !important;
+    color: #000000 !important;
+  }
 }
 
 /* 印刷用スタイル */
