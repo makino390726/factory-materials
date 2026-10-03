@@ -331,15 +331,8 @@ export default function WorkInstructionsPage() {
         })
         const body = await res.json()
         if (!res.ok) {
-          const keys = Object.keys(optimistic) as Array<keyof ProgressRow>
-          setRows((current) =>
-            current.map((row) => {
-              if (row.id !== id || !snapshot) return row
-              const restored = { ...row }
-              for (const key of keys) restored[key] = snapshot[key]
-              return restored
-            })
-          )
+          const saved = snapshot
+          setRows((current) => current.map((row) => (row.id === id && saved ? saved : row)))
           setError(body.error || '更新に失敗しました')
           return
         }
@@ -355,15 +348,8 @@ export default function WorkInstructionsPage() {
           })
         )
       } catch {
-        const keys = Object.keys(optimistic) as Array<keyof ProgressRow>
-        setRows((current) =>
-          current.map((row) => {
-            if (row.id !== id || !snapshot) return row
-            const restored = { ...row }
-            for (const key of keys) restored[key] = snapshot[key]
-            return restored
-          })
-        )
+        const saved = snapshot
+        setRows((current) => current.map((row) => (row.id === id && saved ? saved : row)))
         setError('更新に失敗しました')
       } finally {
         setSavingId(null)
