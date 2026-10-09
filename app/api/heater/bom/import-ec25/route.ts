@@ -16,6 +16,7 @@ import {
   type Ec25WorkOrderDraft,
 } from '@/lib/ec25-cost-build'
 import { computeCostLineFromMasterUnitPrice } from '@/lib/work-order-cost-from-product-master'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 import { type UnfoldResult } from '@/lib/ec25-unfold'
 
 export const runtime = 'nodejs'
@@ -178,6 +179,7 @@ function costLinesForRow(row: Ec25AnalyzeRow) {
       quantity: elQty,
       labor_cost: 0,
       cost_type: '加',
+      fiscalYear: getCurrentFiscalYear(),
     })
     return {
       idx,

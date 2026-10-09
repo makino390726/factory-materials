@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { calcComponentIndirect } from '@/lib/fiscal-cost-method'
 
 const PAGE_SIZE = 1000
 const UPDATE_CHUNK = 10
 const IN_CHUNK = 200
 
-/** cost_type「加」: (材料+労務)×30%、それ以外: ×5%（bulk-apply-cost-all と同一） */
+/** 26年度以前。加は30%、それ以外は5%。27年度以降の計算は calcComponentIndirect を使う */
 export function indirectMultiplier(costType: string | null | undefined): number {
   return (costType || '加') === '加' ? 0.3 : 0.05
 }
@@ -14,6 +15,7 @@ export function computeCostLineFromMasterUnitPrice(params: {
   quantity: number | null
   labor_cost: number | null
   cost_type: string | null
+  fiscalYear?: number | null
 }): {
   unit_price: number
   material_cost: number
@@ -22,9 +24,13 @@ export function computeCostLineFromMasterUnitPrice(params: {
 } {
   const qty = Number(params.quantity || 0)
   const labor = Number(params.labor_cost || 0)
-  const mult = indirectMultiplier(params.cost_type)
   const material_cost = Math.round(qty * params.productCost)
-  const indirect_cost = Math.round((material_cost + labor) * mult)
+  const indirect_cost = calcComponentIndirect(
+    material_cost,
+    labor,
+    params.cost_type,
+    params.fiscalYear
+  )
   const line_total = material_cost + labor + indirect_cost
   return {
     unit_price: params.productCost,
@@ -132,6 +138,7 @@ export async function syncWorkOrderCostItemsForProductCodes(
   }
 
   const allItems: CostItemRow[] = []
+  const headerYearById = new Map<string, number | null>()
   for (let j = 0; j < codes.length; j += IN_CHUNK) {
     const codeSlice = codes.slice(j, j + IN_CHUNK)
     for (let offset = 0; ; offset += PAGE_SIZE) {
@@ -152,6 +159,24 @@ export async function syncWorkOrderCostItemsForProductCodes(
       const rows = (batch || []) as CostItemRow[]
       allItems.push(...rows)
       if (rows.length < PAGE_SIZE) break
+    }
+  }
+
+  const headerIds = Array.from(new Set(allItems.map((item) => item.work_order_cost_id).filter(Boolean)))
+  for (let i = 0; i < headerIds.length; i += IN_CHUNK) {
+    const chunk = headerIds.slice(i, i + IN_CHUNK)
+    const { data: headers, error: headerError } = await supabase
+      .from('work_order_costs')
+      .select('id, fiscal_year')
+      .in('id', chunk)
+    if (headerError) {
+      if (!String(headerError.message || '').includes('fiscal_year')) {
+        throw new Error(headerError.message)
+      }
+      break
+    }
+    for (const header of headers || []) {
+      headerYearById.set(String(header.id), header.fiscal_year == null ? null : Number(header.fiscal_year))
     }
   }
 
@@ -197,6 +222,7 @@ export async function syncWorkOrderCostItemsForProductCodes(
       quantity: item.quantity,
       labor_cost: item.labor_cost,
       cost_type: item.cost_type,
+      fiscalYear: headerYearById.get(item.work_order_cost_id),
     })
 
     toUpdate.push({

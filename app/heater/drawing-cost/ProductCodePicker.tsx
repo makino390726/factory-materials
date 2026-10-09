@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fuzzyScoreAgainstQuery, type MaterialMatch, type ProductCostRow } from '@/lib/ec25-material-match'
+import { MATERIAL_INDIRECT_FLAT_RATE } from '@/lib/fiscal-cost-method'
 import { hasExcludedLeading00 } from '@/lib/product-code'
 
 export type ProductPick = {
@@ -30,7 +31,7 @@ function yen(n: number) {
 
 function lineAmount(qty: number, price: number) {
   const material = Math.round(Number(qty || 0) * Number(price || 0))
-  return { material, total: material + Math.round(material * 0.3) }
+  return { material, total: material + Math.round(material * MATERIAL_INDIRECT_FLAT_RATE) }
 }
 
 function toPick(p: { product_code: string; name: string; spec?: string | null; cost_price?: number | null }): ProductPick {

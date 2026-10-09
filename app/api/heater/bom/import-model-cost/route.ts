@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 import { normalizeBomPartGroup, getDefaultBomGroupsForCategory } from '@/lib/heater-bom-part-group'
 import { inferProductCategory, normalizeProductCategory } from '@/lib/product-category'
+import { MATERIAL_INDIRECT_FLAT_RATE } from '@/lib/fiscal-cost-method'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 
 export const runtime = 'nodejs'
 
@@ -66,6 +68,11 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/** 原価ヘッダ・明細の金額列は整数（円）。Excel の小数は四捨五入して保存する */
+function toYen(value: unknown): number {
+  return Math.round(toNumber(value))
+}
+
 function normalizeGroups(
   data: Record<string, unknown>[],
   defaultModel: string,
@@ -113,10 +120,11 @@ function normalizeGroups(
     const unitPrice = toNumber(
       pickCell(raw, ['単価', '原価単価', 'unit_cost', 'unit_price', '仕入単価'])
     )
-    const materialCost = toNumber(pickCell(raw, ['材料費', 'material_cost', '材料']))
-    const laborCost = toNumber(pickCell(raw, ['工賃', '工費', 'labor_cost', 'labor']))
-    const indirectCost = toNumber(pickCell(raw, ['間接費', 'indirect_cost', '間接']))
-    // 合計欄は欠落・古い値のことがあるため、常にシステムで再計算する
+    const materialCost = toYen(pickCell(raw, ['材料費', 'material_cost', '材料']))
+    const laborCost = toYen(pickCell(raw, ['工賃', '工費', 'labor_cost', 'labor']))
+    // 取込時の間接費は材料費の5%に統一する。ファイルの間接費・合計は使わない。
+    // 工費の40%は取込後の新原価計算で工賃に掛ける。30%（加）は過去年度の表示用。
+    const indirectCost = Math.round(materialCost * MATERIAL_INDIRECT_FLAT_RATE)
     const lineTotal = materialCost + laborCost + indirectCost
 
     if (!model) {
@@ -196,14 +204,20 @@ function normalizeGroups(
  *
  * 列振り分け:
  * - パーツ一覧(BOM/パーツマスタ): 機種, パーツキー(部品キー), パーツ名, グループ(任意)  ※BOM数量は常に1
- * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃, 間接費
- * - 行合計は CSV の合計列を使わず、材料費+工賃+間接費で常に再計算する
+ * - 原価計算明細: 構成部品名, コード(製品コード), 品名(部品名), 規格, 数量, 単価, 材料費, 工賃
+ * - 間接費はファイルの値を使わず、材料費の5%（円未満は四捨五入）
+ * - 行合計は材料費＋工賃＋その間接費。工費間接費40%は年度の新原価計算側
  */
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
     const file = formData.get('file') as File | null
     const defaultModel = String(formData.get('model') || '').trim()
+    const importFiscalYear = Number(formData.get('fiscal_year'))
+    const fiscalYear =
+      Number.isFinite(importFiscalYear) && importFiscalYear >= 2000
+        ? Math.round(importFiscalYear)
+        : getCurrentFiscalYear()
 
     if (!file) {
       return NextResponse.json({ error: 'ファイルが見つかりません' }, { status: 400 })
@@ -444,6 +458,7 @@ export async function POST(req: Request) {
               total_labor_cost: totalLabor,
               total_indirect_cost: totalIndirect,
               total_cost: totalCost,
+              fiscal_year: fiscalYear,
             })
             .eq('id', workOrderCostId)
           if (headerUpdateError) throw headerUpdateError
@@ -458,6 +473,7 @@ export async function POST(req: Request) {
                 total_labor_cost: totalLabor,
                 total_indirect_cost: totalIndirect,
                 total_cost: totalCost,
+                fiscal_year: fiscalYear,
                 notes: `imported model-cost ${group.model}/${group.part_key}`,
               },
             ])

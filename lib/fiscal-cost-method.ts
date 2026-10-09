@@ -16,7 +16,11 @@ export function costMethodLabel(fiscalYear?: number | null): string {
   return '保存済みの原価（加工は材料費と工賃の合計の30%、それ以外は5%）'
 }
 
-/** 明細1行の間接費。27年度以降は材料×5%＋工賃×40%、それ以前は区分別の合算率 */
+/**
+ * 明細1行の間接費。
+ * 27年度以降は材料費の5%＋工賃の40%（区分は使わない）。
+ * 26年度以前は区分「加」が材料費と工賃の合計の30%、「直」が5%。30%は過去データを見るための計算。
+ */
 export function calcComponentIndirect(
   material: number,
   labor: number,

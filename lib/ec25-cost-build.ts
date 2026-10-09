@@ -7,6 +7,7 @@ import {
 import { lookupPdfPages, type Ec25PdfIndex } from '@/lib/ec25-drawing-match'
 import { heuristicUnfold, totalCostQty, type UnfoldResult } from '@/lib/ec25-unfold-core'
 import { computeCostLineFromMasterUnitPrice } from '@/lib/work-order-cost-from-product-master'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 
 export type Ec25AnalyzeRow = {
   part_key: string
@@ -77,6 +78,7 @@ export function buildAnalyzeRows(
         quantity: elQty,
         labor_cost: 0,
         cost_type: '加',
+        fiscalYear: getCurrentFiscalYear(),
       })
       materialCost += one.material_cost
       lineTotal += one.line_total

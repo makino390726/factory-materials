@@ -7,6 +7,7 @@ import { buildCsvRow, downloadCsv } from '@/lib/csv-utils'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
 import { formatFiscalYearLabel, getCurrentFiscalYear, parseFiscalYearLabel } from '@/lib/fiscal-year'
 import { calcLaborIndirectFromLabor, laborIndirectRateForFiscalYear } from '@/lib/labor-indirect-rate'
+import { calcComponentIndirect, usesNewCostMethod } from '@/lib/fiscal-cost-method'
 import { isLine900Series, quoteLaborFromStMinutes } from '@/lib/line-part-labor-cost'
 import {
   type BomGroupDefinition,
@@ -1141,6 +1142,7 @@ export default function WorkOrderCostPage() {
       const fd = new FormData()
       fd.append('file', modelCostImportFile)
       if (selectedHeaterModel) fd.append('model', selectedHeaterModel)
+      fd.append('fiscal_year', String(fiscalYear))
       const res = await fetch('/api/heater/bom/import-model-cost', {
         method: 'POST',
         body: fd,
@@ -2004,14 +2006,15 @@ export default function WorkOrderCostPage() {
 
         // 再計算ルール:
         // - 材料費 = round(数量 × 単価)
-        // - 間接費 = round((材料費 + 工賃) × (区分に応じた率))
-        const pct = updated.cost_type === '加' ? 0.3 : 0.05
+        // - 27年度以降の間接費 = 材料費×5% ＋ 工賃×40%
+        // - 26年度以前は加が (材料費+工賃)×30%、直が5%（過去データ用）
+        const indirectOf = (material: number, labor: number, costType: string) =>
+          calcComponentIndirect(material, labor, costType, fiscalYear)
 
-        // cost_type の変更時は現在の材料費/工賃合計で間接費を再計算
         if (key === 'cost_type') {
           const materialNum = toNumber(String(updated.material_cost))
           const laborNum = toNumber(String(updated.labor_cost))
-          const indirect = Math.round((materialNum + laborNum) * (value === '加' ? 0.3 : 0.05))
+          const indirect = indirectOf(materialNum, laborNum, value)
           return { ...updated, indirect_cost: String(indirect) }
         }
 
@@ -2030,17 +2033,18 @@ export default function WorkOrderCostPage() {
             const baseQty = oldQty > 0 ? oldQty : 1
             if (qtyNum < 0) return updated
             const ratio = qtyNum / baseQty
-            const scale = (amount: string) => String(Math.round(toNumber(amount) * ratio))
+            const materialScaled = Math.round(toNumber(row.material_cost) * ratio)
+            const laborScaled = Math.round(toNumber(row.labor_cost) * ratio)
             return {
               ...updated,
-              material_cost: scale(row.material_cost),
-              labor_cost: scale(row.labor_cost),
-              indirect_cost: scale(row.indirect_cost),
+              material_cost: String(materialScaled),
+              labor_cost: String(laborScaled),
+              indirect_cost: String(indirectOf(materialScaled, laborScaled, updated.cost_type)),
             }
           }
           const material = Math.round(qtyNum * priceNum)
           const laborNum = toNumber(String(updated.labor_cost))
-          const indirect = Math.round((material + laborNum) * pct)
+          const indirect = indirectOf(material, laborNum, updated.cost_type)
           return { ...updated, material_cost: String(material), indirect_cost: String(indirect) }
         }
 
@@ -2048,7 +2052,7 @@ export default function WorkOrderCostPage() {
         if (key === 'labor_cost' || key === 'material_cost') {
           const materialNum = toNumber(String(updated.material_cost))
           const laborNum = toNumber(String(updated.labor_cost))
-          const indirect = Math.round((materialNum + laborNum) * pct)
+          const indirect = indirectOf(materialNum, laborNum, updated.cost_type)
           return { ...updated, indirect_cost: String(indirect) }
         }
 
@@ -2068,7 +2072,12 @@ export default function WorkOrderCostPage() {
               unit_price: String(product.cost_price || 0),
               // recalc material & indirect when unit_price set from master
               material_cost: String(Math.round(toNumber(row.quantity) * toNumber(String(product.cost_price || 0)))),
-              indirect_cost: String(Math.round((Math.round(toNumber(row.quantity) * toNumber(String(product.cost_price || 0))) + toNumber(row.labor_cost)) * (row.cost_type === '加' ? 0.3 : 0.05))),
+              indirect_cost: String(calcComponentIndirect(
+                Math.round(toNumber(row.quantity) * toNumber(String(product.cost_price || 0))),
+                toNumber(row.labor_cost),
+                row.cost_type,
+                fiscalYear
+              )),
             }
           : row
       )
@@ -2187,7 +2196,7 @@ export default function WorkOrderCostPage() {
             const qtyNum = toNumber(row.quantity) || 1
             const priceNum = Number(partMatch.cost_price || 0)
             const material = Math.round(qtyNum * priceNum)
-            const indirect = Math.round((material + toNumber(row.labor_cost)) * (row.cost_type === '加' ? 0.3 : 0.05))
+            const indirect = calcComponentIndirect(material, toNumber(row.labor_cost), row.cost_type, fiscalYear)
             return {
               ...row,
               product_code: codeTrim,
@@ -2225,7 +2234,7 @@ export default function WorkOrderCostPage() {
           const qtyNum = toNumber(row.quantity)
           const priceNum = Number(exact.cost_price || 0)
           const material = Math.round(qtyNum * priceNum)
-          const indirect = Math.round((material + toNumber(row.labor_cost)) * (row.cost_type === '加' ? 0.3 : 0.05))
+          const indirect = calcComponentIndirect(material, toNumber(row.labor_cost), row.cost_type, fiscalYear)
           return {
             ...row,
             product_code: exact.product_code,
@@ -2410,8 +2419,11 @@ export default function WorkOrderCostPage() {
         }
 
         const material = Math.round(toNumber(row.quantity) * normalizedProductCost)
-        const indirect = Math.round(
-          (material + toNumber(row.labor_cost)) * (row.cost_type === '加' ? 0.3 : 0.05)
+        const indirect = calcComponentIndirect(
+          material,
+          toNumber(row.labor_cost),
+          row.cost_type,
+          fiscalYear
         )
 
         updatedCount += 1
@@ -3727,7 +3739,7 @@ export default function WorkOrderCostPage() {
                       {selectedHeaterModel ? '（機種列が空なら選択中の機種を使用）' : ''}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      原価計算欄: 構成部品名 / 製品コード / 部品名 / 規格 / 数量 / 単価 / 材料費 / 工賃 / 間接費（同一パーツキーの複数行＝明細）。行合計は材料費＋工賃＋間接費でシステム再計算（合計列はあっても無視）
+                      原価計算欄: 構成部品名 / 製品コード / 部品名 / 規格 / 数量 / 単価 / 材料費 / 工賃（同一パーツキーの複数行＝明細）。間接費は材料費の5%で取り込む（ファイルの間接費・合計は使わない）。工費の40%は取込後に工賃へ掛ける。加の30%は26年度以前の過去データ用
                     </p>
                   </div>
                   <button
@@ -4840,6 +4852,11 @@ export default function WorkOrderCostPage() {
                         <select
                           value={row.cost_type}
                           onChange={(e) => handlePartChange(row.id, 'cost_type', e.target.value)}
+                          title={
+                            usesNewCostMethod(fiscalYear)
+                              ? '27年度以降の材料間接費は区分に関係なく材料費の5%です。加の30%は26年度以前の過去データ用です。'
+                              : '加は材料費と工賃の合計の30%、直は5%です（過去データの間接費）。'
+                          }
                           className="w-20 rounded-lg border-2 border-slate-600 bg-slate-800 text-slate-100 px-2 py-2 font-medium shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-500/50 focus:outline-none"
                         >
                           <option value="加">加</option>

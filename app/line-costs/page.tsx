@@ -1,6 +1,8 @@
 "use client"
 import React, { useEffect, useState } from "react"
 import Link from 'next/link'
+import { calcComponentIndirect } from '@/lib/fiscal-cost-method'
+import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 
 type WorkOrder = { id: string; order_no?: string; name?: string }
 type Row = {
@@ -146,8 +148,7 @@ export default function LineCostPage() {
   const computeRow = (r: Row): Row => {
     const material = round((r.quantity || 0) * (r.unit_price || 0))
     const labor = round(r.labor || 0)
-    const rate = r.cost_type === '加' ? 0.3 : 0.05
-    const indirect = round((material + labor) * rate)
+    const indirect = calcComponentIndirect(material, labor, r.cost_type, getCurrentFiscalYear())
     const total = material + labor + indirect
     return { ...r, material_cost: material, labor, indirect_cost: indirect, total }
   }

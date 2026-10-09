@@ -7,6 +7,7 @@ import type { UnfoldResult } from '@/lib/ec25-unfold-core'
 import { lookupPdfPages, type Ec25PdfIndex, type Ec25PdfPageHit } from '@/lib/ec25-drawing-match'
 import type { Ec25ParsedPart } from '@/lib/ec25-drawing-bom'
 import ProductCodePicker, { type ProductPick } from '@/app/heater/drawing-cost/ProductCodePicker'
+import { MATERIAL_INDIRECT_FLAT_RATE } from '@/lib/fiscal-cost-method'
 
 type AnalyzeResponse = {
   dry_run?: boolean
@@ -109,7 +110,7 @@ export default function DrawingCostPage() {
   ) => {
     const elQty = costQtyForElement(el, index, costQty, kind)
     const material = Math.round(elQty * Number(el.unit_price || 0))
-    return { qty: elQty, material, total: material + Math.round(material * 0.3) }
+    return { qty: elQty, material, total: material + Math.round(material * MATERIAL_INDIRECT_FLAT_RATE) }
   }
 
   const rebuildRow = (row: Ec25AnalyzeRow, patch: Partial<Ec25AnalyzeRow>): Ec25AnalyzeRow => {
@@ -124,7 +125,7 @@ export default function DrawingCostPage() {
       const elQty = costQtyForElement(el, i, qty, next.kind)
       const m = Math.round(elQty * Number(el.unit_price || 0))
       material += m
-      total += m + Math.round(m * 0.3)
+      total += m + Math.round(m * MATERIAL_INDIRECT_FLAT_RATE)
     }
     next.material_cost = material
     next.line_total = total

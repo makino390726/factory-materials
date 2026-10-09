@@ -205,6 +205,7 @@ export async function POST(req: Request) {
         quantity: item.quantity,
         labor_cost: item.labor_cost,
         cost_type: item.cost_type,
+        fiscalYear: headerYearById.get(item.work_order_cost_id),
       })
 
       toUpdate.push({
