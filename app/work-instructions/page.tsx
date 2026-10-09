@@ -561,14 +561,14 @@ export default function WorkInstructionsPage() {
                         <button
                           type="button"
                           disabled={savingId === row.id}
-                          title={shop.completed ? '完了' : shop.assigned ? '担当' : '未割当'}
+                          title={shop.completed ? '着手' : shop.assigned ? '担当' : '未割当'}
                           onClick={() => {
                             const next = shops.map((item) => (item.code === shop.code ? nextShop(item) : item))
                             void patchRow(row.id, { shops: next }, { shops: next })
                           }}
                           className={`h-7 w-12 rounded border text-[10px] font-semibold ${shopClass(shop)}`}
                         >
-                          {shop.completed ? '完了' : shop.assigned ? '担当' : ''}
+                          {shop.completed ? '着手' : shop.assigned ? '担当' : ''}
                         </button>
                       </td>
                     ))}
