@@ -278,6 +278,49 @@ input[type="number"] {
     background-color: #e2e8f0 !important;
     color: #000000 !important;
   }
+
+  .wi-sheet th,
+  .wi-sheet td {
+    overflow: hidden;
+  }
+
+  .wi-cat {
+    white-space: nowrap;
+  }
+
+  /* 日付入力の固有幅で表が画面外にはみ出さないようにする */
+  .wi-date-slot {
+    width: 0;
+    min-width: 100%;
+  }
+
+  input.wi-date {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 10px;
+  }
+
+  input.wi-date::-webkit-datetime-edit {
+    padding: 0;
+  }
+
+  input.wi-date::-webkit-calendar-picker-indicator {
+    margin: 0;
+    padding: 0;
+  }
+
+  /* 発生日が空のときは mm/dd/yyyy を出さず、カレンダーだけ残す */
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit,
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit-fields-wrapper,
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit-text,
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit-month-field,
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit-day-field,
+  input.wi-date.is-empty:not(:focus)::-webkit-datetime-edit-year-field {
+    color: transparent !important;
+  }
 }
 
 /* 印刷用スタイル */

@@ -365,7 +365,7 @@ export default function Home() {
                 <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-2">
                   <div className="text-4xl">📈</div>
                   <h3 className="text-lg font-bold text-indigo-300 group-hover:text-indigo-200 transition">
-                    出庫伝票処理
+                    入庫伝票処理
                   </h3>
                 </div>
               </div>

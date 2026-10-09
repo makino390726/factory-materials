@@ -858,9 +858,9 @@ function ProcessManagementContent() {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
           <div>
-            <p className="text-indigo-200 text-sm uppercase tracking-[0.3em]">Outbound Slips</p>
+            <p className="text-indigo-200 text-sm uppercase tracking-[0.3em]">Inbound Slips</p>
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-violet-300 to-purple-300">
-              出庫伝票処理
+              入庫伝票処理
             </h1>
             <p className="text-slate-300 text-sm mt-2">
               L指令 / D指令 / 機種指令の3通りから選択。機種指令では入庫対象の指令番号を選び、そのロットの作業グループ別実績を表示します。

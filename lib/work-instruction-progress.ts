@@ -95,6 +95,7 @@ export function normalizeInstructionShops(value: unknown): InstructionShop[] {
 export function isMissingInstructionProgressTable(error: { message?: string; code?: string } | null | undefined) {
   const message = String(error?.message || '')
   const code = String(error?.code || '')
+  if (/column /i.test(message)) return false
   return (
     code === '42P01' ||
     code === 'PGRST205' ||
@@ -217,4 +218,23 @@ export async function syncWorkOrderInstructionNumber(
   }
   if ((data || []).length > 0) return attachResult(order.order_no, { attached: true, needsChoice: false, docType: resolved })
   return attachResult(order.order_no, { attached: false, needsChoice: false, docType: resolved })
+}
+
+/** 空欄は解除。Googleドライブ / Googleドキュメントの https リンクだけ通す。 */
+export function parseDrivePdfUrl(value: unknown): { url: string | null; error?: string } {
+  const text = String(value ?? '').trim()
+  if (!text) return { url: null }
+  const withScheme = /^https?:\/\//i.test(text) ? text : `https://${text}`
+  let parsed: URL
+  try {
+    parsed = new URL(withScheme)
+  } catch {
+    return { url: null, error: 'GoogleドライブのPDFリンクを入力してください' }
+  }
+  if (parsed.protocol !== 'https:') return { url: null, error: 'https のリンクを入力してください' }
+  const host = parsed.hostname.replace(/^www\./, '')
+  if (host !== 'drive.google.com' && host !== 'docs.google.com') {
+    return { url: null, error: 'GoogleドライブのPDFリンクを入力してください' }
+  }
+  return { url: parsed.toString() }
 }

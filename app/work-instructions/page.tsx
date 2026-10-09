@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
-import { formatDInstructionNo, INSTRUCTION_SHOPS, isLInstructionOrderNo, type InstructionShop } from '@/lib/work-instruction-progress'
+import { formatDInstructionNo, INSTRUCTION_SHOPS, isLInstructionOrderNo, parseDrivePdfUrl, type InstructionShop } from '@/lib/work-instruction-progress'
 
 type DocType = '製作' | '切替' | '修理'
 
@@ -27,23 +28,35 @@ type ProgressRow = {
   wish_text: string | null
   planned_qty: number | null
   partial_qty: number | null
+  occurred_on: string | null
+  elapsed_months: number | null
   completed_on: string | null
   serial_no: string | null
   receipt_posted: boolean
   comment: string | null
   received_order_no: string | null
+  pdf_url: string | null
   shops: InstructionShop[]
   source: string
 }
 
 const DOC_TYPES: DocType[] = ['製作', '切替', '修理']
 
+const CATEGORIES = ['たばこ', '暖房機', '食品', '作業機', '青'] as const
+
 const CATEGORY_COLOR: Record<string, string> = {
   たばこ: 'bg-blue-600',
-  食品: 'bg-fuchsia-500',
   暖房機: 'bg-orange-500',
+  食品: 'bg-fuchsia-500',
   作業機: 'bg-red-600',
   青: 'bg-sky-500',
+}
+
+function nextCategory(current: string | null) {
+  const index = CATEGORIES.indexOf(current as (typeof CATEGORIES)[number])
+  if (index < 0) return CATEGORIES[0]
+  if (index >= CATEGORIES.length - 1) return null
+  return CATEGORIES[index + 1]
 }
 
 function todayIso() {
@@ -187,6 +200,7 @@ function CellInput({
   align = 'left',
   widthClass,
   overdue = false,
+  previewOnHover = false,
   onCommit,
 }: {
   value: string
@@ -194,30 +208,90 @@ function CellInput({
   align?: 'left' | 'right'
   widthClass: string
   overdue?: boolean
+  previewOnHover?: boolean
   onCommit: (value: string) => void
 }) {
   const [draft, setDraft] = useState(value)
+  const [tip, setTip] = useState<{ x: number; y: number; above: boolean } | null>(null)
 
   useEffect(() => {
     setDraft(value)
   }, [value])
 
   return (
-    <input
-      value={draft}
-      title={title}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        if (draft !== value) onCommit(draft)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
-      }}
-      className={`rounded border bg-white px-1 py-1 text-xs ${widthClass} ${
-        align === 'right' ? 'text-right' : 'text-left'
-      } ${overdue ? 'border-rose-400 font-semibold text-rose-700' : 'border-slate-300'}`}
-    />
+    <>
+      <input
+        value={draft}
+        title={previewOnHover ? undefined : title}
+        onChange={(event) => setDraft(event.target.value)}
+        onMouseEnter={(event) => {
+          if (!previewOnHover || !draft) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const above = rect.bottom + 72 > window.innerHeight
+          setTip({ x: rect.left, y: above ? rect.top - 4 : rect.bottom + 4, above })
+        }}
+        onMouseLeave={() => setTip(null)}
+        onBlur={() => {
+          setTip(null)
+          if (draft !== value) onCommit(draft)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+        className={`rounded border bg-white px-1 py-1 text-[10px] ${widthClass} ${
+          align === 'right' ? 'text-right' : 'text-left'
+        } ${overdue ? 'border-rose-400 font-semibold text-rose-700' : 'border-slate-300'}`}
+      />
+      {previewOnHover && tip && draft && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed z-[80] max-w-sm whitespace-pre-wrap rounded bg-slate-900 px-2 py-1 text-left text-xs leading-snug text-white shadow-lg"
+              style={{
+                left: Math.max(8, Math.min(tip.x, window.innerWidth - 328)),
+                top: tip.y,
+                transform: tip.above ? 'translateY(-100%)' : undefined,
+              }}
+            >
+              {draft}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   )
+}
+
+const ROW_HEIGHT = 44
+const TABLE_COLUMNS = 10 + INSTRUCTION_SHOPS.length + 5
+
+function useVisibleSlice(rowCount: number, resetKey: string) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [slice, setSlice] = useState({ start: 0, end: 48 })
+
+  useEffect(() => {
+    scrollerRef.current?.scrollTo({ top: 0 })
+  }, [resetKey])
+
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const update = () => {
+      const overscan = 16
+      const start = Math.max(0, Math.floor(scroller.scrollTop / ROW_HEIGHT) - overscan)
+      const end = Math.min(rowCount, start + Math.ceil(scroller.clientHeight / ROW_HEIGHT) + overscan * 2)
+      setSlice((current) => (current.start === start && current.end === end ? current : { start, end }))
+    }
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(scroller)
+    return () => {
+      scroller.removeEventListener('scroll', update)
+      observer.disconnect()
+    }
+  }, [rowCount])
+
+  return { scrollerRef, start: slice.start, end: slice.end }
 }
 
 export default function WorkInstructionsPage() {
@@ -231,6 +305,10 @@ export default function WorkInstructionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [missingTable, setMissingTable] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [registering, setRegistering] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [pdfEditor, setPdfEditor] = useState<{ id: string; label: string; url: string } | null>(null)
+  const [pdfError, setPdfError] = useState<string | null>(null)
   const saveQueue = useRef(new Map<string, Promise<void>>())
 
   const load = useCallback(async () => {
@@ -308,6 +386,9 @@ export default function WorkInstructionsPage() {
     })
   }, [docType, masterPartByRow, parentBySort, query, rows])
 
+  const { scrollerRef, start, end } = useVisibleSlice(visibleRows.length, `${docType}:${fiscalYear}:${openOnly}:${query}`)
+  const windowRows = visibleRows.slice(start, end)
+
   const yearOptions = useMemo(() => {
     const current = getCurrentFiscalYear()
     return Array.from({ length: 6 }, (_, index) => current + 1 - index)
@@ -321,6 +402,11 @@ export default function WorkInstructionsPage() {
     })
     setError(null)
 
+    let finish: (message: string | null) => void = () => {}
+    const done = new Promise<string | null>((resolve) => {
+      finish = resolve
+    })
+
     const run = async () => {
       setSavingId(id)
       try {
@@ -333,7 +419,9 @@ export default function WorkInstructionsPage() {
         if (!res.ok) {
           const saved = snapshot
           setRows((current) => current.map((row) => (row.id === id && saved ? saved : row)))
-          setError(body.error || '更新に失敗しました')
+          const message = body.error || '更新に失敗しました'
+          setError(message)
+          finish(message)
           return
         }
         const keys = Object.keys(patch)
@@ -347,10 +435,12 @@ export default function WorkInstructionsPage() {
             return next
           })
         )
+        finish(null)
       } catch {
         const saved = snapshot
         setRows((current) => current.map((row) => (row.id === id && saved ? saved : row)))
         setError('更新に失敗しました')
+        finish('更新に失敗しました')
       } finally {
         setSavingId(null)
       }
@@ -359,27 +449,111 @@ export default function WorkInstructionsPage() {
     const previous = saveQueue.current.get(id) ?? Promise.resolve()
     const next = previous.then(run, run)
     saveQueue.current.set(id, next)
+    return done
+  }
+
+  async function registerNewYearL() {
+    const year = Number(fiscalYear)
+    if (!Number.isFinite(year)) return
+    setRegistering(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/work-instructions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register_l_master', fiscal_year: year }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error || 'L指令の新規登録に失敗しました')
+        return
+      }
+      await load()
+    } catch {
+      setError('L指令の新規登録に失敗しました')
+    } finally {
+      setRegistering(false)
+    }
+  }
+
+  async function deleteRow(row: ProgressRow) {
+    const label = row.product_name || productionInstructionNo(row)
+    const message =
+      row.parent_sort_no == null
+        ? `${label} と、その部品行を削除します。`
+        : `${label} を削除します。`
+    if (!window.confirm(message)) return
+    setSavingId(row.id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/work-instructions?id=${encodeURIComponent(row.id)}`, { method: 'DELETE' })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error || '削除に失敗しました')
+        return
+      }
+      setRows((current) =>
+        current.filter((item) => {
+          if (item.id === row.id) return false
+          if (row.parent_sort_no == null && row.sort_no != null && item.parent_sort_no === row.sort_no && item.fiscal_year === row.fiscal_year) {
+            return false
+          }
+          return true
+        })
+      )
+    } catch {
+      setError('削除に失敗しました')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function deleteRegisteredL() {
+    const year = Number(fiscalYear)
+    if (!Number.isFinite(year)) return
+    const count = rows.filter((row) => row.source === 'l_master' && row.fiscal_year === year).length
+    if (!count) return
+    if (!window.confirm(`${formatFiscalYearLabel(year)}のL指令登録 ${count}件をすべて削除します。削除後に新規登録からやり直せます。`)) return
+    setBulkDeleting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/work-instructions?scope=l_master&fiscal_year=${year}`, { method: 'DELETE' })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error || '一括削除に失敗しました')
+        return
+      }
+      setRows((current) => current.filter((row) => !(row.source === 'l_master' && row.fiscal_year === year)))
+    } catch {
+      setError('一括削除に失敗しました')
+    } finally {
+      setBulkDeleting(false)
+    }
   }
 
   const today = todayIso()
+  const selectedYear = Number(fiscalYear)
+  const canRegisterL = docType === '製作' && Number.isFinite(selectedYear) && selectedYear >= 2028
+  const showPartColumn = docType !== '修理'
+  const columnCount = TABLE_COLUMNS - (showPartColumn ? 0 : 1)
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto max-w-[1600px] px-4 py-6">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">
+    <div className="flex h-dvh max-h-dvh w-full min-w-0 flex-col overflow-hidden bg-slate-100 text-slate-900">
+      <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col px-2 py-2">
+        <div className="mb-1 flex shrink-0 flex-wrap items-end justify-between gap-2">
+          <div className="min-w-0">
+            <Link href="/" className="text-xs text-slate-500 hover:text-slate-800">
               ← メニュー
             </Link>
-            <h1 className="mt-1 text-2xl font-bold">製作指図書</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              製作の番号は、指図書と№を合わせたマスタの番号です。DR は製作、LR は L指令、KR は切替、RR は修理です。例は D令9 の № 14 が DR9-0014、K令9 の № 1 が KR9-0001 です。部品行のパーツコードは L指令マスタの部品キーです。例は L指令 800 の B01 が 800-01 です。L指令は年度当初の生産計画なので、LR 番号とその部品行をその年度の先頭に並べます。期限は日付か「適宜」などの文字です。黄色は割り当てた作業班、緑はその班の完了です。残台数は予定 − 分納です。
+            <h1 className="text-xl font-bold leading-tight">製作指図書</h1>
+            <p className="text-xs text-slate-600">
+              28年度以降は「L指令新規登録」でマスタから登録します。行の「削除」、または「一括削除」でやり直せます。
             </p>
           </div>
           <div className="text-sm text-slate-500">{loading ? '読込中' : `${visibleRows.length} 件`}</div>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-sm">
+        <div className="mb-1 flex shrink-0 flex-wrap items-center gap-2 rounded-xl bg-white px-2 py-2 shadow-sm">
           {DOC_TYPES.map((type) => (
             <button
               key={type}
@@ -407,6 +581,26 @@ export default function WorkInstructionsPage() {
               ))}
             </select>
           </label>
+          {canRegisterL && (
+            <button
+              type="button"
+              disabled={registering || bulkDeleting || loading}
+              onClick={() => void registerNewYearL()}
+              className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {registering ? '登録中' : 'L指令新規登録'}
+            </button>
+          )}
+          {canRegisterL && (
+            <button
+              type="button"
+              disabled={bulkDeleting || registering || loading || !rows.some((row) => row.source === 'l_master' && row.fiscal_year === selectedYear)}
+              onClick={() => void deleteRegisteredL()}
+              className="rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"
+            >
+              {bulkDeleting ? '削除中' : '一括削除'}
+            </button>
+          )}
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={openOnly} onChange={(event) => setOpenOnly(event.target.checked)} />
             未完了のみ
@@ -430,32 +624,64 @@ export default function WorkInstructionsPage() {
           </div>
         )}
 
-        <div className="overflow-auto rounded-xl bg-white shadow-sm">
-          <table className="min-w-[1400px] border-collapse text-xs">
+        <div ref={scrollerRef} className="min-h-0 min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto rounded-xl bg-white shadow-sm">
+          <table className="wi-sheet w-full table-fixed border-collapse text-[10px]">
+            <colgroup>
+              <col className="w-[4.1%]" />
+              <col className="w-[6.1%]" />
+              {showPartColumn ? <col className="w-[4.7%]" /> : null}
+              <col className="w-[14.5%]" />
+              <col className={showPartColumn ? 'w-[8.1%]' : 'w-[12.8%]'} />
+              <col className="w-[4.4%]" />
+              <col className="w-[5.6%]" />
+              <col className="w-[2.7%]" />
+              <col className="w-[2.7%]" />
+              <col className="w-[2.2%]" />
+              <col className="w-[7.2%]" />
+              <col className="w-[3.1%]" />
+              {INSTRUCTION_SHOPS.map((shop) => (
+                <col key={shop.code} className="w-[3.15%]" />
+              ))}
+              <col className="w-[4.1%]" />
+              <col className="w-[2.2%]" />
+              <col className="w-[3.1%]" />
+            </colgroup>
             <thead className="wi-progress-head sticky top-0">
               <tr>
-                <th className="px-2 py-2 text-left font-medium">区分</th>
-                <th className="px-2 py-2 text-left font-medium">{docType === '製作' ? 'D指令番号' : '指令番号'}</th>
-                <th className="px-2 py-2 text-left font-medium">パーツコード</th>
-                <th className="px-2 py-2 text-left font-medium">名称</th>
-                <th className="px-2 py-2 text-left font-medium">型式</th>
-                <th className="px-2 py-2 text-left font-medium">担当</th>
-                <th className="px-2 py-2 text-left font-medium">期限</th>
-                <th className="px-2 py-2 text-right font-medium">予定</th>
-                <th className="px-2 py-2 text-right font-medium">分納</th>
-                <th className="px-2 py-2 text-right font-medium">残</th>
+                <th className="px-1 py-1 text-left font-medium">区分</th>
+                <th className="px-1 py-1 text-left font-medium">{docType === '製作' ? 'D指令番号' : '指令番号'}</th>
+                {showPartColumn ? <th className="px-1 py-1 text-left font-medium">パーツ</th> : null}
+                <th className="px-1 py-1 text-left font-medium">名称</th>
+                <th className="px-1 py-1 text-left font-medium">{docType === '修理' ? '型式' : '規格'}</th>
+                <th className="px-1 py-1 text-left font-medium">担当</th>
+                <th className="px-1 py-1 text-left font-medium">期限</th>
+                <th className="px-1 py-1 text-right font-medium">予定</th>
+                <th className="px-1 py-1 text-right font-medium">分納</th>
+                <th className="px-1 py-1 text-right font-medium">残</th>
+                <th className="px-0.5 py-1 text-left font-medium">発生日</th>
+                <th className="px-0 py-1 text-center font-medium leading-tight" title="経過月数">
+                  <div>経過</div>
+                  <div className="font-normal">月数</div>
+                </th>
                 {INSTRUCTION_SHOPS.map((shop) => (
-                  <th key={shop.code} className="px-1 py-2 text-center font-medium">
-                    <div>{shop.code}</div>
-                    <div className="wi-progress font-normal">{shop.name}</div>
+                  <th key={shop.code} className="px-0 py-1 text-center text-[10px] font-medium leading-tight" title={shop.name}>
+                    <div className="whitespace-nowrap">{shop.code}</div>
+                    <div className="wi-progress whitespace-nowrap font-normal">{shop.name}</div>
                   </th>
                 ))}
-                <th className="px-2 py-2 text-left font-medium">完了</th>
-                <th className="px-2 py-2 text-center font-medium">入庫</th>
+                <th className="px-1 py-1 text-left font-medium">完了</th>
+                <th className="px-0.5 py-1 text-center font-medium">入庫</th>
+                <th className="px-0.5 py-1 text-center font-medium">削除</th>
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => {
+              {start > 0 && (
+                <tr aria-hidden>
+                  <td colSpan={columnCount} style={{ height: start * ROW_HEIGHT, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {windowRows.map((row) => {
+                const parent = row.parent_sort_no != null ? parentBySort.get(row.parent_sort_no) : undefined
                 const remain = remainingQty(row)
                 const overdue = Boolean(row.due_on && !row.completed_on && row.due_on < today)
                 const child = row.parent_sort_no != null
@@ -470,58 +696,108 @@ export default function WorkInstructionsPage() {
                 })
                 return (
                   <tr key={row.id} className={`border-t border-slate-100 ${child ? 'bg-slate-50' : 'bg-white'}`}>
-                    <td className="px-2 py-1">
-                      {row.category ? (
-                        <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
-                          {row.category}
-                        </span>
-                      ) : null}
+                    <td className="px-1 py-1">
+                      <button
+                        type="button"
+                        disabled={savingId === row.id}
+                        title={row.category ? `${row.category}。クリックで次の区分` : 'クリックで区分を付ける'}
+                        onClick={() => {
+                          const category = nextCategory(row.category)
+                          void patchRow(row.id, { category }, { category })
+                        }}
+                        className="inline-flex min-h-5 w-full items-center justify-center"
+                      >
+                        {row.category ? (
+                          <span className={`wi-cat inline-block max-w-full truncate rounded px-1 py-0.5 text-[10px] leading-none text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
+                            {row.category}
+                          </span>
+                        ) : null}
+                      </button>
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1 font-medium text-white">
-                      {productionInstructionNo(row, row.parent_sort_no != null ? parentBySort.get(row.parent_sort_no) : undefined)}
+                    <td className="truncate px-1 py-1 font-medium">
+                      <button
+                        type="button"
+                        title={(parent ?? row).pdf_url ? 'PDFリンクを変更' : 'GoogleドライブのPDFリンクを設定'}
+                        onClick={() => {
+                          const owner = parent ?? row
+                          setPdfError(null)
+                          setPdfEditor({
+                            id: owner.id,
+                            label: productionInstructionNo(row, parent),
+                            url: owner.pdf_url || '',
+                          })
+                        }}
+                        className={`block w-full truncate text-left text-white hover:underline ${(parent ?? row).pdf_url ? 'underline decoration-sky-400' : ''}`}
+                      >
+                        {productionInstructionNo(row, parent)}
+                      </button>
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1 font-medium text-white">
-                      {partCodeText(
-                        row,
-                        masterPartByRow.get(row.id),
-                        Boolean(lineParts[lineCodeFromRow(row)]?.length)
-                      )}
-                    </td>
-                    <td className={`px-1 py-1 ${child ? 'pl-4' : ''}`}>
+                    {showPartColumn ? (
+                      <td
+                        className="truncate px-1 py-1 font-medium text-white"
+                        title={partCodeText(
+                          row,
+                          masterPartByRow.get(row.id),
+                          Boolean(lineParts[lineCodeFromRow(row)]?.length)
+                        )}
+                      >
+                        {partCodeText(
+                          row,
+                          masterPartByRow.get(row.id),
+                          Boolean(lineParts[lineCodeFromRow(row)]?.length)
+                        )}
+                      </td>
+                    ) : null}
+                    <td className={`min-w-0 px-0.5 py-1 ${child ? 'pl-2' : ''}`}>
                       <CellInput
                         value={row.product_name || ''}
                         title="名称"
-                        widthClass={docType === '切替' ? 'w-56' : 'w-40'}
+                        widthClass="w-full min-w-0"
                         onCommit={(value) => {
                           const product_name = value.trim() || null
                           void patchRow(row.id, { product_name }, { product_name })
                         }}
                       />
                       {row.comment ? (
-                        <div className="max-w-56 truncate text-[10px] text-slate-400" title={row.comment}>
+                        <div className="truncate text-[10px] text-slate-400" title={row.comment}>
                           {row.comment}
                         </div>
                       ) : null}
                     </td>
-                    <td className="max-w-32 truncate px-2 py-1" title={row.model || ''}>
-                      {row.model}
+                    <td className="min-w-0 px-0.5 py-1">
+                      {docType === '修理' ? (
+                        <CellInput
+                          value={row.model || ''}
+                          title="型式"
+                          previewOnHover
+                          widthClass="w-full min-w-0"
+                          onCommit={(value) => {
+                            const model = value.trim() || null
+                            void patchRow(row.id, { model }, { model })
+                          }}
+                        />
+                      ) : (
+                        <span className="block truncate" title={row.model || ''}>
+                          {row.model}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-1 py-1">
+                    <td className="px-0.5 py-1">
                       <CellInput
                         value={row.assignee || ''}
                         title="担当"
-                        widthClass="w-20"
+                        widthClass="w-full min-w-0"
                         onCommit={(value) => {
                           const assignee = value.trim() || null
                           void patchRow(row.id, { assignee }, { assignee })
                         }}
                       />
                     </td>
-                    <td className="px-1 py-1">
+                    <td className="px-0.5 py-1">
                       <CellInput
                         value={dueDisplay(row)}
                         title={row.wish_text ? `完了希望: ${row.wish_text}` : '期限。日付または適宜などの文字'}
-                        widthClass="w-28"
+                        widthClass="w-full min-w-0"
                         overdue={overdue}
                         onCommit={(value) => {
                           const due = normalizeDueInput(value)
@@ -529,12 +805,12 @@ export default function WorkInstructionsPage() {
                         }}
                       />
                     </td>
-                    <td className="px-1 py-1 text-right">
+                    <td className="px-0.5 py-1 text-right">
                       <CellInput
                         value={qtyText(row.planned_qty)}
                         title="予定台数"
                         align="right"
-                        widthClass="w-16"
+                        widthClass="w-full min-w-0"
                         onCommit={(value) => {
                           const planned = value.trim() === '' ? null : Number(value)
                           if (planned != null && !Number.isFinite(planned)) return
@@ -542,12 +818,12 @@ export default function WorkInstructionsPage() {
                         }}
                       />
                     </td>
-                    <td className="px-1 py-1 text-right">
+                    <td className="px-0.5 py-1 text-right">
                       <CellInput
                         value={qtyText(row.partial_qty)}
                         title="分納台数"
                         align="right"
-                        widthClass="w-16"
+                        widthClass="w-full min-w-0"
                         onCommit={(value) => {
                           const partial = value.trim() === '' ? null : Number(value)
                           if (partial != null && !Number.isFinite(partial)) return
@@ -555,37 +831,72 @@ export default function WorkInstructionsPage() {
                         }}
                       />
                     </td>
-                    <td className="px-2 py-1 text-right">{remain == null ? '' : qtyText(remain)}</td>
+                    <td className="px-1 py-1 text-right">{remain == null ? '' : qtyText(remain)}</td>
+                    <td className="px-0.5 py-1">
+                      <div className="wi-date-slot">
+                        <input
+                          type="date"
+                          value={(row.occurred_on || '').slice(0, 10)}
+                          title="発生日"
+                          disabled={savingId === row.id}
+                          onChange={(event) => {
+                            const occurred_on = event.target.value || null
+                            const elapsed_months = occurred_on ? row.elapsed_months : null
+                            void patchRow(
+                              row.id,
+                              { occurred_on, elapsed_months },
+                              { occurred_on, elapsed_months },
+                            )
+                          }}
+                          className={`wi-date rounded border border-slate-300 bg-white px-0.5 py-0.5${row.occurred_on ? '' : ' is-empty'}`}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-0.5 py-1">
+                      <CellInput
+                        value={row.occurred_on && row.elapsed_months != null ? String(row.elapsed_months) : ''}
+                        title="経過月数"
+                        align="right"
+                        widthClass="w-full min-w-0"
+                        onCommit={(value) => {
+                          const elapsed = value.trim() === '' ? null : Number(value)
+                          if (elapsed != null && !Number.isFinite(elapsed)) return
+                          const elapsed_months = elapsed == null ? null : Math.round(elapsed)
+                          void patchRow(row.id, { elapsed_months }, { elapsed_months })
+                        }}
+                      />
+                    </td>
                     {shops.map((shop) => (
-                      <td key={shop.code} className="px-1 py-1 text-center">
+                      <td key={shop.code} className="px-0.5 py-1 text-center">
                         <button
                           type="button"
                           disabled={savingId === row.id}
-                          title={shop.completed ? '着手' : shop.assigned ? '担当' : '未割当'}
+                          title={`${shop.name}: ${shop.completed ? '着手' : shop.assigned ? '担当' : '未割当'}`}
                           onClick={() => {
                             const next = shops.map((item) => (item.code === shop.code ? nextShop(item) : item))
                             void patchRow(row.id, { shops: next }, { shops: next })
                           }}
-                          className={`h-7 w-12 rounded border text-[10px] font-semibold ${shopClass(shop)}`}
+                          className={`h-6 w-full rounded border text-[10px] font-semibold ${shopClass(shop)}`}
                         >
                           {shop.completed ? '着手' : shop.assigned ? '担当' : ''}
                         </button>
                       </td>
                     ))}
-                    <td className="whitespace-nowrap px-2 py-1">
+                    <td className="px-0.5 py-1">
                       <button
                         type="button"
                         disabled={savingId === row.id}
+                        title={row.completed_on || '完了にする'}
                         onClick={() => {
                           const next = row.completed_on ? null : today
                           void patchRow(row.id, { completed_on: next }, { completed_on: next })
                         }}
-                        className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50"
+                        className="w-full truncate rounded border border-slate-300 px-0.5 py-1 text-[10px] hover:bg-slate-50"
                       >
-                        {row.completed_on || '完了にする'}
+                        {row.completed_on ? row.completed_on.slice(5) : '完了'}
                       </button>
                     </td>
-                    <td className="px-2 py-1 text-center">
+                    <td className="px-0.5 py-1 text-center">
                       <input
                         type="checkbox"
                         checked={Boolean(row.receipt_posted)}
@@ -595,12 +906,30 @@ export default function WorkInstructionsPage() {
                         }}
                       />
                     </td>
+                    <td className="px-1 py-1 text-center">
+                      {row.source === 'l_master' ? (
+                        <button
+                          type="button"
+                          disabled={savingId === row.id}
+                          onClick={() => void deleteRow(row)}
+                          title={row.parent_sort_no == null ? 'この指令と部品行を削除' : 'この部品行を削除'}
+                          className="w-full rounded border border-rose-300 px-0.5 py-1 text-[10px] text-rose-700 hover:bg-rose-50"
+                        >
+                          削除
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 )
               })}
+              {end < visibleRows.length && (
+                <tr aria-hidden>
+                  <td colSpan={columnCount} style={{ height: (visibleRows.length - end) * ROW_HEIGHT, padding: 0, border: 0 }} />
+                </tr>
+              )}
               {!loading && visibleRows.length === 0 && !error && (
                 <tr>
-                  <td colSpan={10 + INSTRUCTION_SHOPS.length + 2} className="px-4 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={columnCount} className="px-4 py-10 text-center text-sm text-slate-500">
                     表示できる指図書がありません。SQL を実行したあと、この画面を開き直してください。
                   </td>
                 </tr>
@@ -609,6 +938,72 @@ export default function WorkInstructionsPage() {
           </table>
         </div>
       </div>
+      {pdfEditor
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4"
+              onClick={() => setPdfEditor(null)}
+            >
+              <form
+                className="w-full max-w-md rounded-xl bg-slate-900 p-4 text-white shadow-xl"
+                onClick={(event) => event.stopPropagation()}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const parsed = parseDrivePdfUrl(pdfEditor.url)
+                  if (parsed.error) {
+                    setPdfError(parsed.error)
+                    return
+                  }
+                  const id = pdfEditor.id
+                  void patchRow(id, { pdf_url: parsed.url }, { pdf_url: parsed.url }).then((message) => {
+                    if (message) {
+                      setPdfError(message)
+                      return
+                    }
+                    setPdfError(null)
+                    setPdfEditor(null)
+                  })
+                }}
+              >
+                <h2 className="text-base font-bold">{pdfEditor.label || '指令番号'}</h2>
+                <p className="mt-1 text-sm text-slate-300">GoogleドライブのPDFリンク</p>
+                <input
+                  autoFocus
+                  value={pdfEditor.url}
+                  placeholder="https://drive.google.com/..."
+                  onChange={(event) => {
+                    setPdfError(null)
+                    setPdfEditor({ ...pdfEditor, url: event.target.value })
+                  }}
+                  className="mt-2 w-full rounded border border-slate-500 bg-slate-950 px-2 py-2 text-sm text-white"
+                />
+                {pdfError ? <p className="mt-1 text-sm text-rose-300">{pdfError}</p> : null}
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  {parseDrivePdfUrl(pdfEditor.url).url ? (
+                    <button
+                      type="button"
+                      className="rounded border border-slate-500 px-3 py-1.5 text-sm"
+                      onClick={() => {
+                        const parsed = parseDrivePdfUrl(pdfEditor.url)
+                        if (!parsed.url) return
+                        window.open(parsed.url, '_blank', 'noopener,noreferrer')
+                      }}
+                    >
+                      開く
+                    </button>
+                  ) : null}
+                  <button type="button" className="rounded border border-slate-500 px-3 py-1.5 text-sm" onClick={() => setPdfEditor(null)}>
+                    閉じる
+                  </button>
+                  <button type="submit" className="rounded bg-sky-600 px-3 py-1.5 text-sm text-white">
+                    保存
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   )
 }
