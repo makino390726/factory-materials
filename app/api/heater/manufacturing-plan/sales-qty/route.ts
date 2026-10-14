@@ -13,6 +13,8 @@ export type SalesPlanQtyRow = {
   machine_name: string
   qty: number
   highQty: number
+  circleQty?: number
+  triangleQty?: number
   amount: number
 }
 
@@ -74,6 +76,8 @@ export async function GET(request: NextRequest) {
         machine_name: String(row.machine_name || row.machine_code || '').trim(),
         qty: Number(row.qty) || 0,
         highQty: Number(row.highQty) || 0,
+        circleQty: Number(row.circleQty) || 0,
+        triangleQty: Number(row.triangleQty) || 0,
         amount: Number(row.amount) || 0,
       })),
     })
