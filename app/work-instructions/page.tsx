@@ -624,8 +624,8 @@ export default function WorkInstructionsPage() {
           </div>
         )}
 
-        <div ref={scrollerRef} className="min-h-0 min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto rounded-xl bg-white shadow-sm">
-          <table className="wi-sheet w-full table-fixed border-collapse text-[10px]">
+        <div ref={scrollerRef} className="wi-scroller min-h-0 min-w-0 w-full flex-1 rounded-xl bg-white shadow-sm">
+          <table className="wi-sheet w-full min-w-[1720px] table-fixed border-collapse text-[10px]">
             <colgroup>
               <col className="w-[7%]" />
               <col className="w-[6.1%]" />
@@ -646,7 +646,7 @@ export default function WorkInstructionsPage() {
               <col className="w-[2.2%]" />
               <col className="w-[3.1%]" />
             </colgroup>
-            <thead className="wi-progress-head sticky top-0">
+            <thead className="wi-progress-head sticky top-0 z-10">
               <tr>
                 <th className="px-1 py-1 text-left font-medium">区分</th>
                 <th className="px-1 py-1 text-left font-medium">{docType === '製作' ? 'D指令番号' : '指令番号'}</th>

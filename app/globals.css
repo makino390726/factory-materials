@@ -279,6 +279,30 @@ input[type="number"] {
     color: #000000 !important;
   }
 
+  /* 横スクロールバーは常に出し、縦に動かしても画面下に残す */
+  .wi-scroller {
+    overflow-x: scroll;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+    scrollbar-color: #334155 #e2e8f0;
+  }
+
+  .wi-scroller::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+
+  .wi-scroller::-webkit-scrollbar-track {
+    background: #e2e8f0;
+  }
+
+  .wi-scroller::-webkit-scrollbar-thumb {
+    background: #334155;
+    border: 3px solid #e2e8f0;
+    border-radius: 999px;
+  }
+
   .wi-sheet th,
   .wi-sheet td {
     overflow: hidden;
