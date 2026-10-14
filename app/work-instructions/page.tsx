@@ -238,7 +238,7 @@ function CellInput({
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
-        className={`rounded border bg-white px-1 py-1 text-[10px] ${widthClass} ${
+        className={`rounded border bg-white px-1 py-1 text-[13px] ${widthClass} ${
           align === 'right' ? 'text-right' : 'text-left'
         } ${overdue ? 'border-rose-400 font-semibold text-rose-700' : 'border-slate-300'}`}
       />
@@ -261,7 +261,7 @@ function CellInput({
   )
 }
 
-const ROW_HEIGHT = 44
+const ROW_HEIGHT = 42
 const TABLE_COLUMNS = 10 + INSTRUCTION_SHOPS.length + 5
 
 function useVisibleSlice(rowCount: number, resetKey: string) {
@@ -625,7 +625,7 @@ export default function WorkInstructionsPage() {
         )}
 
         <div ref={scrollerRef} className="wi-scroller min-h-0 min-w-0 w-full flex-1 rounded-xl bg-white shadow-sm">
-          <table className="wi-sheet w-full min-w-[1720px] table-fixed border-collapse text-[10px]">
+          <table className="wi-sheet w-full min-w-[1880px] table-fixed border-collapse text-[13px]">
             <colgroup>
               <col className="w-[7%]" />
               <col className="w-[6.1%]" />
@@ -664,7 +664,7 @@ export default function WorkInstructionsPage() {
                   <div className="font-normal">月数</div>
                 </th>
                 {INSTRUCTION_SHOPS.map((shop) => (
-                  <th key={shop.code} className="px-0 py-1 text-center text-[10px] font-medium leading-tight" title={shop.name}>
+                  <th key={shop.code} className="px-0 py-1 text-center text-[12px] font-medium leading-tight" title={shop.name}>
                     <div className="whitespace-nowrap">{shop.code}</div>
                     <div className="wi-progress whitespace-nowrap font-normal">{shop.name}</div>
                   </th>
@@ -708,7 +708,7 @@ export default function WorkInstructionsPage() {
                         className="inline-flex min-h-5 w-full items-center justify-center"
                       >
                         {row.category ? (
-                          <span className={`wi-cat inline-flex items-center whitespace-nowrap rounded px-1 py-0.5 text-[11px] leading-tight text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
+                          <span className={`wi-cat inline-flex items-center whitespace-nowrap rounded px-1 py-0.5 text-[13px] leading-tight text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
                             {row.category}
                           </span>
                         ) : null}
@@ -781,7 +781,7 @@ export default function WorkInstructionsPage() {
                         }}
                       />
                       {row.comment ? (
-                        <div className="truncate text-[10px] text-slate-400" title={row.comment}>
+                        <div className="truncate text-[12px] text-slate-400" title={row.comment}>
                           {row.comment}
                         </div>
                       ) : null}
@@ -898,7 +898,7 @@ export default function WorkInstructionsPage() {
                             const next = shops.map((item) => (item.code === shop.code ? nextShop(item) : item))
                             void patchRow(row.id, { shops: next }, { shops: next })
                           }}
-                          className={`h-6 w-full rounded border text-[10px] font-semibold ${shopClass(shop)}`}
+                          className={`h-7 w-full rounded border text-[13px] font-semibold ${shopClass(shop)}`}
                         >
                           {shop.completed ? '着手' : shop.assigned ? '担当' : ''}
                         </button>
@@ -913,7 +913,7 @@ export default function WorkInstructionsPage() {
                           const next = row.completed_on ? null : today
                           void patchRow(row.id, { completed_on: next }, { completed_on: next })
                         }}
-                        className="w-full truncate rounded border border-slate-300 px-0.5 py-1 text-[10px] hover:bg-slate-50"
+                        className="w-full truncate rounded border border-slate-300 px-0.5 py-1 text-[13px] hover:bg-slate-50"
                       >
                         {row.completed_on ? row.completed_on.slice(5) : '完了'}
                       </button>
@@ -935,7 +935,7 @@ export default function WorkInstructionsPage() {
                           disabled={savingId === row.id}
                           onClick={() => void deleteRow(row)}
                           title={row.parent_sort_no == null ? 'この指令と部品行を削除' : 'この部品行を削除'}
-                          className="w-full rounded border border-rose-300 px-0.5 py-1 text-[10px] text-rose-700 hover:bg-rose-50"
+                          className="w-full rounded border border-rose-300 px-0.5 py-1 text-[13px] text-rose-700 hover:bg-rose-50"
                         >
                           削除
                         </button>
