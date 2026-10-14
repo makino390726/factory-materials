@@ -50,22 +50,24 @@ interface SavedPlan {
 }
 
 type CategoryFilter = 'すべて' | ProductCategory;
-type SalesQtyMode = 'qty' | 'highQty' | 'circleQty' | 'triangleQty';
+type SalesQtyMode = 'qty' | 'highQty' | 'circleTriangleQty' | 'triangleQty';
 
 const SALES_QTY_MODE_LABEL: Record<SalesQtyMode, string> = {
   qty: '全確度',
   highQty: '●のみ',
-  circleQty: '〇のみ',
+  circleTriangleQty: '●＋▲',
   triangleQty: '▲のみ',
 };
 
 function salesPlanQuantity(
-  row: { qty?: number; highQty?: number; circleQty?: number; triangleQty?: number },
+  row: { qty?: number; highQty?: number; triangleQty?: number },
   mode: SalesQtyMode
 ) {
-  if (mode === 'highQty') return Number(row.highQty) || 0;
-  if (mode === 'circleQty') return Number(row.circleQty) || 0;
-  if (mode === 'triangleQty') return Number(row.triangleQty) || 0;
+  const high = Number(row.highQty) || 0;
+  const triangle = Number(row.triangleQty) || 0;
+  if (mode === 'highQty') return high;
+  if (mode === 'triangleQty') return triangle;
+  if (mode === 'circleTriangleQty') return high + triangle;
   return Number(row.qty) || 0;
 }
 
@@ -479,7 +481,6 @@ export default function ManufacturingPlanPage() {
         machine_name: string;
         qty: number;
         highQty: number;
-        circleQty?: number;
         triangleQty?: number;
       }> = Array.isArray(data.rows) ? data.rows : [];
 
@@ -547,7 +548,7 @@ export default function ManufacturingPlanPage() {
 
       if (importedCount === 0) {
         setError(
-          salesQtyMode === 'circleQty' || salesQtyMode === 'triangleQty'
+          salesQtyMode === 'circleTriangleQty' || salesQtyMode === 'triangleQty'
             ? `該当年度の営業計画に${SALES_QTY_MODE_LABEL[salesQtyMode]}の台数がありません`
             : '該当年度の営業計画台数（工場機種）がありません'
         );
@@ -770,7 +771,7 @@ export default function ManufacturingPlanPage() {
                 >
                   <option value="qty">全確度（●▲□）</option>
                   <option value="highQty">●のみ（確度高）</option>
-                  <option value="circleQty">〇のみ</option>
+                  <option value="circleTriangleQty">●＋▲</option>
                   <option value="triangleQty">▲のみ</option>
                 </select>
               </div>
@@ -785,7 +786,7 @@ export default function ManufacturingPlanPage() {
             </div>
             <p className="text-xs text-indigo-900/80">
               見積システムの年度計画（個人シート）を機種別に集計し、製造台数の初期値にします。
-              〇のみ・▲のみは、その確度の台数だけを取ります。
+              ●＋▲は、確度●と▲の台数を足した数です。□は含みません。
               製造台数は工場側で在庫・能力を見て調整し、営業台数は参考表示のまま残ります。
             </p>
             {salesImportInfo && (
