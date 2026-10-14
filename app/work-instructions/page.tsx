@@ -715,22 +715,44 @@ export default function WorkInstructionsPage() {
                       </button>
                     </td>
                     <td className="truncate px-1 py-1 font-medium">
-                      <button
-                        type="button"
-                        title={(parent ?? row).pdf_url ? 'PDFリンクを変更' : 'GoogleドライブのPDFリンクを設定'}
-                        onClick={() => {
-                          const owner = parent ?? row
-                          setPdfError(null)
-                          setPdfEditor({
-                            id: owner.id,
-                            label: productionInstructionNo(row, parent),
-                            url: owner.pdf_url || '',
-                          })
-                        }}
-                        className={`block w-full truncate text-left text-white hover:underline ${(parent ?? row).pdf_url ? 'underline decoration-sky-400' : ''}`}
-                      >
-                        {productionInstructionNo(row, parent)}
-                      </button>
+                      {(parent ?? row).pdf_url ? (
+                        <a
+                          href={(parent ?? row).pdf_url || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="指図書PDFを開く。右クリックでリンクを変更"
+                          onContextMenu={(event) => {
+                            event.preventDefault()
+                            const owner = parent ?? row
+                            setPdfError(null)
+                            setPdfEditor({
+                              id: owner.id,
+                              label: productionInstructionNo(row, parent),
+                              url: owner.pdf_url || '',
+                            })
+                          }}
+                          className="block w-full truncate text-left text-sky-300 underline decoration-sky-400"
+                        >
+                          {productionInstructionNo(row, parent)}
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          title="GoogleドライブのPDFリンクを設定"
+                          onClick={() => {
+                            const owner = parent ?? row
+                            setPdfError(null)
+                            setPdfEditor({
+                              id: owner.id,
+                              label: productionInstructionNo(row, parent),
+                              url: owner.pdf_url || '',
+                            })
+                          }}
+                          className="block w-full truncate text-left text-white hover:underline"
+                        >
+                          {productionInstructionNo(row, parent)}
+                        </button>
+                      )}
                     </td>
                     {showPartColumn ? (
                       <td
