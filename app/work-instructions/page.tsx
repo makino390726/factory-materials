@@ -627,10 +627,10 @@ export default function WorkInstructionsPage() {
         <div ref={scrollerRef} className="min-h-0 min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto rounded-xl bg-white shadow-sm">
           <table className="wi-sheet w-full table-fixed border-collapse text-[10px]">
             <colgroup>
-              <col className="w-[4.1%]" />
+              <col className="w-[7%]" />
               <col className="w-[6.1%]" />
               {showPartColumn ? <col className="w-[4.7%]" /> : null}
-              <col className="w-[14.5%]" />
+              <col className="w-[11.6%]" />
               <col className={showPartColumn ? 'w-[8.1%]' : 'w-[12.8%]'} />
               <col className="w-[4.4%]" />
               <col className="w-[5.6%]" />
@@ -708,7 +708,7 @@ export default function WorkInstructionsPage() {
                         className="inline-flex min-h-5 w-full items-center justify-center"
                       >
                         {row.category ? (
-                          <span className={`wi-cat inline-block max-w-full truncate rounded px-1 py-0.5 text-[10px] leading-none text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
+                          <span className={`wi-cat inline-flex items-center whitespace-nowrap rounded px-1 py-0.5 text-[11px] leading-tight text-white ${CATEGORY_COLOR[row.category] || 'bg-slate-400'}`}>
                             {row.category}
                           </span>
                         ) : null}

@@ -284,6 +284,11 @@ input[type="number"] {
     overflow: hidden;
   }
 
+  .wi-sheet th:first-child,
+  .wi-sheet td:first-child {
+    overflow: visible;
+  }
+
   .wi-cat {
     white-space: nowrap;
   }
