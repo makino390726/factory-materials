@@ -1,6 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
 import {
+  getSavedModelRealtimeCost,
+  type SavedModelRealtimeCost,
+} from '@/lib/heater-model-realtime-cost'
+import { quoteLaborFromStMinutes } from '@/lib/line-part-labor-cost'
+import { canonicalScheduleModel, scheduleModelLookupCodes } from '@/lib/schedule-model-alias'
+import {
   aggregateTargetWorkGroupMinutesByDateInRange,
   aggregateTargetWorkGroupMinutesInRange,
   aggregateTargetWorkGroupSummariesBySpecInFiscalYear,
@@ -28,9 +34,11 @@ export type ScheduleLotInput = {
   label?: string | null
   /** 規格（UF/DF）。ST解決時に備考一致ロットを優先 */
   notes?: string | null
+  /** 原価一覧の機種一覧から、工費（時間）を借りる機種。空なら工程管理のST */
+  labor_model?: string | null
 }
 
-export type ScheduleStSource = 'lot' | 'fiscal' | 'standard' | 'none'
+export type ScheduleStSource = 'lot' | 'fiscal' | 'standard' | 'cost_list' | 'none'
 
 export type ScheduleWorkGroupPlan = {
   work_group_code: string
@@ -65,6 +73,14 @@ export type ScheduleLotResult = {
   notes: string | null
   st_source: ScheduleStSource
   st_note: string | null
+  /** 工費の根拠にした1台あたりST（分） */
+  unit_st_minutes: number | null
+  /** 1台あたり工費 */
+  unit_labor_cost: number | null
+  /** 1台あたり工費間接費 */
+  unit_indirect_cost: number | null
+  /** 工費（時間）を適用した原価一覧の機種 */
+  labor_model: string | null
   start_date: string
   end_date: string
   /** 工程占有稼働日の合計（パイプライン上の所要稼働日） */
@@ -806,6 +822,46 @@ function maxWorkDate(a: string, b: string) {
   return a >= b ? a : b
 }
 
+function sumStMinutes(stByGroup: Map<string, number>) {
+  let total = 0
+  for (const minutes of stByGroup.values()) total += minutes
+  return total
+}
+
+function scaleStMap(stByGroup: Map<string, number>, targetMinutes: number) {
+  const sum = sumStMinutes(stByGroup)
+  if (sum <= 0 || targetMinutes <= 0) return stByGroup
+  const scaled = new Map<string, number>()
+  for (const [code, minutes] of stByGroup) {
+    scaled.set(code, Math.round((minutes * targetMinutes) / sum * 10) / 10)
+  }
+  return scaled
+}
+
+async function resolveCostListSt(
+  supabase: SupabaseClient,
+  saved: SavedModelRealtimeCost,
+  fiscalYear: number,
+  notes?: string | null
+): Promise<Map<string, number>> {
+  const targetType = saved.target_type === 'line' || saved.target_type === 'instruction'
+    ? saved.target_type
+    : null
+  const targetCode = String(saved.target_code || '').trim()
+  if (!targetType || !targetCode) {
+    return new Map([['_LABOR', saved.st_minutes]])
+  }
+  const { map } = await getFiscalYearAverageStByWorkGroupForSpec(
+    supabase,
+    targetType,
+    targetCode,
+    fiscalYear,
+    normalizeSpecKey(notes) || null
+  )
+  if (map.size === 0) return new Map([['_LABOR', saved.st_minutes]])
+  return scaleStMap(map, saved.st_minutes)
+}
+
 export async function buildProductionSchedule(
   supabase: SupabaseClient,
   input: {
@@ -825,13 +881,15 @@ export async function buildProductionSchedule(
   const workGroupMaster = await fetchWorkGroupOrder(supabase)
   const nameByCode = new Map(workGroupMaster.map((g) => [g.work_group_code, g.work_group_name]))
   nameByCode.set('_STANDARD', '指令標準時間')
+  nameByCode.set('_LABOR', '工費')
+  const savedLaborByModel = new Map<string, SavedModelRealtimeCost | null>()
 
   const orderedLots = [...input.lots]
-    .filter((lot) => lot.quantity > 0 && lot.target_code?.trim())
+    .filter((lot) => lot.quantity > 0 && (lot.target_code?.trim() || lot.labor_model?.trim()))
     .sort((a, b) => a.sequence - b.sequence || a.model.localeCompare(b.model, 'ja'))
 
   if (orderedLots.length === 0) {
-    throw new Error('スケジュール対象のロット（台数・指令）がありません')
+    throw new Error('スケジュール対象のロット（機種の工費、またはD/L指令）がありません')
   }
 
   const results: ScheduleLotResult[] = []
@@ -843,14 +901,77 @@ export async function buildProductionSchedule(
   for (let lotIndex = 0; lotIndex < orderedLots.length; lotIndex++) {
     const lot = orderedLots[lotIndex]
     const targetCode = normalizeTargetCode(lot.target_code)
-    const resolved = await resolveWorkGroupStMinutes(
-      supabase,
-      lot.target_type,
-      targetCode,
-      fiscalYear,
-      lot.notes,
-      lot.model
-    )
+    const laborModel = String(lot.labor_model || '').trim()
+    let laborQuote: { st_minutes: number; labor_cost: number; indirect_cost: number } | null = null
+    let appliedLaborModel: string | null = null
+    let resolved: { source: ScheduleStSource; note: string | null; stByGroup: Map<string, number> }
+
+    if (laborModel) {
+      const lookupCodes = scheduleModelLookupCodes(laborModel)
+      let saved: SavedModelRealtimeCost | null = null
+      let savedModel = laborModel
+      for (const code of lookupCodes) {
+        if (!savedLaborByModel.has(code)) {
+          savedLaborByModel.set(code, await getSavedModelRealtimeCost(supabase, code))
+        }
+        const candidate = savedLaborByModel.get(code) || null
+        if (!saved) {
+          saved = candidate
+          savedModel = code
+        }
+        if (candidate && candidate.st_minutes > 0) {
+          saved = candidate
+          savedModel = code
+          break
+        }
+      }
+      if (saved && saved.st_minutes > 0) {
+        laborQuote = {
+          st_minutes: saved.st_minutes,
+          labor_cost: saved.labor_cost,
+          indirect_cost: saved.indirect_cost,
+        }
+        appliedLaborModel = savedModel
+        const stByGroup = await resolveCostListSt(supabase, saved, fiscalYear, lot.notes)
+        const label = saved.applied_label || '原価一覧'
+        resolved = {
+          source: 'cost_list',
+          note: `機種一覧 ${canonicalScheduleModel(savedModel)} の工費 ${saved.st_minutes}分/台（${label} / ¥${saved.labor_cost.toLocaleString('ja-JP')}）`,
+          stByGroup,
+        }
+      } else if (!targetCode) {
+        warnings.push(
+          `${canonicalScheduleModel(lot.model)}: 機種一覧に工費の時間がなく、D/L指令も未選択のためスキップ`
+        )
+        continue
+      } else {
+        warnings.push(
+          `${canonicalScheduleModel(lot.model)}: 機種一覧の ${canonicalScheduleModel(laborModel)} に工費の時間がないため、工程管理のSTで算出します`
+        )
+        resolved = await resolveWorkGroupStMinutes(
+          supabase,
+          lot.target_type,
+          targetCode,
+          fiscalYear,
+          lot.notes,
+          lot.model
+        )
+      }
+    } else if (!targetCode) {
+      warnings.push(
+        `${canonicalScheduleModel(lot.model)}: 機種一覧に工費がないため、D/L指令を選択してください`
+      )
+      continue
+    } else {
+      resolved = await resolveWorkGroupStMinutes(
+        supabase,
+        lot.target_type,
+        targetCode,
+        fiscalYear,
+        lot.notes,
+        lot.model
+      )
+    }
 
     if (resolved.source === 'none') {
       warnings.push(
@@ -864,14 +985,14 @@ export async function buildProductionSchedule(
       .map(([code, st]) => {
         const master = workGroupMaster.find((g) => g.work_group_code === code)
         const work_group_name = nameByCode.get(code) || code
-        const group_no = code === '_STANDARD' ? 9999 : master?.group_no ?? 5000
+        const group_no = code === '_STANDARD' || code === '_LABOR' ? 9999 : master?.group_no ?? 5000
         return {
           work_group_code: code,
           work_group_name,
           st_minutes: st,
           group_no,
           process_order:
-            code === '_STANDARD'
+            code === '_STANDARD' || code === '_LABOR'
               ? 9000
               : master?.process_order ??
                 getScheduleProcessOrder(code, work_group_name, group_no),
@@ -889,7 +1010,8 @@ export async function buildProductionSchedule(
     }
 
     // 機械加工1（板切り）がSTに無い場合は警告（後工程だけの計画になる）
-    if (!groupEntries.some((g) => g.process_order === 1)) {
+    const laborOnly = groupEntries.length === 1 && groupEntries[0].work_group_code === '_LABOR'
+    if (!laborOnly && !groupEntries.some((g) => g.process_order === 1)) {
       warnings.push(
         `${lot.model}: 機械加工1班（板切り）のSTが無いため、後工程のみで計画しています`
       )
@@ -958,6 +1080,14 @@ export async function buildProductionSchedule(
       notes: normalizeSpecKey(lot.notes) || lot.notes || null,
       st_source: resolved.source,
       st_note: resolved.note,
+      unit_st_minutes: laborQuote?.st_minutes ?? Math.round(sumStMinutes(resolved.stByGroup)),
+      unit_labor_cost:
+        laborQuote?.labor_cost ??
+        quoteLaborFromStMinutes(sumStMinutes(resolved.stByGroup), fiscalYear).labor_cost,
+      unit_indirect_cost:
+        laborQuote?.indirect_cost ??
+        quoteLaborFromStMinutes(sumStMinutes(resolved.stByGroup), fiscalYear).indirect_cost,
+      labor_model: appliedLaborModel,
       start_date: lotStart,
       end_date: lotEnd,
       total_days: workGroups.reduce((sum, g) => sum + g.days, 0),

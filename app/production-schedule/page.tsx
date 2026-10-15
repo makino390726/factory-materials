@@ -3,6 +3,11 @@
 import Link from 'next/link'
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { getCurrentFiscalYear } from '@/lib/fiscal-year'
+import {
+  PRODUCT_CATEGORIES,
+  inferProductCategory,
+} from '@/lib/product-category'
+import { canonicalScheduleModel, scheduleModelLookupCodes } from '@/lib/schedule-model-alias'
 
 type Plan = {
   id: string
@@ -31,6 +36,14 @@ type TargetOption = {
   subtitle: string | null
 }
 
+type CostListModel = {
+  model: string
+  display_name: string
+  st_minutes: number
+  st_labor_cost: number
+  realtime_label: string | null
+}
+
 type LotRow = {
   key: string
   model: string
@@ -40,6 +53,8 @@ type LotRow = {
   target_code: string
   label: string
   notes: string
+  /** 原価一覧の機種一覧から工費（時間）を借りる機種 */
+  labor_model: string
   suggestions: Array<{ target_type: 'line' | 'instruction'; target_code: string; label: string }>
 }
 
@@ -59,6 +74,10 @@ type ScheduleResult = {
     notes: string | null
     st_source: string
     st_note: string | null
+    unit_st_minutes?: number | null
+    unit_labor_cost?: number | null
+    unit_indirect_cost?: number | null
+    labor_model?: string | null
     start_date: string
     end_date: string
     total_days: number
@@ -132,6 +151,92 @@ const LOT_COLOR_HEX = [
   '#d946ef',
   '#65a30d',
 ]
+
+function yen(value: number) {
+  return `¥${Math.round(value || 0).toLocaleString('ja-JP')}`
+}
+
+function categoryRank(category: string) {
+  const index = (PRODUCT_CATEGORIES as readonly string[]).indexOf(category)
+  return index === -1 ? PRODUCT_CATEGORIES.length : index
+}
+
+function scheduleModelCategory(
+  code: string,
+  categories: Record<string, string>,
+  names: Record<string, string>
+) {
+  const raw = String(code || '').trim()
+  const canonical = canonicalScheduleModel(raw)
+  const stored = categories[raw] || categories[canonical]
+  if (stored) return stored
+  return inferProductCategory(canonical, names[canonical] || names[raw] || '')
+}
+
+function orderLotsByCategory(
+  rows: LotRow[],
+  categories: Record<string, string>,
+  names: Record<string, string>
+) {
+  return [...rows]
+    .sort((a, b) => {
+      const rank =
+        categoryRank(scheduleModelCategory(a.model, categories, names)) -
+        categoryRank(scheduleModelCategory(b.model, categories, names))
+      if (rank !== 0) return rank
+      return a.model.localeCompare(b.model, 'ja')
+    })
+    .map((lot, index) => ({ ...lot, sequence: index + 1 }))
+}
+
+function masterModelName(code: string, names: Record<string, string>) {
+  const raw = String(code || '').trim()
+  const name = String(names[raw] || '').trim()
+  if (name && name !== raw) return name
+  const canonical = canonicalScheduleModel(raw)
+  if (canonical !== raw) {
+    const canonicalName = String(names[canonical] || '').trim()
+    if (canonicalName && canonicalName !== canonical) return canonicalName
+    return canonical
+  }
+  return name || raw
+}
+
+/** 機種名の下に出す型式。30A は SP-30A と表示する */
+function modelCodeCaption(code: string, names: Record<string, string>) {
+  const raw = String(code || '').trim()
+  const name = masterModelName(raw, names)
+  const canonical = canonicalScheduleModel(raw)
+  if (canonical !== raw && canonical !== name) return canonical
+  if (name !== raw) return raw
+  return ''
+}
+
+function findCostModelWithTime(model: string, models: CostListModel[]) {
+  const codes = new Set(scheduleModelLookupCodes(model))
+  const hits = models.filter((row) => codes.has(row.model) && row.st_minutes > 0)
+  if (hits.length === 0) return null
+  const canonical = canonicalScheduleModel(model)
+  return hits.find((row) => row.model === model) || hits.find((row) => row.model === canonical) || hits[0]
+}
+
+function selectedLaborModel(laborModel: string, models: CostListModel[]) {
+  const usable = models.filter((row) => row.st_minutes > 0)
+  if (usable.some((row) => row.model === laborModel)) return laborModel
+  const canonical = canonicalScheduleModel(laborModel)
+  if (laborModel && usable.some((row) => row.model === canonical)) return canonical
+  return ''
+}
+
+function costModelLabel(row: CostListModel, names: Record<string, string>) {
+  const code = canonicalScheduleModel(row.model)
+  const name = masterModelName(row.model, names)
+  const title = name !== code ? `${code} ${name}` : code
+  if (row.st_minutes > 0) {
+    return `${title} / ${row.st_minutes}分 / 工費 ${yen(row.st_labor_cost)}`
+  }
+  return `${title} / 工費の時間なし`
+}
 
 function todayIso() {
   const d = new Date()
@@ -228,6 +333,10 @@ export default function ProductionSchedulePage() {
   const [minutesPerDay, setMinutesPerDay] = useState(480)
   const [fiscalYear, setFiscalYear] = useState(getCurrentFiscalYear())
   const [lots, setLots] = useState<LotRow[]>([])
+  const [costModels, setCostModels] = useState<CostListModel[]>([])
+  const [costModelsLoaded, setCostModelsLoaded] = useState(false)
+  const [modelNames, setModelNames] = useState<Record<string, string>>({})
+  const [modelCategories, setModelCategories] = useState<Record<string, string>>({})
   const [result, setResult] = useState<ScheduleResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -246,18 +355,33 @@ export default function ProductionSchedulePage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [plansRes, targetsRes, schedulesRes] = await Promise.all([
+        const [plansRes, targetsRes, schedulesRes, modelsRes] = await Promise.all([
           fetch('/api/production-schedule?list=plans'),
           fetch('/api/production-schedule?list=targets'),
           fetch('/api/production-schedule?list=schedules'),
+          fetch('/api/heater/models'),
         ])
         const plansData = await plansRes.json()
         const targetsData = await targetsRes.json()
         const schedulesData = await schedulesRes.json()
+        const modelsData = await modelsRes.json()
         if (!plansRes.ok) throw new Error(plansData.error || '計画一覧の取得に失敗')
         if (!targetsRes.ok) throw new Error(targetsData.error || '対象一覧の取得に失敗')
         setPlans(plansData.plans || [])
         setTargets(targetsData.targets || [])
+        if (modelsRes.ok && Array.isArray(modelsData)) {
+          const names: Record<string, string> = {}
+          const categories: Record<string, string> = {}
+          for (const row of modelsData) {
+            const code = String(row?.model || '').trim()
+            const name = String(row?.name || '').trim()
+            if (!code) continue
+            if (name) names[code] = name
+            categories[code] = String(row?.product_category || '').trim() || inferProductCategory(code, name)
+          }
+          setModelNames(names)
+          setModelCategories(categories)
+        }
         if (schedulesRes.ok) {
           setSavedSchedules(schedulesData.schedules || [])
         } else if (schedulesData.error) {
@@ -269,6 +393,78 @@ export default function ProductionSchedulePage() {
     }
     void load()
   }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadCostModels = async () => {
+      setCostModelsLoaded(false)
+      try {
+        const res = await fetch(
+          `/api/work-order-costs/print-report?type=model&fiscal_year=${fiscalYear}`,
+          { signal: controller.signal }
+        )
+        const data = await res.json()
+        if (!res.ok) return
+        const rows: CostListModel[] = (Array.isArray(data.rows) ? data.rows : [])
+          .map((row: CostListModel) => ({
+            model: String(row.model || ''),
+            display_name: String(row.display_name || row.model || ''),
+            st_minutes: Number(row.st_minutes || 0),
+            st_labor_cost: Number(row.st_labor_cost || 0),
+            realtime_label: row.realtime_label || null,
+          }))
+          .filter((row: CostListModel) => row.model)
+        const hidden = new Set<string>()
+        const byModel = new Map(rows.map((row) => [row.model, row]))
+        for (const row of rows) {
+          const canonical = canonicalScheduleModel(row.model)
+          if (canonical === row.model || !byModel.has(canonical)) continue
+          const target = byModel.get(canonical)!
+          hidden.add(row.st_minutes > target.st_minutes ? canonical : row.model)
+        }
+        const visible = rows
+          .filter((row) => !hidden.has(row.model))
+          .sort((a: CostListModel, b: CostListModel) => {
+            if ((a.st_minutes > 0) !== (b.st_minutes > 0)) return a.st_minutes > 0 ? -1 : 1
+            return a.model.localeCompare(b.model, 'ja')
+          })
+        setCostModels(visible)
+      } catch {
+        if (!controller.signal.aborted) setCostModels([])
+      } finally {
+        if (!controller.signal.aborted) setCostModelsLoaded(true)
+      }
+    }
+    void loadCostModels()
+    return () => controller.abort()
+  }, [fiscalYear])
+
+  useEffect(() => {
+    if (Object.keys(modelCategories).length === 0 || result) return
+    setLots((prev) => {
+      if (prev.length === 0) return prev
+      const next = orderLotsByCategory(prev, modelCategories, modelNames)
+      const same = next.every(
+        (lot, index) => lot.key === prev[index]?.key && lot.sequence === prev[index]?.sequence
+      )
+      return same ? prev : next
+    })
+  }, [modelCategories, modelNames, result])
+
+  useEffect(() => {
+    if (!costModelsLoaded || costModels.length === 0) return
+    setLots((prev) => {
+      let changed = false
+      const next = prev.map((lot) => {
+        if (selectedLaborModel(lot.labor_model, costModels)) return lot
+        const match = findCostModelWithTime(lot.model, costModels)
+        if (!match) return lot
+        changed = true
+        return { ...lot, labor_model: match.model, target_code: '', label: '' }
+      })
+      return changed ? next : prev
+    })
+  }, [costModels, costModelsLoaded, lots])
 
   const targetOptions = useMemo(() => {
     return targets.map((t) => ({
@@ -316,10 +512,11 @@ export default function ProductionSchedulePage() {
           target_code: '',
           label: '',
           notes: d.suggested_notes || '',
+          labor_model: '',
           suggestions: d.suggestions || [],
         })
       )
-      setLots(rows)
+      setLots(orderLotsByCategory(rows, modelCategories, modelNames))
       const plan = plans.find((p) => p.id === id)
       if (plan?.fiscal_year) setFiscalYear(plan.fiscal_year)
     } catch (e) {
@@ -358,6 +555,7 @@ export default function ProductionSchedulePage() {
             target_code: string
             label?: string | null
             notes?: string | null
+            labor_model?: string | null
             suggestions?: LotRow['suggestions']
           },
           index: number
@@ -370,6 +568,7 @@ export default function ProductionSchedulePage() {
           target_code: lot.target_code || '',
           label: lot.label || '',
           notes: lot.notes || '',
+          labor_model: lot.labor_model || '',
           suggestions: lot.suggestions || [],
         })
       )
@@ -403,7 +602,15 @@ export default function ProductionSchedulePage() {
           fiscal_year: fiscalYear,
           source_plan_id: planId || null,
           source_plan_name: plan?.plan_name || null,
-          lots,
+          lots: lots.map((lot) => {
+            const laborModel =
+              selectedLaborModel(lot.labor_model, costModels) ||
+              findCostModelWithTime(lot.model, costModels)?.model ||
+              ''
+            return laborModel
+              ? { ...lot, labor_model: laborModel, target_code: '', label: '' }
+              : { ...lot, labor_model: '' }
+          }),
           result,
         }),
       })
@@ -452,16 +659,23 @@ export default function ProductionSchedulePage() {
           start_date: startDate,
           minutes_per_day: minutesPerDay,
           fiscal_year: fiscalYear,
-          lots: lots.map((lot) => ({
-            key: lot.key,
-            model: lot.model,
-            quantity: lot.quantity,
-            sequence: lot.sequence,
-            target_type: lot.target_type,
-            target_code: lot.target_code,
-            label: lot.label,
-            notes: lot.notes || null,
-          })),
+          lots: lots.map((lot) => {
+            const laborModel =
+              selectedLaborModel(lot.labor_model, costModels) ||
+              findCostModelWithTime(lot.model, costModels)?.model ||
+              ''
+            return {
+              key: lot.key,
+              model: lot.model,
+              quantity: lot.quantity,
+              sequence: lot.sequence,
+              target_type: laborModel ? 'instruction' : lot.target_type,
+              target_code: laborModel ? '' : lot.target_code,
+              label: laborModel ? '' : lot.label,
+              notes: lot.notes || null,
+              labor_model: laborModel || null,
+            }
+          }),
         }),
       })
       const data = await res.json()
@@ -558,7 +772,7 @@ export default function ProductionSchedulePage() {
                     >
                       {hasPlan && cell ? (
                         <div
-                          title={`${cell.model || '—'}（順序${cell.sequence ?? '—'}）計画 ${cell.planned_minutes_per_day}分`}
+                          title={`${masterModelName(cell.model || '', modelNames)}（順序${cell.sequence ?? '—'}）計画 ${cell.planned_minutes_per_day}分`}
                           className={`ps-bar h-5 rounded-sm ${LOT_COLORS[cell.color_index % LOT_COLORS.length]}`}
                           style={
                             {
@@ -599,7 +813,7 @@ export default function ProductionSchedulePage() {
                         <div
                           title={
                             cell.has_plan
-                              ? `${cell.model || '—'} 実績 ${actual}分 / 計画 ${planned}分`
+                              ? `${masterModelName(cell.model || '', modelNames)} 実績 ${actual}分 / 計画 ${planned}分`
                               : `計画外実績 ${actual}分`
                           }
                           className="ps-bar-track relative h-5 overflow-hidden rounded-sm bg-slate-800"
@@ -877,14 +1091,6 @@ export default function ProductionSchedulePage() {
             </label>
           </div>
 
-          <p className="text-xs text-slate-300">
-            ST優先順: 工程管理で機種×指令に「スケジュールに適用」した年平均ST → 直近製作ロット平均 → 年度平均 → D/L指令標準時間（年平均ST合計を優先採用）。
-            指令の標準時間も工程管理の年平均ST合計を採用します。
-            たばこ／食品／光合成／その他（D指令）は、工程管理の年平均に適用チェックを入れて根拠を確定してください。
-            UFのSTは DF＋UF差分（UF=DF+UF）。工程順: 機械加工1班（板切り）→ 機械加工2班 → 組み立て1班 → 2班 → 3班。
-            板切り完了後に後工程へ。班が空き次第、次順序の機種を流し込む（パイプライン）。
-          </p>
-
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm text-white">
               <thead>
@@ -893,7 +1099,7 @@ export default function ProductionSchedulePage() {
                   <th className="px-2 py-2">機種</th>
                   <th className="px-2 py-2">台数</th>
                   <th className="px-2 py-2">規格</th>
-                  <th className="px-2 py-2">D/L指令</th>
+                  <th className="px-2 py-2">機種の工費</th>
                 </tr>
               </thead>
               <tbody>
@@ -904,8 +1110,22 @@ export default function ProductionSchedulePage() {
                     </td>
                   </tr>
                 ) : (
-                  lots.map((lot) => (
-                    <tr key={lot.key} className="border-b border-slate-800">
+                  lots.map((lot, index) => {
+                    const category = scheduleModelCategory(lot.model, modelCategories, modelNames)
+                    const previous =
+                      index > 0
+                        ? scheduleModelCategory(lots[index - 1].model, modelCategories, modelNames)
+                        : ''
+                    return (
+                    <Fragment key={lot.key}>
+                      {category !== previous ? (
+                        <tr className="border-b border-slate-700 bg-slate-800/80">
+                          <td colSpan={5} className="px-2 py-1.5 text-xs font-semibold tracking-wide text-sky-100">
+                            {category}
+                          </td>
+                        </tr>
+                      ) : null}
+                    <tr className="border-b border-slate-800">
                       <td className="px-2 py-2">
                         <input
                           type="number"
@@ -916,7 +1136,14 @@ export default function ProductionSchedulePage() {
                           }
                         />
                       </td>
-                      <td className="px-2 py-2 font-medium text-white">{lot.model}</td>
+                      <td className="px-2 py-2 font-medium text-white">
+                        <div>{masterModelName(lot.model, modelNames)}</div>
+                        {modelCodeCaption(lot.model, modelNames) ? (
+                          <div className="text-[11px] font-normal text-slate-400">
+                            {modelCodeCaption(lot.model, modelNames)}
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="px-2 py-2">
                         <input
                           type="number"
@@ -940,45 +1167,99 @@ export default function ProductionSchedulePage() {
                         </select>
                       </td>
                       <td className="px-2 py-2 min-w-[22rem]">
-                        <select
-                          className="w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-white"
-                          value={
-                            lot.target_code ? `${lot.target_type}:${lot.target_code}` : ''
-                          }
-                          onChange={(e) => {
-                            const value = e.target.value
-                            if (!value) {
-                              updateLot(lot.key, { target_code: '', label: '' })
-                              return
-                            }
-                            const [target_type, ...rest] = value.split(':')
-                            const target_code = rest.join(':')
-                            const opt = targetOptions.find((o) => o.value === value)
-                            updateLot(lot.key, {
-                              target_type: target_type as 'line' | 'instruction',
-                              target_code,
-                              label: opt?.label || value,
-                            })
-                          }}
-                        >
-                          <option value="">未選択</option>
-                          {lot.suggestions.map((s) => (
-                            <option
-                              key={`sug-${s.target_type}:${s.target_code}`}
-                              value={`${s.target_type}:${s.target_code}`}
-                            >
-                              推奨: {s.label}
-                            </option>
-                          ))}
-                          {targetOptions.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
+                        {(() => {
+                          const matched = findCostModelWithTime(lot.model, costModels)
+                          const laborValue =
+                            selectedLaborModel(lot.labor_model, costModels) || matched?.model || ''
+                          const showDl = costModelsLoaded && !laborValue
+                          return (
+                            <>
+                              <label className="block text-[11px] text-slate-300">
+                                機種一覧の工費（時間）
+                                <select
+                                  className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white"
+                                  value={laborValue}
+                                  onChange={(e) =>
+                                    updateLot(lot.key, {
+                                      labor_model: e.target.value,
+                                      ...(e.target.value ? { target_code: '', label: '' } : {}),
+                                    })
+                                  }
+                                >
+                                  {matched ? null : (
+                                    <option value="">機種一覧にない（D/L指令で選ぶ）</option>
+                                  )}
+                                  {PRODUCT_CATEGORIES.map((category) => {
+                                    const rows = costModels
+                                      .filter(
+                                        (row) =>
+                                          row.st_minutes > 0 &&
+                                          scheduleModelCategory(row.model, modelCategories, modelNames) ===
+                                            category
+                                      )
+                                      .sort((a, b) => a.model.localeCompare(b.model, 'ja'))
+                                    if (rows.length === 0) return null
+                                    return (
+                                      <optgroup key={category} label={category}>
+                                        {rows.map((row) => (
+                                          <option key={row.model} value={row.model}>
+                                            {costModelLabel(row, modelNames)}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    )
+                                  })}
+                                </select>
+                              </label>
+                              {showDl ? (
+                                <label className="mt-2 block text-[11px] text-slate-300">
+                                  D/L指令
+                                  <select
+                                    className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-white"
+                                    value={
+                                      lot.target_code ? `${lot.target_type}:${lot.target_code}` : ''
+                                    }
+                                    onChange={(e) => {
+                                      const value = e.target.value
+                                      if (!value) {
+                                        updateLot(lot.key, { target_code: '', label: '' })
+                                        return
+                                      }
+                                      const [target_type, ...rest] = value.split(':')
+                                      const target_code = rest.join(':')
+                                      const opt = targetOptions.find((o) => o.value === value)
+                                      updateLot(lot.key, {
+                                        target_type: target_type as 'line' | 'instruction',
+                                        target_code,
+                                        label: opt?.label || value,
+                                      })
+                                    }}
+                                  >
+                                    <option value="">未選択</option>
+                                    {lot.suggestions.map((s) => (
+                                      <option
+                                        key={`sug-${s.target_type}:${s.target_code}`}
+                                        value={`${s.target_type}:${s.target_code}`}
+                                      >
+                                        推奨: {s.label}
+                                      </option>
+                                    ))}
+                                    {targetOptions.map((opt) => (
+                                      <option key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ) : null}
+                            </>
+                          )
+                        })()}
                       </td>
                     </tr>
-                  ))
+                    </Fragment>
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -1107,7 +1388,8 @@ export default function ProductionSchedulePage() {
                     <th className="px-2 py-2">順序</th>
                     <th className="px-2 py-2">機種</th>
                     <th className="px-2 py-2">規格</th>
-                    <th className="px-2 py-2">指令</th>
+                    <th className="px-2 py-2">適用</th>
+                    <th className="px-2 py-2">工費</th>
                     <th className="px-2 py-2">着手</th>
                     <th className="px-2 py-2">完了</th>
                     <th className="px-2 py-2">稼働日LT</th>
@@ -1118,8 +1400,22 @@ export default function ProductionSchedulePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.lots.map((lot, index) => (
-                    <tr key={lot.key} className="border-b border-slate-800 align-top">
+                  {result.lots.map((lot, index) => {
+                    const category = scheduleModelCategory(lot.model, modelCategories, modelNames)
+                    const previous =
+                      index > 0
+                        ? scheduleModelCategory(result.lots[index - 1].model, modelCategories, modelNames)
+                        : ''
+                    return (
+                    <Fragment key={lot.key}>
+                      {category !== previous ? (
+                        <tr className="border-b border-slate-700 bg-slate-800/80">
+                          <td colSpan={13} className="px-2 py-1.5 text-xs font-semibold tracking-wide text-sky-100">
+                            {category}
+                          </td>
+                        </tr>
+                      ) : null}
+                    <tr className="border-b border-slate-800 align-top">
                       <td className="px-2 py-2">
                         <span
                           className={`ps-swatch inline-block h-3 w-6 rounded ${LOT_COLORS[index % LOT_COLORS.length]}`}
@@ -1133,14 +1429,38 @@ export default function ProductionSchedulePage() {
                       </td>
                       <td className="px-2 py-2 text-white">{lot.sequence}</td>
                       <td className="px-2 py-2 text-white">
-                        {lot.model} × {lot.quantity}
+                        {masterModelName(lot.model, modelNames)} × {lot.quantity}
+                        {modelCodeCaption(lot.model, modelNames) ? (
+                          <span className="ml-1 text-[11px] font-normal text-slate-400">
+                            {modelCodeCaption(lot.model, modelNames)}
+                          </span>
+                        ) : null}
                         <div className="text-[10px] text-slate-400 no-print">
                           {lot.st_note || lot.st_source}
                         </div>
                       </td>
                       <td className="px-2 py-2 text-white">{lot.notes || '—'}</td>
                       <td className="px-2 py-2 text-white whitespace-nowrap">
-                        {lot.target_type === 'line' ? 'L' : 'D'} {lot.target_code}
+                        {lot.labor_model
+                          ? masterModelName(lot.labor_model, modelNames)
+                          : lot.target_code
+                            ? `${lot.target_type === 'line' ? 'L' : 'D'} ${lot.target_code}`
+                            : '—'}
+                      </td>
+                      <td className="px-2 py-2 text-white whitespace-nowrap">
+                        {lot.unit_labor_cost != null ? (
+                          <>
+                            <div>{yen(lot.unit_labor_cost)}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {lot.unit_st_minutes != null ? `${lot.unit_st_minutes}分/台` : ''}
+                              {lot.quantity > 0 && lot.unit_labor_cost
+                                ? ` / 計 ${yen(lot.unit_labor_cost * lot.quantity)}`
+                                : ''}
+                            </div>
+                          </>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className="px-2 py-2 text-white whitespace-nowrap">{lot.start_date}</td>
                       <td className="px-2 py-2 text-white whitespace-nowrap">{lot.end_date}</td>
@@ -1167,12 +1487,14 @@ export default function ProductionSchedulePage() {
                         <ProgressBar pctValue={lot.progress.minutes_progress_pct} label="工数" />
                       </td>
                     </tr>
-                  ))}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
                 {scheduleSpan && (
                   <tfoot>
                     <tr className="border-t border-slate-600">
-                      <td className="px-2 py-2 font-semibold" colSpan={5}>
+                      <td className="px-2 py-2 font-semibold" colSpan={6}>
                         全体（先頭着手〜最終完了）
                       </td>
                       <td className="px-2 py-2 whitespace-nowrap">{scheduleSpan.start}</td>

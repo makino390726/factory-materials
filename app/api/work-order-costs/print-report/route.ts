@@ -389,6 +389,9 @@ async function buildModelCostList(fiscalYear: number) {
           total_cost: Math.round(shown.total_cost),
           realtime_applied: Boolean(saved),
           realtime_label: saved?.applied_label || null,
+          st_minutes: saved?.st_minutes || 0,
+          st_labor_cost: saved?.labor_cost || 0,
+          st_indirect_cost: saved?.indirect_cost || 0,
           cost_calculated:
             Boolean(saved) ||
             annualSaved ||

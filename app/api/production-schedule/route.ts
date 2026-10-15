@@ -25,6 +25,11 @@ function parseTargetType(value: unknown): ProcessTargetType | null {
   return null
 }
 
+function parseLaborModel(value: unknown): string | null {
+  const model = String(value || '').trim()
+  return model || null
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -134,19 +139,21 @@ export async function POST(request: NextRequest) {
       const rawLots = Array.isArray(body.lots) ? body.lots : []
       const lots: SavedScheduleLotInput[] = []
       for (const raw of rawLots) {
-        const targetType = parseTargetType(raw?.target_type)
+        const laborModel = parseLaborModel(raw?.labor_model)
+        const targetType = parseTargetType(raw?.target_type) || (laborModel ? 'instruction' : null)
         const targetCode = String(raw?.target_code || '').trim()
         const quantity = Number(raw?.quantity)
-        if (!targetType || !targetCode || !Number.isFinite(quantity) || quantity <= 0) continue
+        if ((!targetCode && !laborModel) || !targetType || !Number.isFinite(quantity) || quantity <= 0) continue
         lots.push({
-          key: String(raw?.key || `${targetType}:${targetCode}:${raw?.model || ''}`),
-          model: String(raw?.model || targetCode),
+          key: String(raw?.key || `${laborModel || targetType}:${targetCode}:${raw?.model || ''}`),
+          model: String(raw?.model || laborModel || targetCode),
           quantity,
           sequence: Number(raw?.sequence) || lots.length + 1,
           target_type: targetType,
           target_code: targetCode,
           label: raw?.label ? String(raw.label) : null,
           notes: raw?.notes != null && String(raw.notes).trim() ? String(raw.notes).trim() : null,
+          labor_model: laborModel,
           suggestions: Array.isArray(raw?.suggestions) ? raw.suggestions : undefined,
         })
       }
@@ -171,19 +178,21 @@ export async function POST(request: NextRequest) {
     const rawLots = Array.isArray(body.lots) ? body.lots : []
     const lots: ScheduleLotInput[] = []
     for (const raw of rawLots) {
-      const targetType = parseTargetType(raw?.target_type)
+      const laborModel = parseLaborModel(raw?.labor_model)
+      const targetType = parseTargetType(raw?.target_type) || (laborModel ? 'instruction' : null)
       const targetCode = String(raw?.target_code || '').trim()
       const quantity = Number(raw?.quantity)
-      if (!targetType || !targetCode || !Number.isFinite(quantity) || quantity <= 0) continue
+      if ((!targetCode && !laborModel) || !targetType || !Number.isFinite(quantity) || quantity <= 0) continue
       lots.push({
-        key: String(raw?.key || `${targetType}:${targetCode}:${raw?.model || ''}`),
-        model: String(raw?.model || targetCode),
+        key: String(raw?.key || `${laborModel || targetType}:${targetCode}:${raw?.model || ''}`),
+        model: String(raw?.model || laborModel || targetCode),
         quantity,
         sequence: Number(raw?.sequence) || lots.length + 1,
         target_type: targetType,
         target_code: targetCode,
         label: raw?.label ? String(raw.label) : null,
         notes: raw?.notes != null && String(raw.notes).trim() ? String(raw.notes).trim() : null,
+        labor_model: laborModel,
       })
     }
 
