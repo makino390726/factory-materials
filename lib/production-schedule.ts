@@ -13,6 +13,7 @@ import {
   composeUfTotalStMap,
   getFiscalYearAverageStByWorkGroupForSpec,
   getProcessScheduleStSource,
+  listProcessScheduleStSourcesByModel,
   listProductionLotRecords,
   lotMatchesSpec,
   normalizeSpecKey,
@@ -179,6 +180,7 @@ async function attachScheduleProgress(
     { target_type: ProcessTargetType; target_code: string; lineId: string | null }
   >()
   for (const lot of result.lots) {
+    if (!String(lot.target_code || '').trim()) continue
     const key = `${lot.target_type}:${lot.target_code}`
     if (targetKeys.has(key)) continue
     const { lineId } = await resolveTargetContext(supabase, lot.target_type, lot.target_code)
@@ -838,28 +840,176 @@ function scaleStMap(stByGroup: Map<string, number>, targetMinutes: number) {
   return scaled
 }
 
-async function resolveCostListSt(
-  supabase: SupabaseClient,
-  saved: SavedModelRealtimeCost,
-  fiscalYear: number,
-  notes?: string | null
-): Promise<Map<string, number>> {
-  const targetType = saved.target_type === 'line' || saved.target_type === 'instruction'
-    ? saved.target_type
-    : null
-  const targetCode = String(saved.target_code || '').trim()
-  if (!targetType || !targetCode) {
-    return new Map([['_LABOR', saved.st_minutes]])
+function usableWorkGroupMap(stByGroup: Map<string, number>) {
+  const real = new Map<string, number>()
+  for (const [code, minutes] of stByGroup) {
+    if (minutes > 0 && code !== '_STANDARD' && code !== '_LABOR') real.set(code, minutes)
   }
-  const { map } = await getFiscalYearAverageStByWorkGroupForSpec(
+  if (real.size < 2) return null
+  const sum = sumStMinutes(real)
+  const significant = new Map<string, number>()
+  for (const [code, minutes] of real) {
+    if (sum <= 0 || minutes / sum >= 0.01) significant.set(code, minutes)
+  }
+  return significant.size >= 2 ? significant : real
+}
+
+function scheduleModelTokens(code: string, name?: string | null) {
+  const tokens = new Set<string>()
+  const add = (value: string) => {
+    const token = value.trim().toUpperCase().replace(/\s+/g, '')
+    if (token.length >= 3) tokens.add(token)
+  }
+  add(code)
+  add(canonicalScheduleModel(code))
+  add(String(name || ''))
+  const source = `${code} ${name || ''}`
+  for (const match of source.match(/[A-Z]{1,3}-?\d+[A-Z0-9-]*/gi) || []) add(match)
+  for (const token of [...tokens]) add(token.replace(/-(DF|UF)$/i, ''))
+  return [...tokens].sort((a, b) => b.length - a.length)
+}
+
+function textHasModelToken(text: string, token: string) {
+  const hay = text.toUpperCase().replace(/\s+/g, '')
+  const needle = token.toUpperCase().replace(/\s+/g, '')
+  let from = 0
+  while (from < hay.length) {
+    const index = hay.indexOf(needle, from)
+    if (index < 0) return false
+    const next = hay[index + needle.length] || ''
+    if (!/[A-Z0-9]/.test(next)) return true
+    from = index + 1
+  }
+  return false
+}
+
+async function resolveGroupShape(
+  supabase: SupabaseClient,
+  targetType: ProcessTargetType,
+  targetCode: string,
+  fiscalYear: number,
+  notes: string | null | undefined,
+  model: string
+) {
+  const resolved = await resolveWorkGroupStMinutes(
     supabase,
     targetType,
     targetCode,
     fiscalYear,
-    normalizeSpecKey(notes) || null
+    notes,
+    model
   )
-  if (map.size === 0) return new Map([['_LABOR', saved.st_minutes]])
-  return scaleStMap(map, saved.st_minutes)
+  const map = usableWorkGroupMap(resolved.stByGroup)
+  if (!map) return null
+  return { map, note: resolved.note }
+}
+
+function isManualLaborCost(saved: SavedModelRealtimeCost) {
+  if (saved.target_type === 'manual') return true
+  return String(saved.applied_label || '').trim().startsWith('手入力')
+}
+
+async function resolveCostListSt(
+  supabase: SupabaseClient,
+  saved: SavedModelRealtimeCost,
+  fiscalYear: number,
+  notes: string | null | undefined,
+  lotModel: string,
+  lines: Array<{ line_code: string; name: string }>
+): Promise<{ stByGroup: Map<string, number>; splitNote: string | null }> {
+  const fallback = () => ({
+    stByGroup: new Map([['_LABOR', saved.st_minutes]]),
+    splitNote: null as string | null,
+  })
+
+  // 手入力の工費は合計だけなので、作業班には分けず工費1行にする
+  if (isManualLaborCost(saved)) return fallback()
+
+  const savedType = saved.target_type === 'line' || saved.target_type === 'instruction'
+    ? saved.target_type
+    : null
+  const savedCode = String(saved.target_code || '').trim()
+  if (savedType && savedCode && savedCode !== saved.model) {
+    const shaped = await resolveGroupShape(
+      supabase,
+      savedType,
+      savedCode,
+      fiscalYear,
+      notes,
+      lotModel || saved.model
+    )
+    if (shaped) {
+      return {
+        stByGroup: scaleStMap(shaped.map, saved.st_minutes),
+        splitNote: shaped.note,
+      }
+    }
+  }
+
+  const modelCodes = [...new Set([...scheduleModelLookupCodes(saved.model), ...scheduleModelLookupCodes(lotModel)])]
+  const sources = []
+  for (const code of modelCodes) {
+    sources.push(...(await listProcessScheduleStSourcesByModel(supabase, code)))
+  }
+  const spec = normalizeSpecKey(notes) || ''
+  const orderedSources = [...sources].sort((a, b) => {
+    const aSpec = (a.spec_key || '') === spec ? 0 : 1
+    const bSpec = (b.spec_key || '') === spec ? 0 : 1
+    return aSpec - bSpec
+  })
+  for (const source of orderedSources.slice(0, 4)) {
+    const shaped = await resolveGroupShape(
+      supabase,
+      source.target_type,
+      source.target_code,
+      fiscalYear,
+      notes || source.spec_key,
+      source.model
+    )
+    if (!shaped) continue
+    return {
+      stByGroup: scaleStMap(shaped.map, saved.st_minutes),
+      splitNote: shaped.note,
+    }
+  }
+
+  let modelName = ''
+  const nameCode = lotModel || saved.model
+  if (nameCode) {
+    const { data } = await supabase
+      .from('heater_models')
+      .select('name')
+      .eq('model', nameCode)
+      .maybeSingle()
+    modelName = String(data?.name || '')
+  }
+  const tokens = scheduleModelTokens(nameCode, modelName)
+  const matchedLine = lines
+    .map((line) => {
+      const text = `${line.line_code} ${line.name}`
+      const token = tokens.find((item) => textHasModelToken(text, item))
+      return token ? { line, token } : null
+    })
+    .filter((item): item is { line: { line_code: string; name: string }; token: string } => Boolean(item))
+    .sort((a, b) => b.token.length - a.token.length)[0]
+  if (matchedLine) {
+    const shaped = await resolveGroupShape(
+      supabase,
+      'line',
+      matchedLine.line.line_code,
+      fiscalYear,
+      notes,
+      nameCode
+    )
+    if (shaped) {
+      return {
+        stByGroup: scaleStMap(shaped.map, saved.st_minutes),
+        splitNote: shaped.note || `${matchedLine.line.name}の作業班比率`,
+      }
+    }
+  }
+
+  return fallback()
 }
 
 export async function buildProductionSchedule(
@@ -879,6 +1029,16 @@ export async function buildProductionSchedule(
   const warnings: string[] = []
 
   const workGroupMaster = await fetchWorkGroupOrder(supabase)
+  const { data: lineRows } = await supabase
+    .from('lines')
+    .select('line_code, name')
+    .eq('is_active', true)
+  const scheduleLines = (lineRows || [])
+    .map((row) => ({
+      line_code: String(row.line_code || '').trim(),
+      name: String(row.name || '').trim(),
+    }))
+    .filter((row) => row.line_code)
   const nameByCode = new Map(workGroupMaster.map((g) => [g.work_group_code, g.work_group_name]))
   nameByCode.set('_STANDARD', '指令標準時間')
   nameByCode.set('_LABOR', '工費')
@@ -932,12 +1092,20 @@ export async function buildProductionSchedule(
           indirect_cost: saved.indirect_cost,
         }
         appliedLaborModel = savedModel
-        const stByGroup = await resolveCostListSt(supabase, saved, fiscalYear, lot.notes)
+        const shaped = await resolveCostListSt(
+          supabase,
+          saved,
+          fiscalYear,
+          lot.notes,
+          lot.model,
+          scheduleLines
+        )
         const label = saved.applied_label || '原価一覧'
+        const split = shaped.splitNote ? `。作業班は工程管理の比率で按分（${shaped.splitNote}）` : ''
         resolved = {
           source: 'cost_list',
-          note: `機種一覧 ${canonicalScheduleModel(savedModel)} の工費 ${saved.st_minutes}分/台（${label} / ¥${saved.labor_cost.toLocaleString('ja-JP')}）`,
-          stByGroup,
+          note: `機種一覧 ${canonicalScheduleModel(savedModel)} の工費 ${saved.st_minutes}分/台（${label} / ¥${saved.labor_cost.toLocaleString('ja-JP')}）${split}`,
+          stByGroup: shaped.stByGroup,
         }
       } else if (!targetCode) {
         warnings.push(
