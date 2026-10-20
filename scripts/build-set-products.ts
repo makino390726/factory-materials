@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { parseSetWorkbook, saveSetProducts } from '../lib/set-products.ts'
+import { parseSetWorkbook, saveSetProducts } from '../lib/set-products'
 
 const sourcePath = process.argv[2]
 if (!sourcePath) {
