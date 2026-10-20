@@ -40,7 +40,7 @@ function formatYen(value: number | null | undefined): string {
 
 interface InventoryState {
   searchTerm: string
-  sortBy: 'code' | 'name' | 'qty' | 'movement' | 'movementDate'
+  sortBy: 'code' | 'name' | 'shelf' | 'qty' | 'movement' | 'movementDate'
   movementType: 'all' | 'IN' | 'OUT'
   filterLowStock: boolean
   movementStartDate: string
@@ -55,7 +55,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [sortBy, setSortBy] = useState<'code' | 'name' | 'qty' | 'movement' | 'movementDate'>('code')
+  const [sortBy, setSortBy] = useState<'code' | 'name' | 'shelf' | 'qty' | 'movement' | 'movementDate'>('code')
   const [movementType, setMovementType] = useState<'all' | 'IN' | 'OUT'>('all')
   const [filterLowStock, setFilterLowStock] = useState(false)
   const [movementStartDate, setMovementStartDate] = useState('')
@@ -142,8 +142,10 @@ export default function InventoryPage() {
 
   // フィルタリングとソート
   let filteredStocks = stocks.filter(item => {
-    const matchesSearch = item.product_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    const keyword = searchTerm.toLowerCase()
+    const matchesSearch = item.product_code.toLowerCase().includes(keyword) ||
+                         item.name.toLowerCase().includes(keyword) ||
+                         (item.shelf_no || '').toLowerCase().includes(keyword)
     const matchesFilter = !filterLowStock || item.stock_qty <= 10
     const matchesMovementFilter = item.matches_movement_filter !== false
     return matchesSearch && matchesFilter && matchesMovementFilter
@@ -152,6 +154,11 @@ export default function InventoryPage() {
   filteredStocks.sort((a, b) => {
     if (sortBy === 'code') return a.product_code.localeCompare(b.product_code)
     if (sortBy === 'name') return a.name.localeCompare(b.name)
+    if (sortBy === 'shelf') {
+      const shelfCompare = (a.shelf_no || '').localeCompare(b.shelf_no || '', 'ja')
+      if (shelfCompare !== 0) return shelfCompare
+      return a.product_code.localeCompare(b.product_code)
+    }
     if (sortBy === 'qty') return (b.stock_qty || 0) - (a.stock_qty || 0)
     if (sortBy === 'movement') {
       const aHas = a.has_movement ? 1 : 0
@@ -312,7 +319,7 @@ export default function InventoryPage() {
                     setSearchTerm(e.target.value)
                     setCurrentPage(1)
                   }}
-                  placeholder="コード・名称..."
+                  placeholder="コード・名称・棚番..."
                   className="w-full px-4 py-2 bg-slate-800 border-2 border-purple-400 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-300 focus:shadow-[0_0_10px_rgba(168,85,247,0.5)]"
                 />
               </div>
@@ -333,6 +340,7 @@ export default function InventoryPage() {
                 >
                   <option value="code">コード順</option>
                   <option value="name">名称順</option>
+                  <option value="shelf">棚番順</option>
                   <option value="qty">在庫数順</option>
                   <option value="movement">在庫変動あり順</option>
                   <option value="movementDate">移動日順</option>
@@ -493,6 +501,7 @@ export default function InventoryPage() {
                     <tr>
                       <th className="px-6 py-4 text-left text-cyan-300 font-bold">製品コード</th>
                       <th className="px-6 py-4 text-left text-cyan-300 font-bold">製品名</th>
+                      <th className="px-6 py-4 text-left text-cyan-300 font-bold">棚番</th>
                       <th className="px-6 py-4 text-right text-cyan-300 font-bold">在庫数</th>
                       <th className="px-6 py-4 text-right text-cyan-300 font-bold">単価</th>
                       <th className="px-6 py-4 text-right text-cyan-300 font-bold">在庫金額</th>
@@ -510,6 +519,7 @@ export default function InventoryPage() {
                       >
                         <td className="px-6 py-4 font-semibold text-cyan-300">{item.product_code}</td>
                         <td className="px-6 py-4 text-gray-300">{item.name}</td>
+                        <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.shelf_no?.trim() || '—'}</td>
                         <td className="px-6 py-4 text-right">
                           <span className={`px-3 py-1 rounded-full font-bold text-sm ${
                             item.stock_qty === 0 ? 'bg-red-900/50 text-red-300 border border-red-500' :

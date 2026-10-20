@@ -1,0 +1,3818 @@
+{
+  "source_name": "セット品リスト.xlsx",
+  "imported_at": "2026-10-20T04:07:14.666Z",
+  "warnings": [],
+  "sets": [
+    {
+      "id": "set-1",
+      "sheet_name": "D令3-91　EC30",
+      "set_code": "86003100",
+      "set_name": "不完全燃焼警報機 SG-CO1-01",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85070700",
+          "product_name": "新コスモス CO警報機 XW-715G",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85070800",
+          "product_name": "新コスモス 出力信号変換器 OC-3a",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85060500",
+          "product_name": "（生産中止）リレー HJ2 AC100V 2C AHJ3124",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85072000",
+          "product_name": "リレー用端子台 AP3822K HC2-SF-K",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85073300",
+          "product_name": "警報ブザー（ブラケット付） EA-4201",
+          "qty_per_set": 1,
+          "supplier": "九州オリンピア"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85366100",
+          "product_name": "豊澄 トランス AD21-020A（AC200V→100V）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85072200",
+          "product_name": "押釦スイッチ 日開 SB-4011（N/C）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85072300",
+          "product_name": "カラーキャップ AT-422-R（赤色）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85072400",
+          "product_name": "IDEC 端子台 BTB15C4（４P)",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85119600",
+          "product_name": "シール P-584 不完全燃焼警報機",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85119700",
+          "product_name": "シール P-583 警告 ●警報器が鳴り始めたらすぐ",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85014100",
+          "product_name": "PLシール（感電の恐れ） P-332 H82010",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85027900",
+          "product_name": "グロメット C-30-SG-20A タキゲン",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85064200",
+          "product_name": "CTコード VCTF0.75×4C（灰）",
+          "qty_per_set": 4,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 15,
+          "product_code": "81023300",
+          "product_name": "ユニクロナベビス M4×16 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 16,
+          "product_code": "81024600",
+          "product_name": "ユニクロナベビス M3×18 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 17,
+          "product_code": "81024700",
+          "product_name": "ユニクロナベビス M4×6 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        }
+      ]
+    },
+    {
+      "id": "set-2",
+      "sheet_name": "D31-341 箱型乾燥機 制御ボックス",
+      "set_code": "",
+      "set_name": "箱型乾燥機 制御ボックス",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85216600",
+          "product_name": "電源コードプラグ付 VCTFK1.25×2C×3m (灰)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 2,
+          "product_code": "85055000",
+          "product_name": "温調 DG121-5025",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 3,
+          "product_code": "85115500",
+          "product_name": "デジタルタイマー H5CZ-L8 100V オムロン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 4,
+          "product_code": "85065000",
+          "product_name": "ソケット P3G-08",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 5,
+          "product_code": "85169700",
+          "product_name": "埋込み取付用アダプタ Y92F-30 オムロン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 6,
+          "product_code": "85185700",
+          "product_name": "コマンドスイッチ AR22PY-231B 3a1b",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 7,
+          "product_code": "85179500",
+          "product_name": "押しボタンスイッチ A2A-4B オムロン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 8,
+          "product_code": "85186800",
+          "product_name": "電磁接触器 FC-0 100V 1a",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 9,
+          "product_code": "85207200",
+          "product_name": "ｻｰﾏﾙﾀｲﾏｰ（バイメタルタイマー） 100M-180 4BFP1",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 10,
+          "product_code": "85060500",
+          "product_name": "リレー HJ2 AC100V 2C AHJ3124",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 11,
+          "product_code": "85060600",
+          "product_name": "リレーソケット HJ2-SFD",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 12,
+          "product_code": "85050400",
+          "product_name": "ヒューズホルダー F-4000",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 13,
+          "product_code": "85067800",
+          "product_name": "コンデンサ 30μF 220VAC",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 14,
+          "product_code": "85059200",
+          "product_name": "春日 端子台 T10-12P",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 15,
+          "product_code": "85034900",
+          "product_name": "パチン錠 C-12-2-2",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 16,
+          "product_code": "85033500",
+          "product_name": "平蝶番（穴無） B-102-3",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 17,
+          "product_code": "85028000",
+          "product_name": "グロメット C-30-SG-18A タキゲン",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 18,
+          "product_code": "85185800",
+          "product_name": "スイッチ銘板 (停止・運転)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 19,
+          "product_code": "85147300",
+          "product_name": "ガラス管ヒューズ TWO 125V 15A 100個入 （富士端子工業）",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 20,
+          "product_code": "85061000",
+          "product_name": "サーミスタ組立（図番4-E1402） たばこ用サーミスタコード L=5m",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 21,
+          "product_code": "85116200",
+          "product_name": "シール （ヒューズ） P-524",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 22,
+          "product_code": "85117100",
+          "product_name": "シール （タイマーリセット） P-599",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 23,
+          "product_code": "85116100",
+          "product_name": "シール 運転スイッチ P-508",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 24,
+          "product_code": "85117000",
+          "product_name": "シール （乾燥タイマー） P-503",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 25,
+          "product_code": "85116500",
+          "product_name": "シール （温度調節器） P-193",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 26,
+          "product_code": "85117300",
+          "product_name": "シール 名板 （三州産業） P-312",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 27,
+          "product_code": "85117200",
+          "product_name": "シール 端子案内 P-570",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 28,
+          "product_code": "85014100",
+          "product_name": "PLシール（感電の恐れ） P-332 H82010",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 29,
+          "product_code": "85062500",
+          "product_name": "配線ダクト AD-232",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 30,
+          "product_code": "85063100",
+          "product_name": "スパイラルチューブ KS-6",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 31,
+          "product_code": "81024000",
+          "product_name": "クロメートナベセムス M4×16（P=4） FAHV",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 32,
+          "product_code": "81010900",
+          "product_name": "クロメートナベセムス M4×10（P=3） FAHU",
+          "qty_per_set": 8,
+          "supplier": ""
+        },
+        {
+          "line_no": 33,
+          "product_code": "85038700",
+          "product_name": "インシュロックタイ AB-100W",
+          "qty_per_set": 1,
+          "supplier": ""
+        }
+      ]
+    },
+    {
+      "id": "set-3",
+      "sheet_name": "D31-344 SG-CO1-01",
+      "set_code": "86003100",
+      "set_name": "不完全燃焼警報機 SG-CO1-01",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85070700",
+          "product_name": "新コスモス CO警報機 XW-715G",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85070800",
+          "product_name": "新コスモス 出力信号変換器 OC-3a",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85060500",
+          "product_name": "（生産中止）リレー HJ2 AC100V 2C AHJ3124",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85072000",
+          "product_name": "リレー用端子台 AP3822K HC2-SF-K",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85073300",
+          "product_name": "警報ブザー（ブラケット付） EA-4201",
+          "qty_per_set": 1,
+          "supplier": "九州オリンピア"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85366100",
+          "product_name": "豊澄 トランス AD21-020A（AC200V→100V）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85072200",
+          "product_name": "押釦スイッチ 日開 SB-4011（N/C）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85072300",
+          "product_name": "カラーキャップ AT-422-R（赤色）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85072400",
+          "product_name": "IDEC 端子台 BTB15C4（４P)",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85119600",
+          "product_name": "シール P-584 不完全燃焼警報機",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85119700",
+          "product_name": "シール P-583 警告 ●警報器が鳴り始めたらすぐ",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85014100",
+          "product_name": "PLシール（感電の恐れ） P-332 H82010",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85027900",
+          "product_name": "グロメット C-30-SG-20A タキゲン",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85064200",
+          "product_name": "CTコード VCTF0.75×4C（灰）",
+          "qty_per_set": 4,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 15,
+          "product_code": "81023300",
+          "product_name": "ユニクロナベビス M4×16 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 16,
+          "product_code": "81024600",
+          "product_name": "ユニクロナベビス M3×18 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 17,
+          "product_code": "81024700",
+          "product_name": "ユニクロナベビス M4×6 FAHJ",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        }
+      ]
+    },
+    {
+      "id": "set-4",
+      "sheet_name": "D令3-187除草剤散布機",
+      "set_code": "86004200",
+      "set_name": "除草剤散布機 TJS-20",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85012100",
+          "product_name": "ウォッシャブルタンク WASH-N20L",
+          "qty_per_set": 1,
+          "supplier": "MonotaRo"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85396800",
+          "product_name": "ゴムロープ　W20㎜×40m　1巻(40m)",
+          "qty_per_set": 0.1,
+          "supplier": "MonotaRo"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85012300",
+          "product_name": "ゴムロープ金具 GA-10 ユタカメイク（1袋＝2個）",
+          "qty_per_set": 2,
+          "supplier": "MonotaRo"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85058000",
+          "product_name": "ビニールブレードホース 透明 4.5×10",
+          "qty_per_set": 0.8,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85058100",
+          "product_name": "ビニールチューブ 透明 6×9",
+          "qty_per_set": 0.6,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85012400",
+          "product_name": "マグネット C-106-3 タキゲン",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85027100",
+          "product_name": "グロメット C-30-BW-12-2EP-UL タキゲン",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85010100",
+          "product_name": "タバコマルチ用5頭口 P=160 TP-3316 ヤマホ",
+          "qty_per_set": 1,
+          "supplier": "ヤマホ"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85010200",
+          "product_name": "ボールコック G1/4 321412 ヤマホ",
+          "qty_per_set": 1,
+          "supplier": "ヤマホ"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85010300",
+          "product_name": "オスメスジョイント G1/4 751117 ヤマホ",
+          "qty_per_set": 1,
+          "supplier": "ヤマホ"
+        },
+        {
+          "line_no": 11,
+          "product_code": "84001000",
+          "product_name": "黒鉄板 SPHC t3.2×914×1829",
+          "qty_per_set": 0.2,
+          "supplier": "井上金属"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85011300",
+          "product_name": "スイッチAYコントロール 154100-0310 デンソー",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85011400",
+          "product_name": "エマヒューズホルダー EHC-60 デンソー",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85011500",
+          "product_name": "ブレードヒューズ 5A SAF6050",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 15,
+          "product_code": "85011600",
+          "product_name": "トグルスイッチ TS50",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 16,
+          "product_code": "85011700",
+          "product_name": "防水キャップ BT01 デンソー",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 17,
+          "product_code": "85011800",
+          "product_name": "ハウジング Y31（オス）10個入",
+          "qty_per_set": 0.1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 18,
+          "product_code": "85012800",
+          "product_name": "グロメット BU-687-C サトーパーツ",
+          "qty_per_set": 3,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 19,
+          "product_code": "85038700",
+          "product_name": "インシュロックタイ AB-100W",
+          "qty_per_set": 10,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 20,
+          "product_code": "82000100",
+          "product_name": "ダンボール 三州除草剤散布機",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 21,
+          "product_code": "82000200",
+          "product_name": "ダンボール 三州除草剤散布機 部品箱",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 22,
+          "product_code": "81001600",
+          "product_name": "ユニクロトラスビス M6×20 FAHM",
+          "qty_per_set": 1.6,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 23,
+          "product_code": "81001900",
+          "product_name": "ユニクロナベ小ネジ M6×20 FAHJ",
+          "qty_per_set": 0.5,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 24,
+          "product_code": "81007000",
+          "product_name": "ステンレスナベセムスビス M4×10 P=3 FAGY",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 25,
+          "product_code": "81017500",
+          "product_name": "ユニクロPW M6 FASC",
+          "qty_per_set": 10,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 26,
+          "product_code": "81017600",
+          "product_name": "ユニクロSW M6 FBPV",
+          "qty_per_set": 6,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 27,
+          "product_code": "81017700",
+          "product_name": "ユニクロ六角ナット M6 FALR",
+          "qty_per_set": 6,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 28,
+          "product_code": "81047800",
+          "product_name": "三価クロメートナベセムス        M5×10　(P=3)",
+          "qty_per_set": 3,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 29,
+          "product_code": "85066600",
+          "product_name": "ユニクロUボルト                 M8×65",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 30,
+          "product_code": "85010400",
+          "product_name": "モーターポンプセット 5ｋ仕様 BP-105DX 4563200 麻場",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 31,
+          "product_code": "85010800",
+          "product_name": "調圧弁部一式 5K用（金具付） BP-103 （部品コード450090870）",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 32,
+          "product_code": "85215500",
+          "product_name": "給水ストレーナ TJS-20用 4560890 (T-10、T-11、T-12、T-30のセット)",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 33,
+          "product_code": "85011200",
+          "product_name": "調圧弁用ロックナット G1/4 400433920",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 34,
+          "product_code": "85125100",
+          "product_name": "クイックスプレー吐出ホースAY 450101350",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 35,
+          "product_code": "85010600",
+          "product_name": "クレセントクランプ              RS-8004（φ10）　麻場",
+          "qty_per_set": 3,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 36,
+          "product_code": "85010700",
+          "product_name": "クレセントクランプ              RS-8001（φ9）　麻場",
+          "qty_per_set": 2,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 37,
+          "product_code": "85014100",
+          "product_name": "PLシール（感電の恐れ） P-332 H82010",
+          "qty_per_set": 2,
+          "supplier": "木山印刷"
+        }
+      ]
+    },
+    {
+      "id": "set-5",
+      "sheet_name": "D31-374  ポンプモーター変更キット",
+      "set_code": "86008000",
+      "set_name": "ポンプモータ変更キット TJS-20用",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85010400",
+          "product_name": "モーターポンプセット 5ｋ仕様 BP-105DX 4563200 麻場",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85010800",
+          "product_name": "調圧弁部一式 5K用（金具付） BP-103 （部品コード450090870）",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85010500",
+          "product_name": "ホース φ4.5糸入り 外径φ10×内径φ4.5 2202 麻場",
+          "qty_per_set": 0.01,
+          "supplier": ""
+        },
+        {
+          "line_no": 4,
+          "product_code": "85010600",
+          "product_name": "クレセットクランプ RS-8004（φ10） 麻場",
+          "qty_per_set": 1,
+          "supplier": "麻場"
+        }
+      ]
+    },
+    {
+      "id": "set-6",
+      "sheet_name": "D31-281   SGR-300",
+      "set_code": "86304100",
+      "set_name": "SGR-300用部材",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85107400",
+          "product_name": "バーナーフランジパッキンKP-8（151.5t×225φ×170φ×200P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85107600",
+          "product_name": "火炉フランジパッキンKP-3（500～85t×350φ×262φ×320P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85106700",
+          "product_name": "フレキホース T型 65φ×5m 両端カフス付",
+          "qty_per_set": 1,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85027800",
+          "product_name": "グロメット C-30-SG-26A タキゲン",
+          "qty_per_set": 5,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85027900",
+          "product_name": "グロメット C-30-SG-20A タキゲン",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85034900",
+          "product_name": "パチン錠 C-12-2-2",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85252500",
+          "product_name": "抜差蝶番 B-1075-L",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85250000",
+          "product_name": "有圧換気扇 EWF-30BTA 低騒音排気専用 三相",
+          "qty_per_set": 1,
+          "supplier": "丸岩電機"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85252400",
+          "product_name": "オイルバーナー GB-300C2 0.65G/H 60° フォトIC仕様",
+          "qty_per_set": 1,
+          "supplier": "九州オリンピア"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85239500",
+          "product_name": "プロテクトリレー OPR-200-1 （フォトIC用）ﾊﾞｰﾅｰｺﾝﾄﾛｰﾙﾘﾚｰ",
+          "qty_per_set": 1,
+          "supplier": "九州オリンピア"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85058200",
+          "product_name": "サーモスタット 03PN6171A80 SK、SG用 ハイリミット",
+          "qty_per_set": 1,
+          "supplier": "松尾電器"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85058400",
+          "product_name": "ｻｰﾏﾙﾀｲﾏｰ（バイメタルタイマー） 200-M-180 4BFP1",
+          "qty_per_set": 1,
+          "supplier": "松尾電器"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85366700",
+          "product_name": "サーキットプロテクタ CP30-BA 3P 1-M 5A 三菱電機",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85366800",
+          "product_name": "ミニパワーリレー MY4N AC200/220 オムロン",
+          "qty_per_set": 3,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 15,
+          "product_code": "85366900",
+          "product_name": "ミニパワーリレー MY2N AC200/220 オムロン",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 16,
+          "product_code": "85180000",
+          "product_name": "リレーソケット PYF14A",
+          "qty_per_set": 3,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 17,
+          "product_code": "85004200",
+          "product_name": "オムロン ソケット PYF08A FOR MY",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 18,
+          "product_code": "85139700",
+          "product_name": "表示灯（赤） BN-5665-2-R AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 19,
+          "product_code": "85003700",
+          "product_name": "表示灯（緑） BN-5665-2-G AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 20,
+          "product_code": "85062800",
+          "product_name": "アルミレール TB-DR(1m) 日東アルミレール",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 21,
+          "product_code": "85059800",
+          "product_name": "春日 端子台 T10-22P",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 22,
+          "product_code": "85396100",
+          "product_name": "組端子 PTU-10 東洋技研",
+          "qty_per_set": 38,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 23,
+          "product_code": "85396200",
+          "product_name": "組端子側板 PTU-10L2 東洋技研",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 24,
+          "product_code": "85396300",
+          "product_name": "端子台止め金具 HDV-1 東洋技研",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 25,
+          "product_code": "85137900",
+          "product_name": "スナップスイッチ WD1011F パナソ ニック",
+          "qty_per_set": 3,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 26,
+          "product_code": "85012800",
+          "product_name": "グロメット BU-687-C サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 27,
+          "product_code": "85035600",
+          "product_name": "網付きキャップ 60φ",
+          "qty_per_set": 1,
+          "supplier": "東洋アルチタイト"
+        },
+        {
+          "line_no": 28,
+          "product_code": "85003400",
+          "product_name": "A-TB72-D-HR1A-200V ATB71015 パナソニック タイムスイッチ",
+          "qty_per_set": 1,
+          "supplier": "八洲産業"
+        },
+        {
+          "line_no": 29,
+          "product_code": "85252700",
+          "product_name": "ﾃﾞｼﾞﾀﾙ指示調節計(盤面取付形) BCS2R00-00 AC100～240V",
+          "qty_per_set": 1,
+          "supplier": "八洲産業"
+        },
+        {
+          "line_no": 30,
+          "product_code": "85363400",
+          "product_name": "室内型CO2濃度センサー DSW-200-CO2-2-1-1",
+          "qty_per_set": 1,
+          "supplier": "八洲産業"
+        },
+        {
+          "line_no": 31,
+          "product_code": "85252800",
+          "product_name": "パワーサプライ PLA30F-24 コーセル㈱",
+          "qty_per_set": 1,
+          "supplier": "八洲産業"
+        },
+        {
+          "line_no": 32,
+          "product_code": "85396400",
+          "product_name": "DINレール取付金具 FD-PLA30-2 コーセル",
+          "qty_per_set": 1,
+          "supplier": "八洲産業"
+        },
+        {
+          "line_no": 33,
+          "product_code": "85077400",
+          "product_name": "杉1等 角材 4000×60×60 木枠 ベース枠用",
+          "qty_per_set": 1,
+          "supplier": "渕脇"
+        }
+      ]
+    },
+    {
+      "id": "set-7",
+      "sheet_name": "SGR-300",
+      "set_code": "",
+      "set_name": "SGR-300",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85250000",
+          "product_name": "有圧換気扇 EWF-30BTA 低騒音排気専用 三相",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 2,
+          "product_code": "83021700",
+          "product_name": "オイルバーナー GB-300C3 200V 0.55G/H60°HFD フォトIC仕様",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 3,
+          "product_code": "85107100",
+          "product_name": "バーナフランジパッキンKP-8（500 1.5t×275φ×220φ×250P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 4,
+          "product_code": "85107600",
+          "product_name": "火炉フランジパッキンKP-3（500～85t×350φ×262φ×320P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 5,
+          "product_code": "85035600",
+          "product_name": "網付きキャップ 60φ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 6,
+          "product_code": "85106700",
+          "product_name": "フレキホース T型 65φ×5m 両端カフス付",
+          "qty_per_set": 0.5,
+          "supplier": ""
+        },
+        {
+          "line_no": 7,
+          "product_code": "81003500",
+          "product_name": "ユニクロ六角コーチスクリュー M6×50 FAGN",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 8,
+          "product_code": "81012200",
+          "product_name": "クロメート六角ボルト M6×15 FAAX",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 9,
+          "product_code": "81016700",
+          "product_name": "クロメートPW M6 FASK",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 10,
+          "product_code": "81021800",
+          "product_name": "クロメートナベセムス M4×12（P=3） FAHU",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 11,
+          "product_code": "81011800",
+          "product_name": "クロメートナベセムス M5×12（P=3） FAHU",
+          "qty_per_set": 51,
+          "supplier": ""
+        },
+        {
+          "line_no": 12,
+          "product_code": "81026800",
+          "product_name": "三価クロメート六角アプセットセムス M8×25(P=3) FBAB",
+          "qty_per_set": 8,
+          "supplier": ""
+        },
+        {
+          "line_no": 13,
+          "product_code": "81021400",
+          "product_name": "ステンレストラステクス M4×13（細目） SACH",
+          "qty_per_set": 20,
+          "supplier": ""
+        },
+        {
+          "line_no": 14,
+          "product_code": "81007300",
+          "product_name": "ステンレスナベテクス M3.5×10 FBLQ",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 15,
+          "product_code": "81010400",
+          "product_name": "クロメート蝶ボルト M6×10 SALG",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 16,
+          "product_code": "81012000",
+          "product_name": "クロメートアイボルト M8",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 17,
+          "product_code": "81017000",
+          "product_name": "クロメートPW M8 FASK",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 18,
+          "product_code": "85430200",
+          "product_name": "プロテクトリレー OPR-200-1C （フォトIC用）ﾊﾞｰﾅｰｺﾝﾄﾛｰﾙﾘﾚｰ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 19,
+          "product_code": "85058200",
+          "product_name": "サーモスタット 03PN6171A80 SK、SG用 ハイリミット",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 20,
+          "product_code": "85058300",
+          "product_name": "サーモスタット(ボタン付き) SK用 23PN1316A120 ハイリミット",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 21,
+          "product_code": "85003400",
+          "product_name": "A-TB72-D-HR1A-200V ATB71015 パナソニック タイムスイッチ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 22,
+          "product_code": "85443400",
+          "product_name": "サーキットプロテクタ CP30-BA 3P 1-M 10A 三菱電機",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 23,
+          "product_code": "85366800",
+          "product_name": "ミニパワーリレー MY4N AC200/220 オムロン",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 24,
+          "product_code": "85180000",
+          "product_name": "リレーソケット PYF14A",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 25,
+          "product_code": "85004300",
+          "product_name": "保持金具 PYC-A1 2本1組 オムロン",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 26,
+          "product_code": "85087500",
+          "product_name": "オムロン タイマー H3YN-2 AC200V",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 27,
+          "product_code": "85004200",
+          "product_name": "オムロン ソケット PYF08A FOR MY",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 28,
+          "product_code": "85007100",
+          "product_name": "保持金具 Y92H-3 (2本1組) オムロン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 29,
+          "product_code": "85003700",
+          "product_name": "表示灯（緑） BN-5665-2-G AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 30,
+          "product_code": "85139700",
+          "product_name": "表示灯（赤） BN-5665-2-R AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 31,
+          "product_code": "85062800",
+          "product_name": "アルミレール TB-DR(1m) 日東アルミレール",
+          "qty_per_set": 0.5,
+          "supplier": ""
+        },
+        {
+          "line_no": 32,
+          "product_code": "85443500",
+          "product_name": "組端子 PTU-30 東洋技研",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 33,
+          "product_code": "85443600",
+          "product_name": "側板 PTU-30L2 東洋技研",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 34,
+          "product_code": "85443700",
+          "product_name": "端子台カバー CA-36 1m 東洋技研",
+          "qty_per_set": 0.045,
+          "supplier": ""
+        },
+        {
+          "line_no": 35,
+          "product_code": "85396100",
+          "product_name": "組端子 PTU-10 東洋技研",
+          "qty_per_set": 21,
+          "supplier": ""
+        },
+        {
+          "line_no": 36,
+          "product_code": "85396200",
+          "product_name": "組端子側板 PTU-10L2 東洋技研",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 37,
+          "product_code": "85403100",
+          "product_name": "端子台カバー CA-34 1m 東洋技研",
+          "qty_per_set": 0.15,
+          "supplier": ""
+        },
+        {
+          "line_no": 38,
+          "product_code": "85396300",
+          "product_name": "端子台止め金具 HDV-1 東洋技研",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 39,
+          "product_code": "85402400",
+          "product_name": "記名板 AM-10 1200mm×10mm 東洋技研",
+          "qty_per_set": 0.158,
+          "supplier": ""
+        },
+        {
+          "line_no": 40,
+          "product_code": "85067400",
+          "product_name": "ハウジングプラグ 3191-02P モレックス",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 41,
+          "product_code": "85134200",
+          "product_name": "ハウジングプラグ 3191-06P モレックス",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 42,
+          "product_code": "85050600",
+          "product_name": "カバー付ヒューズホルダー FHC-15",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 43,
+          "product_code": "85443800",
+          "product_name": "ガラス管ヒューズ 250V 3A φ6.4×30 FUJI FGBO-A等",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 44,
+          "product_code": "85137900",
+          "product_name": "スナップスイッチ WD1011F パナソ ニック",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 45,
+          "product_code": "85085100",
+          "product_name": "スナップスイッチ WD1511F パナソ ニック",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 46,
+          "product_code": "85027800",
+          "product_name": "グロメット C-30-SG-26A タキゲン",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 47,
+          "product_code": "85027900",
+          "product_name": "グロメット C-30-SG-20A タキゲン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 48,
+          "product_code": "85012800",
+          "product_name": "グロメット BU-687-C サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 49,
+          "product_code": "85034900",
+          "product_name": "パチン錠 C-12-2-2",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 50,
+          "product_code": "85252500",
+          "product_name": "抜差蝶番 B-1075-L",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 51,
+          "product_code": "85062400",
+          "product_name": "配線ダクト AD-262 2m",
+          "qty_per_set": 0.167,
+          "supplier": ""
+        },
+        {
+          "line_no": 52,
+          "product_code": "85062600",
+          "product_name": "配線ダクト AD-322",
+          "qty_per_set": 0.15,
+          "supplier": ""
+        },
+        {
+          "line_no": 53,
+          "product_code": "85015000",
+          "product_name": "SUSリベット SSD-42-BS",
+          "qty_per_set": 12,
+          "supplier": ""
+        },
+        {
+          "line_no": 54,
+          "product_code": "81010900",
+          "product_name": "クロメートナベセムス M4×10（P=3） FAHU",
+          "qty_per_set": 22,
+          "supplier": ""
+        },
+        {
+          "line_no": 55,
+          "product_code": "81041100",
+          "product_name": "三価クロメートナベセムス M4×8(P=2)",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 56,
+          "product_code": "81036600",
+          "product_name": "クロメートナベセムス M4×10（P=4） FAHV",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 57,
+          "product_code": "85366500",
+          "product_name": "パワーサプライ PLA15F-24 コーセル㈱",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 58,
+          "product_code": "85440400",
+          "product_name": "神港ﾃｸﾉｽ CO2濃度調節計 BCD2R00-00,T3098A(三州仕様)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 59,
+          "product_code": "85223000",
+          "product_name": "ハウジングプラグ 3191-04P モレックス",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 60,
+          "product_code": "81044400",
+          "product_name": "クロメートPW M4 FASK",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 61,
+          "product_code": "81044300",
+          "product_name": "クロメート六角ナット M4 FAMD",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 62,
+          "product_code": "85440300",
+          "product_name": "室内型CO2濃度センサー DSW-200-CO2-411",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 63,
+          "product_code": "85401800",
+          "product_name": "ハウジングレセプタクル 3191-04R1 モレックス",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 64,
+          "product_code": "81016900",
+          "product_name": "クロメートSW M8 FATW",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 65,
+          "product_code": "81017100",
+          "product_name": "クロメート六角ナット M8 FAMD",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 66,
+          "product_code": "85264700",
+          "product_name": "杉1等 角材 3000×60×60 木枠 ベース枠用",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 67,
+          "product_code": "85022300",
+          "product_name": "シール　P-132 運転中は送風機に～",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 68,
+          "product_code": "85016000",
+          "product_name": "シール　P-135 灯油に限る",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 69,
+          "product_code": "85017800",
+          "product_name": "シール　P-333 運転中は開けない",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 70,
+          "product_code": "85017900",
+          "product_name": "シール　P-334 煙突にふれないこと",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 71,
+          "product_code": "85018000",
+          "product_name": "シール　P-335 危険・警告・注意",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 72,
+          "product_code": "85014100",
+          "product_name": "PLシール　P-332 感電の恐れ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 73,
+          "product_code": "85140300",
+          "product_name": "シール　P-518 吐出口につき運搬～",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 74,
+          "product_code": "85449800",
+          "product_name": "ロゴシール　P-714 SANSHU",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 75,
+          "product_code": "85167100",
+          "product_name": "インシュロックタイ　AB-380",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 76,
+          "product_code": "85105300",
+          "product_name": "PEカバー　0.05×650×950×1500",
+          "qty_per_set": 1,
+          "supplier": ""
+        }
+      ]
+    },
+    {
+      "id": "set-8",
+      "sheet_name": "SGR-600",
+      "set_code": "",
+      "set_name": "SGR-600",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85363300",
+          "product_name": "機器冷却用有圧換気扇 EF-35UCT",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 2,
+          "product_code": "83021800",
+          "product_name": "オイルバーナー GB-600C3 200V 0.85G/H60°SS フォトIC仕様",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 3,
+          "product_code": "85107100",
+          "product_name": "バーナフランジパッキンKP-8（500 1.5t×275φ×220φ×250P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 4,
+          "product_code": "85107600",
+          "product_name": "火炉フランジパッキンKP-3（500～85t×350φ×262φ×320P×10φ-4",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 5,
+          "product_code": "85035600",
+          "product_name": "網付きキャップ 60φ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 6,
+          "product_code": "85106700",
+          "product_name": "フレキホース T型 65φ×5m 両端カフス付",
+          "qty_per_set": 0.5,
+          "supplier": ""
+        },
+        {
+          "line_no": 7,
+          "product_code": "81003500",
+          "product_name": "ユニクロ六角コーチスクリュー M6×50 FAGN",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 8,
+          "product_code": "81012200",
+          "product_name": "クロメート六角ボルト M6×15 FAAX",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 9,
+          "product_code": "81016700",
+          "product_name": "クロメートPW M6 FASK",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 10,
+          "product_code": "81021800",
+          "product_name": "クロメートナベセムス M4×12（P=3） FAHU",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 11,
+          "product_code": "81011800",
+          "product_name": "クロメートナベセムス M5×12（P=3） FAHU",
+          "qty_per_set": 56,
+          "supplier": ""
+        },
+        {
+          "line_no": 12,
+          "product_code": "81026800",
+          "product_name": "三価クロメート六角アプセットセムス M8×25(P=3) FBAB",
+          "qty_per_set": 8,
+          "supplier": ""
+        },
+        {
+          "line_no": 13,
+          "product_code": "81021400",
+          "product_name": "ステンレストラステクス M4×13（細目） SACH",
+          "qty_per_set": 20,
+          "supplier": ""
+        },
+        {
+          "line_no": 14,
+          "product_code": "81007300",
+          "product_name": "ステンレスナベテクス M3.5×10 FBLQ",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 15,
+          "product_code": "81010400",
+          "product_name": "クロメート蝶ボルト M6×10 SALG",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 16,
+          "product_code": "81012000",
+          "product_name": "クロメートアイボルト M8",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 17,
+          "product_code": "81017000",
+          "product_name": "クロメートPW M8 FASK",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 18,
+          "product_code": "85430200",
+          "product_name": "プロテクトリレー OPR-200-1C （フォトIC用）ﾊﾞｰﾅｰｺﾝﾄﾛｰﾙﾘﾚｰ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 19,
+          "product_code": "85058200",
+          "product_name": "サーモスタット 03PN6171A80 SK、SG用 ハイリミット",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 20,
+          "product_code": "85058300",
+          "product_name": "サーモスタット(ボタン付き) SK用 23PN1316A120 ハイリミット",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 21,
+          "product_code": "85003400",
+          "product_name": "A-TB72-D-HR1A-200V ATB71015 パナソニック タイムスイッチ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 22,
+          "product_code": "85443400",
+          "product_name": "サーキットプロテクタ CP30-BA 3P 1-M 10A 三菱電機",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 23,
+          "product_code": "85366800",
+          "product_name": "ミニパワーリレー MY4N AC200/220 オムロン",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 24,
+          "product_code": "85180000",
+          "product_name": "リレーソケット PYF14A",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 25,
+          "product_code": "85004300",
+          "product_name": "保持金具 PYC-A1 2本1組 オムロン",
+          "qty_per_set": 5,
+          "supplier": ""
+        },
+        {
+          "line_no": 26,
+          "product_code": "85087500",
+          "product_name": "オムロン タイマー H3YN-2 AC200V",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 27,
+          "product_code": "85004200",
+          "product_name": "オムロン ソケット PYF08A FOR MY",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 28,
+          "product_code": "85007100",
+          "product_name": "保持金具 Y92H-3 (2本1組) オムロン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 29,
+          "product_code": "85003700",
+          "product_name": "表示灯（緑） BN-5665-2-G AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 30,
+          "product_code": "85139700",
+          "product_name": "表示灯（赤） BN-5665-2-R AC200V サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 31,
+          "product_code": "85062800",
+          "product_name": "アルミレール TB-DR(1m) 日東アルミレール",
+          "qty_per_set": 0.5,
+          "supplier": ""
+        },
+        {
+          "line_no": 32,
+          "product_code": "85443500",
+          "product_name": "組端子 PTU-30 東洋技研",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 33,
+          "product_code": "85443600",
+          "product_name": "側板 PTU-30L2 東洋技研",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 34,
+          "product_code": "85443700",
+          "product_name": "端子台カバー CA-36 1m 東洋技研",
+          "qty_per_set": 0.045,
+          "supplier": ""
+        },
+        {
+          "line_no": 35,
+          "product_code": "85396100",
+          "product_name": "組端子 PTU-10 東洋技研",
+          "qty_per_set": 21,
+          "supplier": ""
+        },
+        {
+          "line_no": 36,
+          "product_code": "85396200",
+          "product_name": "組端子側板 PTU-10L2 東洋技研",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 37,
+          "product_code": "85403100",
+          "product_name": "端子台カバー CA-34 1m 東洋技研",
+          "qty_per_set": 0.15,
+          "supplier": ""
+        },
+        {
+          "line_no": 38,
+          "product_code": "85396300",
+          "product_name": "端子台止め金具 HDV-1 東洋技研",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 39,
+          "product_code": "85402400",
+          "product_name": "記名板 AM-10 1200mm×10mm 東洋技研",
+          "qty_per_set": 0.158,
+          "supplier": ""
+        },
+        {
+          "line_no": 40,
+          "product_code": "85067400",
+          "product_name": "ハウジングプラグ 3191-02P モレックス",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 41,
+          "product_code": "85134200",
+          "product_name": "ハウジングプラグ 3191-06P モレックス",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 42,
+          "product_code": "85050600",
+          "product_name": "カバー付ヒューズホルダー FHC-15",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 43,
+          "product_code": "85443800",
+          "product_name": "ガラス管ヒューズ 250V 3A φ6.4×30 FUJI FGBO-A等",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 44,
+          "product_code": "85137900",
+          "product_name": "スナップスイッチ WD1011F パナソ ニック",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 45,
+          "product_code": "85085100",
+          "product_name": "スナップスイッチ WD1511F パナソ ニック",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 46,
+          "product_code": "85027800",
+          "product_name": "グロメット C-30-SG-26A タキゲン",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 47,
+          "product_code": "85027900",
+          "product_name": "グロメット C-30-SG-20A タキゲン",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 48,
+          "product_code": "85012800",
+          "product_name": "グロメット BU-687-C サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 49,
+          "product_code": "85034900",
+          "product_name": "パチン錠 C-12-2-2",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 50,
+          "product_code": "85252500",
+          "product_name": "抜差蝶番 B-1075-L",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 51,
+          "product_code": "85062400",
+          "product_name": "配線ダクト AD-262 2m",
+          "qty_per_set": 0.167,
+          "supplier": ""
+        },
+        {
+          "line_no": 52,
+          "product_code": "85062600",
+          "product_name": "配線ダクト AD-322",
+          "qty_per_set": 0.15,
+          "supplier": ""
+        },
+        {
+          "line_no": 53,
+          "product_code": "85015000",
+          "product_name": "SUSリベット SSD-42-BS",
+          "qty_per_set": 12,
+          "supplier": ""
+        },
+        {
+          "line_no": 54,
+          "product_code": "81010900",
+          "product_name": "クロメートナベセムス M4×10（P=3） FAHU",
+          "qty_per_set": 22,
+          "supplier": ""
+        },
+        {
+          "line_no": 55,
+          "product_code": "81041100",
+          "product_name": "三価クロメートナベセムス M4×8(P=2)",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 56,
+          "product_code": "81036600",
+          "product_name": "クロメートナベセムス M4×10（P=4） FAHV",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 57,
+          "product_code": "85366500",
+          "product_name": "パワーサプライ PLA15F-24 コーセル㈱",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 58,
+          "product_code": "85440400",
+          "product_name": "神港ﾃｸﾉｽ CO2濃度調節計 BCD2R00-00,T3098A(三州仕様)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 59,
+          "product_code": "85223000",
+          "product_name": "ハウジングプラグ 3191-04P モレックス",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 60,
+          "product_code": "81044400",
+          "product_name": "クロメートPW M4 FASK",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 61,
+          "product_code": "81044300",
+          "product_name": "クロメート六角ナット M4 FAMD",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 62,
+          "product_code": "85440300",
+          "product_name": "室内型CO2濃度センサー DSW-200-CO2-411",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 63,
+          "product_code": "85401800",
+          "product_name": "ハウジングレセプタクル 3191-04R1 モレックス",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 64,
+          "product_code": "81016900",
+          "product_name": "クロメートSW M8 FATW",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 65,
+          "product_code": "81017100",
+          "product_name": "クロメート六角ナット M8 FAMD",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 66,
+          "product_code": "85264700",
+          "product_name": "杉1等 角材 3000×60×60 木枠 ベース枠用",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 67,
+          "product_code": "85022300",
+          "product_name": "シール　P-132 運転中は送風機に～",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 68,
+          "product_code": "85016000",
+          "product_name": "シール　P-135 灯油に限る",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 69,
+          "product_code": "85017800",
+          "product_name": "シール　P-333 運転中は開けない",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 70,
+          "product_code": "85017900",
+          "product_name": "シール　P-334 煙突にふれないこと",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 71,
+          "product_code": "85018000",
+          "product_name": "シール　P-335 危険・警告・注意",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 72,
+          "product_code": "85014100",
+          "product_name": "PLシール　P-332 感電の恐れ",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 73,
+          "product_code": "85140300",
+          "product_name": "シール　P-518 吐出口につき運搬～",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 74,
+          "product_code": "85449800",
+          "product_name": "ロゴシール　P-714 SANSHU",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 75,
+          "product_code": "85167100",
+          "product_name": "インシュロックタイ　AB-380",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 76,
+          "product_code": "85105300",
+          "product_name": "PEカバー　0.05×650×950×1500",
+          "qty_per_set": 1,
+          "supplier": ""
+        }
+      ]
+    },
+    {
+      "id": "set-9",
+      "sheet_name": "D31-387圧搾梱包機AT-1500GⅢI",
+      "set_code": "86021000",
+      "set_name": "圧搾梱包機AT-1500GⅢI",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85027000",
+          "product_name": "グロメットC-30-BW-14-2 タキゲン",
+          "qty_per_set": 5,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85028300",
+          "product_name": "グロメットC-30-SG-24A タキゲン",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85184400",
+          "product_name": "主軸 ATG-35013 オネジ",
+          "qty_per_set": 1,
+          "supplier": "YSK"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85184500",
+          "product_name": "メネジ AT3A0179",
+          "qty_per_set": 1,
+          "supplier": "YSK"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85035500",
+          "product_name": "サポーター軸受 5t×28φ×65φ2-φ7 ATG-45005(MCナイロン、青)",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85050100",
+          "product_name": "スナップスイッチS-308",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85180300",
+          "product_name": "押しボタンスイッチ AH25-ER01",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85050400",
+          "product_name": "ヒューズホルダーF-4000",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85184200",
+          "product_name": "ガラス管ヒューズ 250V 5A FGBOφ6.4×30",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85255700",
+          "product_name": "端子台ML50-S3EXS 10P",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85180200",
+          "product_name": "インバータFRN0.4C2S-6J",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85183600",
+          "product_name": "タイマー H3Y-2 AC100-12030秒 オムロン",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85004200",
+          "product_name": "オムロン ソケット PYF08A FOR MY",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85179900",
+          "product_name": "パワーリレーMY4AC100",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 15,
+          "product_code": "85180000",
+          "product_name": "リレーソケット PYF14A",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 16,
+          "product_code": "85180100",
+          "product_name": "サーマルリレーTR-0NH/3 2.2～3.4A",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 17,
+          "product_code": "85186300",
+          "product_name": "クリップ C-3.5A 黒",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 18,
+          "product_code": "85065400",
+          "product_name": "防水ゴムキャップWF7215K 2P 15A100V",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 19,
+          "product_code": "85063700",
+          "product_name": "CTコード VCTF1.25×4C（灰）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 20,
+          "product_code": "85064200",
+          "product_name": "CTコード VCTF0.75×4C（灰）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 21,
+          "product_code": "85164000",
+          "product_name": "CTコード VCTF22 2.0×3C（黒）",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 22,
+          "product_code": "85040100",
+          "product_name": "ワイヤーステッカーS-608",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 23,
+          "product_code": "85061500",
+          "product_name": "マイクロスイッチV-153-1A5",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 24,
+          "product_code": "85039900",
+          "product_name": "スピードクランプNAD-06",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 25,
+          "product_code": "82001100",
+          "product_name": "ダンボールAT-2000GⅢK 加圧部№1（無地）",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 26,
+          "product_code": "82001000",
+          "product_name": "ダンボール AT-2000GⅢK 脚№4(無地）",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 27,
+          "product_code": "85184600",
+          "product_name": "スチロプレンカット品 №1用100×200×350",
+          "qty_per_set": 2,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 28,
+          "product_code": "85184700",
+          "product_name": "スチロプレンカット品 №1用130×120×740",
+          "qty_per_set": 2,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 29,
+          "product_code": "85184800",
+          "product_name": "スチロプレンカット品 №4用 (脚)60×100×600",
+          "qty_per_set": 2,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 30,
+          "product_code": "85102200",
+          "product_name": "ベーク板 1.0×20×35 紙入（ｶｯﾄ＆穴加工、自動ダンパー用）",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 31,
+          "product_code": "85180400",
+          "product_name": "円すいころ軸受 4T-32008X",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 32,
+          "product_code": "85035900",
+          "product_name": "ベアリング6007ZZ",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 33,
+          "product_code": "85024400",
+          "product_name": "スプロケット A型 40# 22Z 下穴品 焼入れ（40A22 ベタ）",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 34,
+          "product_code": "85024300",
+          "product_name": "スプロケット A型 40# 20Z 下穴品 焼入れ（40A20 ベタ）",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 35,
+          "product_code": "85113900",
+          "product_name": "東芝ギヤモーター（AT-1500GⅢI） GMS-4P-0.4kw 1/15 200V",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 36,
+          "product_code": "85180500",
+          "product_name": "キャスター（ストッパー付）SR-40-RM S-1 M8×1.25",
+          "qty_per_set": 4,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 37,
+          "product_code": "85188600",
+          "product_name": "ローラーチェーン（60リンク相当）#40 59L（J.L 1個付）ｴﾝﾄﾞﾚｽ使用",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 38,
+          "product_code": "85173500",
+          "product_name": "キャストナイロン（MCナイロン）φ45×1m NBブルー",
+          "qty_per_set": 0,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 39,
+          "product_code": "85133600",
+          "product_name": "ジョイントリンク(継手リンク)#40 JL",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 40,
+          "product_code": "81011100",
+          "product_name": "クロメートナベセムスM3×16（P=3） FAHU",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 41,
+          "product_code": "81042100",
+          "product_name": "クロメートナベセムスM4×12 (P=4) FAHV",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 42,
+          "product_code": "81036600",
+          "product_name": "クロメートナベセムスM4×10（P=4） FAHV",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 43,
+          "product_code": "81034000",
+          "product_name": "ユニクロ六角ボルト(半ネジ)M10×50",
+          "qty_per_set": 1,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 44,
+          "product_code": "81034100",
+          "product_name": "ユニクロUナット M10 FAPU",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 45,
+          "product_code": "81034200",
+          "product_name": "ユニクロUナット M16 FAPU",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 46,
+          "product_code": "81034300",
+          "product_name": "ユニクロ六角ナットM3",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 47,
+          "product_code": "81018000",
+          "product_name": "ユニクロ六角ナットM8 FALR",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 48,
+          "product_code": "81018300",
+          "product_name": "ユニクロ六角ナットM10 FALR",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 49,
+          "product_code": "81034400",
+          "product_name": "ユニクロSWM3 FBPV",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 50,
+          "product_code": "81017600",
+          "product_name": "ユニクロSWM6 FBPV",
+          "qty_per_set": 14,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 51,
+          "product_code": "81017900",
+          "product_name": "ユニクロSWM8 FBPV",
+          "qty_per_set": 22,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 52,
+          "product_code": "81018100",
+          "product_name": "ユニクロSWM10 FBPV",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 53,
+          "product_code": "81034500",
+          "product_name": "ユニクロSWM16 FBPV",
+          "qty_per_set": 1,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 54,
+          "product_code": "81034600",
+          "product_name": "ユニクロPWM3 FASC",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 55,
+          "product_code": "81017500",
+          "product_name": "ユニクロPWM6 FASC",
+          "qty_per_set": 10,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 56,
+          "product_code": "81017800",
+          "product_name": "ユニクロPWM8 FASC",
+          "qty_per_set": 22,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 57,
+          "product_code": "81118200",
+          "product_name": "ユニクロPWM10 FASC",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 58,
+          "product_code": "81017700",
+          "product_name": "ユニクロ六角ナットM6 FALR",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 59,
+          "product_code": "81032000",
+          "product_name": "六角穴付止めネジM6×6",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 60,
+          "product_code": "81034700",
+          "product_name": "黒色クロメート六角穴付ボルトM6×20 FABN",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 61,
+          "product_code": "81034800",
+          "product_name": "黒色クロメート六角穴付ボルトM8×20 FABN",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 62,
+          "product_code": "81024000",
+          "product_name": "クロメートナベセムスM4×16（P=4） FAHV",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 63,
+          "product_code": "81011800",
+          "product_name": "クロメートナベセムスM5×12（P=3） FAHU",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 64,
+          "product_code": "81034900",
+          "product_name": "クロメートナベセムスM5×16（P=3） FAHU",
+          "qty_per_set": 12,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 65,
+          "product_code": "81035000",
+          "product_name": "クロメートナベセムスM3×20（P=3） FAHU",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 66,
+          "product_code": "81035100",
+          "product_name": "クロメートナベセムスM3×25（P=3） FAHU",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 67,
+          "product_code": "81022400",
+          "product_name": "クロメートナベビスM6×25",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 68,
+          "product_code": "81013700",
+          "product_name": "ユニクロ六角ボルトM6×15 FAAR",
+          "qty_per_set": 3,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 69,
+          "product_code": "81015100",
+          "product_name": "ユニクロ六角ボルトM8×20 FAAR",
+          "qty_per_set": 15,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 70,
+          "product_code": "81015200",
+          "product_name": "ユニクロ六角ボルトM8×25 FAAR",
+          "qty_per_set": 12,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 71,
+          "product_code": "81019200",
+          "product_name": "ユニクロ六角ボルトM10×40 FAAS",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 72,
+          "product_code": "85189400",
+          "product_name": "端子銘板 P-413",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 73,
+          "product_code": "85185500",
+          "product_name": "シール P-348(操作ボタン)",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 74,
+          "product_code": "85178000",
+          "product_name": "シール AT-2010GⅢI P-678銘板",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 75,
+          "product_code": "85016700",
+          "product_name": "シールP-178",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 76,
+          "product_code": "85014100",
+          "product_name": ".PLシール（感電の恐れ）P-332 H82010",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 77,
+          "product_code": "85203800",
+          "product_name": "シールP-127",
+          "qty_per_set": 4,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 78,
+          "product_code": "85015900",
+          "product_name": "シールP-130",
+          "qty_per_set": 4,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 79,
+          "product_code": "85017100",
+          "product_name": "シールP-186",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 80,
+          "product_code": "85017600",
+          "product_name": "シールP-286",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 81,
+          "product_code": "85203700",
+          "product_name": "シールP-677",
+          "qty_per_set": 4,
+          "supplier": "木山印刷"
+        }
+      ]
+    },
+    {
+      "id": "set-10",
+      "sheet_name": "D31-388圧搾板部分",
+      "set_code": "",
+      "set_name": "圧搾板部分",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85171900",
+          "product_name": "杉板 30×200×720 圧搾板用",
+          "qty_per_set": 1,
+          "supplier": "渕脇"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85171700",
+          "product_name": "杉板 20×150×540 圧搾板用",
+          "qty_per_set": 2,
+          "supplier": "渕脇"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85171800",
+          "product_name": "杉板 20×170×540 圧搾板用",
+          "qty_per_set": 2,
+          "supplier": "渕脇"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85172000",
+          "product_name": "メラピー 30×30×710 圧搾板用",
+          "qty_per_set": 2,
+          "supplier": "渕脇"
+        },
+        {
+          "line_no": 5,
+          "product_code": "81033500",
+          "product_name": "ユニクロ皿タッピング M5×45",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 6,
+          "product_code": "81033600",
+          "product_name": "ユニクロ皿タッピング M4×45",
+          "qty_per_set": 32,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 7,
+          "product_code": "81001500",
+          "product_name": "ユニクロトラスビスM6×60",
+          "qty_per_set": 8,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 8,
+          "product_code": "81001400",
+          "product_name": "ユニクロトラスビスM6×30",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 9,
+          "product_code": "81033800",
+          "product_name": "ユニクロキャップ付ロックナット（袋Uナット）M6",
+          "qty_per_set": 12,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 10,
+          "product_code": "81017500",
+          "product_name": "ユニクロPWM6",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 11,
+          "product_code": "82017500",
+          "product_name": "AT用圧搾板 無地 蓋 5050-231-02 ダンボール",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 12,
+          "product_code": "82017400",
+          "product_name": "AT用圧搾板 無地 身 5050-231-01 ダンボール",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85213000",
+          "product_name": "シール P-596作業前にネジが～",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        }
+      ]
+    },
+    {
+      "id": "set-11",
+      "sheet_name": "D31-388梱包箱部分",
+      "set_code": "86323200",
+      "set_name": "AT-1500GⅢ",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85074000",
+          "product_name": "レバーファスナーC-506",
+          "qty_per_set": 4,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85204900",
+          "product_name": "ステンレス平蝶番(L50×W32×t1.5 B-1027-13 穴あき",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85034600",
+          "product_name": "鋼板製旗蝶番B-1103（特）オス",
+          "qty_per_set": 5,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85034400",
+          "product_name": "鋼板製旗蝶番B-1103（特）メス",
+          "qty_per_set": 5,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85034500",
+          "product_name": "鋼板製旗蝶番B-1103（特）ピンのみ",
+          "qty_per_set": 10,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85006800",
+          "product_name": "ハンマーキャスター 420S-RD50(自 在)",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85006900",
+          "product_name": "ハンマーキャスター420SR-RD50",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 8,
+          "product_code": "82011600",
+          "product_name": "ダンボール（無地）AT-1500GⅢ №2",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 9,
+          "product_code": "82010500",
+          "product_name": "ダンボールAT-1500GⅢ №3",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85015000",
+          "product_name": "SUSリベット　SSD-42-BS",
+          "qty_per_set": 20,
+          "supplier": "日邦ファスナー"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85014400",
+          "product_name": "SUSリベット　SSD-54-BS",
+          "qty_per_set": 24,
+          "supplier": "日邦ファスナー"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85014800",
+          "product_name": "STS-64",
+          "qty_per_set": 8,
+          "supplier": "日邦ファスナー"
+        }
+      ]
+    },
+    {
+      "id": "set-12",
+      "sheet_name": "D31-389土寄せ機SST-02",
+      "set_code": "86010000",
+      "set_name": "土寄せ機 SST-01",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85026800",
+          "product_name": "スリーロブノブ（エンプラノブ）TS-40×16",
+          "qty_per_set": 2,
+          "supplier": "monotaro、博多商工など"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85141400",
+          "product_name": "空気入りタイヤ 固定260mm FC1005 コメリ",
+          "qty_per_set": 2,
+          "supplier": "コメリ"
+        },
+        {
+          "line_no": 3,
+          "product_code": "83007000",
+          "product_name": "エスコーエアー入り車輪260×85mm（EA986MV-260）",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85031900",
+          "product_name": "Rピン（三価クロメート）10",
+          "qty_per_set": 5,
+          "supplier": "monotaro、博多商工など"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85114000",
+          "product_name": "クロメート丸頭ロットピン10×65",
+          "qty_per_set": 5,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 6,
+          "product_code": "81019300",
+          "product_name": "ユニクロ六角ボルトM12×40",
+          "qty_per_set": 4,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 7,
+          "product_code": "81018900",
+          "product_name": "ユニクロ六角ボルトM10×25",
+          "qty_per_set": 4,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 8,
+          "product_code": "81019000",
+          "product_name": "ユニクロ六角ボルトM10×30",
+          "qty_per_set": 4,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 9,
+          "product_code": "81019100",
+          "product_name": "ユニクロ六角ボルトM10×35",
+          "qty_per_set": 2,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 10,
+          "product_code": "81018300",
+          "product_name": "ユニクロ六角ナットM10",
+          "qty_per_set": 12,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 11,
+          "product_code": "81018500",
+          "product_name": "ユニクロ六角ナットM12",
+          "qty_per_set": 4,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 12,
+          "product_code": "81018200",
+          "product_name": "ユニクロPWM10",
+          "qty_per_set": 8,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 13,
+          "product_code": "81018700",
+          "product_name": "ユニクロPWM12",
+          "qty_per_set": 6,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 14,
+          "product_code": "81018100",
+          "product_name": "ユニクロSWM10",
+          "qty_per_set": 8,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 15,
+          "product_code": "81018400",
+          "product_name": "ユニクロSWM12",
+          "qty_per_set": 4,
+          "supplier": "八幡ネジ"
+        },
+        {
+          "line_no": 16,
+          "product_code": "85031100",
+          "product_name": "ポリエステルスパンロープ（白）6m/m",
+          "qty_per_set": 1,
+          "supplier": "クリテック九州"
+        },
+        {
+          "line_no": 17,
+          "product_code": "85030300",
+          "product_name": "チェイン留め金具B-135-8",
+          "qty_per_set": 1,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 18,
+          "product_code": "85019500",
+          "product_name": "シールP-610",
+          "qty_per_set": 2,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 19,
+          "product_code": "85019600",
+          "product_name": "シールP-611",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 20,
+          "product_code": "85019400",
+          "product_name": "シールP-609",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 21,
+          "product_code": "85016800",
+          "product_name": "シールP-180-①右",
+          "qty_per_set": 2,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 22,
+          "product_code": "85016900",
+          "product_name": "シールP-180-①左",
+          "qty_per_set": 2,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 23,
+          "product_code": "82002700",
+          "product_name": "ダンボール土寄せ機（フタ・ミ）（セット）",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        }
+      ]
+    },
+    {
+      "id": "set-13",
+      "sheet_name": "D31-391　SP-10K発生機",
+      "set_code": "86355000",
+      "set_name": "制御ボックス（デジタル仕様）100V SP-K（・12K用）",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85387200",
+          "product_name": "リレー MY2 100V",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85004200",
+          "product_name": "オムロン ソケット PYF08A FOR MY",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85050600",
+          "product_name": "カバー付ヒューズホルダーFHC-15",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85065100",
+          "product_name": "タイマーH3AM-NSR-A",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85053400",
+          "product_name": "電磁接触器FC-0 3a1b 100V",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85207200",
+          "product_name": "ｻｰﾏﾙﾀｲﾏｰ（バイメタルタイマー）100M-180 4BFP1",
+          "qty_per_set": 1,
+          "supplier": "松尾電器産業"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85054900",
+          "product_name": "温調DGP121-5017",
+          "qty_per_set": 1,
+          "supplier": "ニッポー"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85061700",
+          "product_name": "コマンドスイッチAR22PCY-7184B",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85059300",
+          "product_name": "春日 端子台T10-15P",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85217000",
+          "product_name": "マークチューブ 1.25sq 白 4KEB-3.2×15",
+          "qty_per_set": 50,
+          "supplier": ""
+        },
+        {
+          "line_no": 16,
+          "product_code": "85035200",
+          "product_name": "握り玉（赤）                    PB-35×M8-RD",
+          "qty_per_set": 1,
+          "supplier": "MonotaRo"
+        },
+        {
+          "line_no": 17,
+          "product_code": "85033300",
+          "product_name": "抜差し蝶番                      B-4-2-L",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 18,
+          "product_code": "85344400",
+          "product_name": "有圧換気扇　排気型　EWF-25ASA",
+          "qty_per_set": 1,
+          "supplier": "丸岩電機"
+        }
+      ]
+    },
+    {
+      "id": "set-14",
+      "sheet_name": "針ラック　HR-05",
+      "set_code": "86010100",
+      "set_name": "針ラック HR-05",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85407800",
+          "product_name": "シール　P-321（安全に関するご注意）T",
+          "qty_per_set": 1,
+          "supplier": "木山印刷書"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85134100",
+          "product_name": "キャスター K-420R-25C(鋳物仕様) ユニクロメッキ",
+          "qty_per_set": 4,
+          "supplier": "（未定）"
+        },
+        {
+          "line_no": 3,
+          "product_code": "84007500",
+          "product_name": "コイル SGCC（Z18）t1.2×64.5×C スリットコイル（HR-05用）",
+          "qty_per_set": 4.4,
+          "supplier": "※板材にて手動製作"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85226000",
+          "product_name": "キャッチクリップ C-7-1(受け無し)クロメート",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 5,
+          "product_code": "81027000",
+          "product_name": "三価クロメートスプリングナットM4",
+          "qty_per_set": 53,
+          "supplier": "三笠鋲螺"
+        },
+        {
+          "line_no": 6,
+          "product_code": "81027100",
+          "product_name": "クロメートトラス小ネジ M4×25",
+          "qty_per_set": 4,
+          "supplier": "三笠鋲螺"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85078800",
+          "product_name": "ホーク（針ラックHR-05用）4×190 SWRH62A",
+          "qty_per_set": 49,
+          "supplier": "星工業"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85098200",
+          "product_name": "ダンボール HR-05用 1086×1820針ラック用",
+          "qty_per_set": 0.5,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85134700",
+          "product_name": "ブラインドリベット DSS-62福井鋲螺",
+          "qty_per_set": 8,
+          "supplier": "日邦ファスナー"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85134500",
+          "product_name": "ブラインドリベット DSS-52福井鋲螺",
+          "qty_per_set": 32,
+          "supplier": "日邦ファスナー"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85134600",
+          "product_name": "ブラインドリベット DSS-53福井鋲螺",
+          "qty_per_set": 4,
+          "supplier": "日邦ファスナー"
+        }
+      ]
+    },
+    {
+      "id": "set-15",
+      "sheet_name": "D令2-50、52_3段吊自動ダンパー",
+      "set_code": "86360400",
+      "set_name": "3段吊用自動ダンパー",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "85361500",
+          "product_name": "ウォームホイール PG2-20R1（ポテンショメーター用）",
+          "qty_per_set": 1,
+          "supplier": "水渕電機"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85207600",
+          "product_name": "マイクロスイッチ V-155-1A6オムロン",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85135000",
+          "product_name": "端子台 ML-2015-6P サトーパーツ",
+          "qty_per_set": 1,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85040400",
+          "product_name": "ナイロンクリップAB-6N",
+          "qty_per_set": 2,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85064200",
+          "product_name": "CTコード VCTF0.75×4C（灰）",
+          "qty_per_set": 4,
+          "supplier": "電新デジック"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85025700",
+          "product_name": "オリエンタルモーター3RK15GN-C",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 7,
+          "product_code": "85025800",
+          "product_name": "オリエンタルギヤヘッド3GN120K",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 8,
+          "product_code": "85361300",
+          "product_name": "ウォームギヤ SW2-R1 (KHK)",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 9,
+          "product_code": "85361400",
+          "product_name": "ウォームホイール CG2-40R1 (KHK",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 10,
+          "product_code": "85361600",
+          "product_name": "ミニピロ B-BAF1214-5",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 11,
+          "product_code": "85361700",
+          "product_name": "4×4×20 片丸キー 新JIS",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 12,
+          "product_code": "85361800",
+          "product_name": "5×5×28 片丸キー 新JIS",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 13,
+          "product_code": "85361900",
+          "product_name": "5×5×28 両丸キー 新JIS",
+          "qty_per_set": 1,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 14,
+          "product_code": "85102200",
+          "product_name": "ベーク板 1.0×20×35 紙入（ｶｯﾄ＆穴加工、自動ダンパー用）",
+          "qty_per_set": 2,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 15,
+          "product_code": "81042000",
+          "product_name": "三価クロメート六角アプセットセムス M4×8 P=2 FBAA",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 16,
+          "product_code": "81041900",
+          "product_name": "三価クロメート六角アプセットセムス M5×12(P=2) FBAA",
+          "qty_per_set": 18,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 17,
+          "product_code": "81043600",
+          "product_name": "三価クロメート六角アプセットセムス M6×12(P=2) FBAA",
+          "qty_per_set": 6,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 18,
+          "product_code": "81045800",
+          "product_name": "三価クロメート六角アプセットセムス M6×40(P=3) FBAB",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 19,
+          "product_code": "81020500",
+          "product_name": "三価クロメートナベセムスM4×8（P=3）",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 20,
+          "product_code": "81021600",
+          "product_name": "クロメートナベセムスM6×12（P=3） FAHU",
+          "qty_per_set": 1,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 21,
+          "product_code": "81035500",
+          "product_name": "ユニクロ袋ナットM5 FAOF",
+          "qty_per_set": 1,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 22,
+          "product_code": "81000100",
+          "product_name": "ユニクロ六角ナット M5",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 23,
+          "product_code": "81000200",
+          "product_name": "ユニクロPW M5FASC",
+          "qty_per_set": 3,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 24,
+          "product_code": "81000300",
+          "product_name": "ユニクロSW M5 FBPV",
+          "qty_per_set": 6,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 25,
+          "product_code": "81017600",
+          "product_name": "ユニクロSWM6 FBPV",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 26,
+          "product_code": "81014200",
+          "product_name": "ユニクロ六角ボルトM6×40 FAAR",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 27,
+          "product_code": "85362100",
+          "product_name": "スプリングピン4×24（黒） FAVB",
+          "qty_per_set": 1,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 28,
+          "product_code": "81030300",
+          "product_name": "黒色クロメート六角穴付止めネジM4×8 FACB",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 29,
+          "product_code": "81010200",
+          "product_name": "黒色クロメート六角穴付止めネジM5×8 FACB",
+          "qty_per_set": 10,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 30,
+          "product_code": "81010100",
+          "product_name": "黒色クロメート六角穴付止めネジM6×12 FACB",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 31,
+          "product_code": "85206900",
+          "product_name": "ダンパーVRJP30B40L 2KΩ",
+          "qty_per_set": 1,
+          "supplier": "富士電機"
+        },
+        {
+          "line_no": 32,
+          "product_code": "85362000",
+          "product_name": "シールP-255",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        }
+      ]
+    },
+    {
+      "id": "set-16",
+      "sheet_name": "D令2-72　葉詰台　NCT-01",
+      "set_code": "87102320",
+      "set_name": "葉詰台 NCT-01",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "84019000",
+          "product_name": "キャスター 415G-R65(ハンマー)",
+          "qty_per_set": 4,
+          "supplier": "博多商工"
+        },
+        {
+          "line_no": 2,
+          "product_code": "85025100",
+          "product_name": "パイプゴム脚 C-31-5",
+          "qty_per_set": 2,
+          "supplier": "タキゲン"
+        },
+        {
+          "line_no": 3,
+          "product_code": "85029200",
+          "product_name": "グリップ PVC φ19.1×103×28 GP-51/12（黒）",
+          "qty_per_set": 2,
+          "supplier": "大昌産業"
+        },
+        {
+          "line_no": 4,
+          "product_code": "85192500",
+          "product_name": "型式銘板 NCT-01 P-267",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 5,
+          "product_code": "85017500",
+          "product_name": "シール P-259・260",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 6,
+          "product_code": "85192600",
+          "product_name": "シール P-282",
+          "qty_per_set": 1,
+          "supplier": "木山印刷"
+        },
+        {
+          "line_no": 7,
+          "product_code": "82017100",
+          "product_name": "ダンボール本体 NCT-01",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 8,
+          "product_code": "82017200",
+          "product_name": "ダンボール部品 NCT-01",
+          "qty_per_set": 1,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 9,
+          "product_code": "82017300",
+          "product_name": "発泡スチロール ブロックカット品 30mm×100mm×320mm NCT-01",
+          "qty_per_set": 4,
+          "supplier": "日進包装"
+        },
+        {
+          "line_no": 10,
+          "product_code": "81015100",
+          "product_name": "ユニクロ六角ボルト M8×20 FAAR",
+          "qty_per_set": 10,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 11,
+          "product_code": "81015400",
+          "product_name": "ユニクロ六角ボルト M8×35 FAAR",
+          "qty_per_set": 3,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 12,
+          "product_code": "81015000",
+          "product_name": "ユニクロ六角ボルト M8×15 FAAR",
+          "qty_per_set": 16,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 13,
+          "product_code": "81018000",
+          "product_name": "ユニクロ六角ナット M8 FALR",
+          "qty_per_set": 29,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 14,
+          "product_code": "81017900",
+          "product_name": "ユニクロSW M8 FBPV",
+          "qty_per_set": 31,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 15,
+          "product_code": "81017800",
+          "product_name": "ユニクロPW M8 FASC",
+          "qty_per_set": 47,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 16,
+          "product_code": "81003000",
+          "product_name": "ユニクロトラスタッピング M4×12 FAIX",
+          "qty_per_set": 4,
+          "supplier": "八幡ねじ"
+        },
+        {
+          "line_no": 17,
+          "product_code": "81036800",
+          "product_name": "ユニクロ蝶ボルト M8×25",
+          "qty_per_set": 2,
+          "supplier": "八幡ねじ"
+        }
+      ]
+    },
+    {
+      "id": "set-17",
+      "sheet_name": "D令2-213　ピッキング台JK-17",
+      "set_code": "",
+      "set_name": "ピッキング台JK-17",
+      "items": [
+        {
+          "line_no": 1,
+          "product_code": "81015000",
+          "product_name": "ユニクロ六角ボルト M8×15 FAAR",
+          "qty_per_set": 15,
+          "supplier": ""
+        },
+        {
+          "line_no": 2,
+          "product_code": "81018000",
+          "product_name": "ユニクロ六角ナット M8 FALR",
+          "qty_per_set": 30,
+          "supplier": ""
+        },
+        {
+          "line_no": 3,
+          "product_code": "81017800",
+          "product_name": "ユニクロPW M8 FASC",
+          "qty_per_set": 45,
+          "supplier": ""
+        },
+        {
+          "line_no": 4,
+          "product_code": "81017900",
+          "product_name": "ユニクロSW M8 FBPV",
+          "qty_per_set": 30,
+          "supplier": ""
+        },
+        {
+          "line_no": 5,
+          "product_code": "85098700",
+          "product_name": "ｻﾝｴｽﾊﾞﾈ AP110-025-1.4 昌和発条",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 6,
+          "product_code": "85098800",
+          "product_name": "ｽﾃﾝ厚ｻﾄﾞﾙ A10454-0045 ｱｶｷﾞ",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 7,
+          "product_code": "85098900",
+          "product_name": "キャスター TJ-65R-S",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 8,
+          "product_code": "81015400",
+          "product_name": "ユニクロ六角ボルト M8×35 FAAR",
+          "qty_per_set": 8,
+          "supplier": ""
+        },
+        {
+          "line_no": 9,
+          "product_code": "81015500",
+          "product_name": "ユニクロ六角ボルト M8×40 FAAR",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 10,
+          "product_code": "81015600",
+          "product_name": "ユニクロ六角ボルト M8×45 FAAR",
+          "qty_per_set": 4,
+          "supplier": ""
+        },
+        {
+          "line_no": 11,
+          "product_code": "85090100",
+          "product_name": "ユニクロ六角ボルト M6×16",
+          "qty_per_set": 16,
+          "supplier": ""
+        },
+        {
+          "line_no": 12,
+          "product_code": "81022600",
+          "product_name": "ユニクロ皿小ネジ M6×12 FAHK",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 13,
+          "product_code": "81052200",
+          "product_name": "ユニクロ六角穴付きボルト M8×25",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 14,
+          "product_code": "81040800",
+          "product_name": "ユニクロ六角穴付きボルト M10×45",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 15,
+          "product_code": "81040900",
+          "product_name": "ユニクロトラスビス M4×12 FAHM",
+          "qty_per_set": 3,
+          "supplier": ""
+        },
+        {
+          "line_no": 16,
+          "product_code": "81018300",
+          "product_name": "ユニクロ六角ナット M10 FALR",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 17,
+          "product_code": "81017700",
+          "product_name": "ユニクロ六角ナット M6 FALR",
+          "qty_per_set": 17,
+          "supplier": ""
+        },
+        {
+          "line_no": 18,
+          "product_code": "81027800",
+          "product_name": "ユニクロUナット M8 FAPU",
+          "qty_per_set": 2,
+          "supplier": ""
+        },
+        {
+          "line_no": 19,
+          "product_code": "81017600",
+          "product_name": "ユニクロSW M6 FBPV",
+          "qty_per_set": 16,
+          "supplier": ""
+        },
+        {
+          "line_no": 20,
+          "product_code": "81018200",
+          "product_name": "ユニクロPW M10 FASC",
+          "qty_per_set": 6,
+          "supplier": ""
+        },
+        {
+          "line_no": 21,
+          "product_code": "81017500",
+          "product_name": "ユニクロPW M6 FASC",
+          "qty_per_set": 32,
+          "supplier": ""
+        },
+        {
+          "line_no": 22,
+          "product_code": "85098500",
+          "product_name": "KHK ﾗﾁｪｯﾄ SRT2-30",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 23,
+          "product_code": "85098600",
+          "product_name": "KHK ﾗﾁｪｯﾄ爪 SRT2-C",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 24,
+          "product_code": "82019300",
+          "product_name": "ダンボール JK-27 ミ 5050-235-01 (2470×725×50)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 25,
+          "product_code": "82019400",
+          "product_name": "ダンボール JK-27 ﾌﾀ 5050-235-02 (2490×745×50)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 26,
+          "product_code": "82019500",
+          "product_name": "ダンボール JK-27 脚 5050-236-01 (780×370×525)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 27,
+          "product_code": "82019600",
+          "product_name": "ダンボール JK-27 胴枠 5050-236-02 (765×355×505)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 28,
+          "product_code": "82019700",
+          "product_name": "ダンボール JK-27 ギヤー部 ミ 5050-277-01 (2520×275×155)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 29,
+          "product_code": "82019800",
+          "product_name": "ダンボール JK-27 ギヤー部 フタ 5050-277-02 (2540×295×155)",
+          "qty_per_set": 1,
+          "supplier": ""
+        },
+        {
+          "line_no": 30,
+          "product_code": "82019900",
+          "product_name": "ダンボール JK-27 ギヤー部 あて板5050-277-03 (200×480)",
+          "qty_per_set": 4,
+          "supplier": ""
+        }
+      ]
+    }
+  ]
+}

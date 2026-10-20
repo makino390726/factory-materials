@@ -144,6 +144,19 @@ export default function Home() {
             在庫管理
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* セット品払い出し */}
+          <Link href="/stock/sets">
+            <div className="group relative h-40 cursor-pointer">
+              <div className="absolute inset-0 bg-gradient-to-br from-teal-600/20 to-teal-900/20 rounded-2xl border-2 border-teal-400 group-hover:border-teal-300 group-hover:shadow-[0_0_20px_rgba(45,212,191,0.5)] transition-all duration-300" />
+              <div className="relative h-full flex flex-col items-center justify-center p-6 space-y-3">
+                <div className="text-5xl">📦</div>
+                <h3 className="text-xl font-bold text-teal-300 group-hover:text-teal-200 transition">
+                  セット品払い出し
+                </h3>
+              </div>
+            </div>
+          </Link>
+
           {/* 入出庫管理表 */}
           <Link href="/stock/receive">
             <div className="group relative h-40 cursor-pointer">

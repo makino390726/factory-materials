@@ -191,6 +191,8 @@ export default function InventoryDetailPage() {
         return '📊 棚卸'
       case 'batch_import':
         return '📥 データ取込'
+      case 'set_issue':
+        return '📦 セット払い出し'
       default:
         return '📋 記録'
     }
