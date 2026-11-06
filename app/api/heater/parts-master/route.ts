@@ -54,14 +54,45 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
+    const partKey = String(body?.part_key || '').trim();
+    if (!partKey) {
+      return NextResponse.json({ error: 'part_key required' }, { status: 400 });
+    }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: existing, error: lookupError } = await supabase
+      .from('heater_parts_master')
+      .select('part_key')
+      .eq('part_key', partKey)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+
+    if (!existing) {
+      const partName = String(body.part_name || '').trim() || partKey;
+      const costPrice = Number(body.cost_price);
+      const { data, error } = await supabase
+        .from('heater_parts_master')
+        .insert([
+          {
+            part_key: partKey,
+            part_name: partName,
+            product_code: body.product_code ?? null,
+            spec: body.spec ?? null,
+            shelf_no: body.shelf_no ?? null,
+            cost_price: Number.isFinite(costPrice) ? costPrice : 0,
+          },
+        ])
+        .select();
+      if (error) throw error;
+      return NextResponse.json(data?.[0] ?? { part_key: partKey, part_name: partName });
+    }
+
     const { data, error } = await supabase
       .from('heater_parts_master')
       .update(body)
-      .eq('part_key', body.part_key)
+      .eq('part_key', partKey)
       .select();
     if (error) throw error;
-    return NextResponse.json(data[0]);
+    return NextResponse.json(data?.[0] ?? { part_key: partKey });
   } catch (err: any) {
     console.error('PUT error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

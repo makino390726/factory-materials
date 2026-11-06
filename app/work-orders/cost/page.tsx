@@ -2801,6 +2801,7 @@ export default function WorkOrderCostPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         part_key: selectedPartKey,
+        part_name: selectedLinePart.name || selectedPartKey,
         cost_price: partMaterialCost,
       }),
     })
@@ -2871,6 +2872,7 @@ export default function WorkOrderCostPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         part_key: selectedPartKey,
+        part_name: orphanPart?.name || selectedPartKey,
         cost_price: Math.round(material + indirect),
       }),
     })
@@ -3151,7 +3153,11 @@ export default function WorkOrderCostPage() {
           const partRes = await fetch('/api/heater/parts-master', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ part_key: selectedPartKey, cost_price: Math.round(headerPayload.total_cost) }),
+            body: JSON.stringify({
+              part_key: selectedPartKey,
+              part_name: selectedLinePart?.name || selectedPartKey,
+              cost_price: Math.round(headerPayload.total_cost),
+            }),
           })
           if (!partRes.ok) throw new Error('parts master update failed')
           const updated = await partRes.json()
