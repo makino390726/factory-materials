@@ -54,15 +54,30 @@ export async function loadLineCostForPartYear(
   fiscalYear: number,
   options?: { allowUntaggedFallback?: boolean; allowPreviousYearFallback?: boolean }
 ): Promise<{ header: CostHeader; items: CostItem[] } | null> {
-  const { data: items, error: itemsError } = await supabase
-    .from('work_order_cost_items')
-    .select('*')
-    .eq('master_type', LINE_MASTER_TYPE)
-    .eq('master_id', partKey)
-    .order('line_no', { ascending: true })
+  const [byMaster, byPartKey] = await Promise.all([
+    supabase
+      .from('work_order_cost_items')
+      .select('*')
+      .eq('master_type', LINE_MASTER_TYPE)
+      .eq('master_id', partKey)
+      .order('line_no', { ascending: true }),
+    supabase
+      .from('work_order_cost_items')
+      .select('*')
+      .eq('master_type', LINE_MASTER_TYPE)
+      .eq('part_key', partKey)
+      .order('line_no', { ascending: true }),
+  ])
 
-  if (itemsError) throw itemsError
-  if (!items || items.length === 0) return null
+  if (byMaster.error) throw byMaster.error
+  if (byPartKey.error) throw byPartKey.error
+  const itemMap = new Map<string, CostItem>()
+  for (const row of [...(byMaster.data || []), ...(byPartKey.data || [])]) {
+    const key = String(row.id || `${row.work_order_cost_id}-${row.line_no}`)
+    itemMap.set(key, row)
+  }
+  const items = [...itemMap.values()]
+  if (items.length === 0) return null
 
   const headerIds = [...new Set(items.map((row) => String(row.work_order_cost_id || '')).filter(Boolean))]
   if (headerIds.length === 0) return { header: { id: '', order_no: null }, items }

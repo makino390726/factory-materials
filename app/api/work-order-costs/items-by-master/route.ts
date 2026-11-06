@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { parseFiscalYearParam } from '@/lib/fiscal-year'
-import { loadLineCostForPartYear } from '@/lib/line-cost-carryover'
 
 export const runtime = 'nodejs'
 
@@ -78,19 +77,45 @@ export async function DELETE(req: Request) {
     const fiscalYearRaw = url.searchParams.get('fiscal_year')
     if (fiscalYearRaw && master_type === 'ライン原価') {
       const fiscalYear = parseFiscalYearParam(fiscalYearRaw)
-      const bundle = await loadLineCostForPartYear(supabase, master_id, fiscalYear, {
-        allowUntaggedFallback: false,
-      })
-      if (bundle?.header.id) {
+      // 部品キーが枝番ID（例: L800 の B01 = 800-01）と同じだと、
+      // LCOST-* の共通ヘッダまで消えて再選択時に読めなくなる。旧パーツ単体の原価だけ消す。
+      const { data: matchedItems, error: matchedError } = await supabase
+        .from('work_order_cost_items')
+        .select('work_order_cost_id')
+        .eq('master_type', master_type)
+        .eq('master_id', master_id)
+      if (matchedError) throw matchedError
+      const headerIds = [
+        ...new Set(
+          (matchedItems || [])
+            .map((row) => String(row.work_order_cost_id || ''))
+            .filter(Boolean)
+        ),
+      ]
+      if (headerIds.length === 0) {
+        return NextResponse.json({ success: true })
+      }
+      const { data: headers, error: headerLookupError } = await supabase
+        .from('work_order_costs')
+        .select('id, order_no, fiscal_year')
+        .in('id', headerIds)
+      if (headerLookupError) throw headerLookupError
+      const legacyHeaderIds = (headers || [])
+        .filter((header) => {
+          const orderNo = String(header.order_no || '')
+          return Number(header.fiscal_year) === fiscalYear && !orderNo.startsWith('LCOST-')
+        })
+        .map((header) => header.id)
+      for (const headerId of legacyHeaderIds) {
         const { error: itemDeleteError } = await supabase
           .from('work_order_cost_items')
           .delete()
-          .eq('work_order_cost_id', bundle.header.id)
+          .eq('work_order_cost_id', headerId)
         if (itemDeleteError) throw itemDeleteError
         const { error: headerDeleteError } = await supabase
           .from('work_order_costs')
           .delete()
-          .eq('id', bundle.header.id)
+          .eq('id', headerId)
         if (headerDeleteError) throw headerDeleteError
       }
       return NextResponse.json({ success: true })
