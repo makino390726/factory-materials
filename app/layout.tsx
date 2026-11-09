@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import AuthGuard from "./auth-guard";
 
@@ -39,10 +40,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-white`}
-      >
+    <html lang="ja" className="dark" suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <Script id="fm-theme" strategy="beforeInteractive">
+          {`(function(){try{var t=localStorage.getItem("fm-theme");var r=document.documentElement;if(t==="light"){r.classList.remove("dark");r.classList.add("light")}else{r.classList.add("dark");r.classList.remove("light")}}catch(e){}})()`}
+        </Script>
         <AuthGuard>{children}</AuthGuard>
       </body>
     </html>

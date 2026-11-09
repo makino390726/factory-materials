@@ -1,12 +1,22 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html.dark {
   --background: #020617; /* slate-950 */
   --foreground: #ffffff;
   --surface: #0f172a; /* slate-900 */
   --surface-muted: #1e293b; /* slate-800 */
   --border: #334155; /* slate-700 */
   --muted: #cbd5e1; /* slate-300 */
+}
+
+html.light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --border: #cbd5e1;
+  --muted: #475569;
 }
 
 @theme inline {
@@ -16,8 +26,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-html {
+html.dark {
   color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
 }
 
 body {
@@ -26,20 +40,25 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* selectオプションのスタイル - 白文字で見えやすく */
-option {
+html.dark option {
   background-color: #1f2937;
   color: white;
 }
 
-option:checked {
+html.dark option:checked,
+html.light option:checked {
   background-color: #3b82f6;
   color: white;
 }
 
-select option:hover {
+html.dark select option:hover {
   background-color: #374151;
   color: white;
+}
+
+html.light option {
+  background-color: #ffffff;
+  color: #0f172a;
 }
 
 /* number型inputのスピナー（▼ボタン）を非表示 */
@@ -62,6 +81,7 @@ input[type="number"] {
  * =========================================================
  */
 @media screen {
+  html.dark {
   /* --- 背景（ライト面→ダーク面） --- */
   .bg-white,
   .bg-white\/95,
@@ -267,6 +287,125 @@ input[type="number"] {
   input::placeholder,
   textarea::placeholder {
     color: #94a3b8 !important;
+  }
+
+  }
+
+  /* 通常モード: 暗い画面を明るい地色と暗い文字に戻す */
+  html.light [class*="from-slate-950"],
+  html.light [class*="from-slate-900"],
+  html.light [class*="bg-slate-950"]:not(button):not(a),
+  html.light [class*="bg-slate-900"]:not(button):not(a) {
+    background-image: none !important;
+    background-color: #f8fafc !important;
+    color: #0f172a;
+  }
+
+  html.light .bg-slate-800:not(button):not(a),
+  html.light .bg-slate-800\/50:not(button):not(a),
+  html.light .bg-slate-800\/80:not(button):not(a),
+  html.light .bg-slate-900\/40:not(button):not(a),
+  html.light .bg-slate-900\/50:not(button):not(a),
+  html.light .bg-slate-900\/80:not(button):not(a) {
+    background-color: #ffffff !important;
+  }
+
+  html.light .text-white,
+  html.light .text-slate-100,
+  html.light .text-slate-200,
+  html.light .text-slate-300,
+  html.light .text-gray-300,
+  html.light .text-zinc-300 {
+    color: #0f172a !important;
+  }
+
+  html.light .text-gray-400,
+  html.light .text-slate-400,
+  html.light .text-zinc-400 {
+    color: #475569 !important;
+  }
+
+  html.light .text-white[class*="bg-red-"],
+  html.light .text-white[class*="bg-rose-"],
+  html.light .text-white[class*="bg-emerald-"],
+  html.light .text-white[class*="bg-green-"],
+  html.light .text-white[class*="bg-sky-"],
+  html.light .text-white[class*="bg-blue-"],
+  html.light .text-white[class*="bg-indigo-"],
+  html.light .text-white[class*="bg-cyan-"],
+  html.light .text-white[class*="bg-orange-"],
+  html.light .text-white[class*="bg-amber-"],
+  html.light .text-white[class*="bg-yellow-"],
+  html.light .text-white[class*="bg-purple-"],
+  html.light .text-white[class*="bg-fuchsia-"],
+  html.light .text-white[class*="bg-pink-"],
+  html.light .text-white[class*="bg-teal-"],
+  html.light .text-white[class*="bg-violet-"],
+  html.light .text-white[class*="bg-slate-4"],
+  html.light .text-white[class*="bg-slate-5"],
+  html.light .text-white[class*="bg-slate-6"],
+  html.light .text-white[class*="bg-slate-7"] {
+    color: #ffffff !important;
+  }
+
+  html.light .text-yellow-300,
+  html.light .text-amber-300,
+  html.light .text-orange-300 {
+    color: #b45309 !important;
+  }
+
+  html.light .text-cyan-300,
+  html.light .text-sky-300,
+  html.light .text-blue-300 {
+    color: #0369a1 !important;
+  }
+
+  html.light .text-indigo-300,
+  html.light .text-violet-300,
+  html.light .text-purple-300,
+  html.light .text-fuchsia-300,
+  html.light .text-pink-300 {
+    color: #6d28d9 !important;
+  }
+
+  html.light .text-emerald-300,
+  html.light .text-green-300,
+  html.light .text-teal-300 {
+    color: #047857 !important;
+  }
+
+  html.light .text-rose-300,
+  html.light .text-red-300 {
+    color: #be123c !important;
+  }
+
+  html.light :is(button, a)[class*="bg-red-"],
+  html.light :is(button, a)[class*="bg-rose-"],
+  html.light :is(button, a)[class*="bg-emerald-"],
+  html.light :is(button, a)[class*="bg-green-"],
+  html.light :is(button, a)[class*="bg-sky-"],
+  html.light :is(button, a)[class*="bg-blue-"],
+  html.light :is(button, a)[class*="bg-indigo-"],
+  html.light :is(button, a)[class*="bg-cyan-"],
+  html.light :is(button, a)[class*="bg-orange-"],
+  html.light :is(button, a)[class*="bg-amber-"],
+  html.light :is(button, a)[class*="bg-slate-8"],
+  html.light :is(button, a)[class*="bg-slate-9"] {
+    color: #ffffff !important;
+  }
+
+  html.light .border-slate-600,
+  html.light .border-slate-700,
+  html.light .border-slate-800,
+  html.light .border-white\/10,
+  html.light .border-white\/20 {
+    border-color: #cbd5e1 !important;
+  }
+
+  html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  html.light textarea,
+  html.light select {
+    color-scheme: light;
   }
 
   /* 製作指図書の進捗文字は、暗色テーマの白文字変換より優先して黒にする */

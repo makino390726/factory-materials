@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { ThemeToggle } from './theme-toggle'
 
 type AuthGuardProps = {
   children: React.ReactNode
@@ -49,19 +50,19 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     router.replace('/login')
   }
 
-  if (!isReady && !PUBLIC_PATHS.has(pathname)) {
-    return null
-  }
+  const showPage = isReady || PUBLIC_PATHS.has(pathname)
+  const showLogout = showPage && isLoggedIn && !PUBLIC_PATHS.has(pathname)
 
   return (
     <>
-      {children}
-      {!PUBLIC_PATHS.has(pathname) && isLoggedIn ? (
+      {showPage ? children : null}
+      <ThemeToggle reserveLogout={showLogout} />
+      {showLogout ? (
         <button
           type="button"
           onClick={handleLogout}
           aria-label="ログアウト"
-          className="fixed right-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-slate-900/80 text-white shadow-lg backdrop-blur transition hover:bg-slate-800"
+          className="no-print fixed right-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-slate-900/80 text-white shadow-lg backdrop-blur transition hover:bg-slate-800"
         >
           ×
         </button>
