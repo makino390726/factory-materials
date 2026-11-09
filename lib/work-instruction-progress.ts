@@ -123,6 +123,29 @@ export type InstructionAttachResult = {
   lInstruction: boolean
 }
 
+/** カレンダー入力の YYYY-MM-DD。空欄や不正な日付は null。 */
+export function parseInstructionDate(value: unknown): string | null {
+  const text = String(value ?? '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
+  const year = Number(text.slice(0, 4))
+  const month = Number(text.slice(5, 7))
+  const day = Number(text.slice(8, 10))
+  const date = new Date(year, month - 1, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return text
+}
+
+/** 未指定（undefined）の項目は指図書側を変えない。納期の日付を入れたときは文字の期限を消す。 */
+function instructionDatePatch(occurredOn: string | null | undefined, dueOn: string | null | undefined) {
+  const patch: Record<string, string | null> = {}
+  if (occurredOn !== undefined) patch.occurred_on = occurredOn
+  if (dueOn !== undefined) {
+    patch.due_on = dueOn
+    if (dueOn) patch.due_text = null
+  }
+  return patch
+}
+
 function attachResult(
   orderNo: string | null | undefined,
   result: Omit<InstructionAttachResult, 'lInstruction'>
@@ -140,12 +163,15 @@ export async function attachWorkOrderToInstructionProgress(
     model?: string | null
     qty?: number | null
     fiscal_year?: number | null
+    occurred_on?: string | null
+    due_on?: string | null
   },
   explicitDocType?: InstructionDocType | null
 ): Promise<InstructionAttachResult> {
   const resolved = explicitDocType ?? docTypeFromOrderNo(order.order_no)
   if (!resolved) return attachResult(order.order_no, { attached: false, needsChoice: true, docType: null })
 
+  const dates = instructionDatePatch(order.occurred_on, order.due_on)
   const payload = {
     work_order_id: order.id,
     doc_type: resolved,
@@ -156,6 +182,7 @@ export async function attachWorkOrderToInstructionProgress(
     planned_qty: typeof order.qty === 'number' ? order.qty : null,
     shops: emptyInstructionShops(),
     source: 'work_order',
+    ...dates,
   }
   const { error } = await supabase.from('work_instruction_progress').insert(payload)
   if (!error) return attachResult(order.order_no, { attached: true, needsChoice: false, docType: resolved })
@@ -172,6 +199,7 @@ export async function attachWorkOrderToInstructionProgress(
         model: payload.model,
         planned_qty: payload.planned_qty,
         fiscal_year: payload.fiscal_year,
+        ...dates,
         updated_at: new Date().toISOString(),
       })
       .eq('work_order_id', order.id)
@@ -198,6 +226,8 @@ export async function syncWorkOrderInstructionNumber(
     model?: string | null
     qty?: number | null
     fiscal_year?: number | null
+    occurred_on?: string | null
+    due_on?: string | null
   }
 ): Promise<InstructionAttachResult> {
   const resolved = docTypeFromOrderNo(order.order_no)
@@ -207,6 +237,7 @@ export async function syncWorkOrderInstructionNumber(
     model: order.model || null,
     planned_qty: typeof order.qty === 'number' ? order.qty : null,
     fiscal_year: order.fiscal_year ?? null,
+    ...instructionDatePatch(order.occurred_on, order.due_on),
     updated_at: new Date().toISOString(),
   }
   if (resolved) payload.doc_type = resolved

@@ -6,6 +6,7 @@ import {
   isMissingInstructionProgressTable,
   normalizeInstructionShops,
   parseDrivePdfUrl,
+  parseInstructionDate,
   type InstructionDocType,
 } from '@/lib/work-instruction-progress'
 
@@ -236,6 +237,8 @@ export async function POST(req: Request) {
         model: order.model,
         qty: order.qty,
         fiscal_year: order.fiscal_year,
+        occurred_on: Object.prototype.hasOwnProperty.call(body, 'occurred_on') ? parseInstructionDate(body.occurred_on) : undefined,
+        due_on: Object.prototype.hasOwnProperty.call(body, 'due_on') ? parseInstructionDate(body.due_on) : undefined,
       },
       docType
     )
@@ -249,6 +252,25 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
+    const workOrderId = (url.searchParams.get('work_order_id') || '').trim()
+    if (workOrderId) {
+      const { data, error } = await supabase
+        .from('work_instruction_progress')
+        .select('occurred_on, due_on')
+        .eq('work_order_id', workOrderId)
+        .limit(1)
+      if (error) {
+        if (isMissingInstructionProgressTable(error)) {
+          return NextResponse.json({ occurred_on: null, due_on: null })
+        }
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      const row = data?.[0]
+      return NextResponse.json({
+        occurred_on: row?.occurred_on ? String(row.occurred_on).slice(0, 10) : null,
+        due_on: row?.due_on ? String(row.due_on).slice(0, 10) : null,
+      })
+    }
     const docType = url.searchParams.get('doc_type') || '製作'
     const fiscalYear = url.searchParams.get('fiscal_year') || 'all'
     const openOnly = url.searchParams.get('open_only') === '1'

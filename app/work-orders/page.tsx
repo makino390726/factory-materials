@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import FiscalYearSelect from '@/app/components/FiscalYearSelect'
@@ -55,7 +55,13 @@ export default function WorkOrdersPage() {
   const [togglingExcludeId, setTogglingExcludeId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [instructionChoice, setInstructionChoice] = useState<{ id: string; orderNo: string } | null>(null)
+  const [instructionChoice, setInstructionChoice] = useState<{
+    id: string
+    orderNo: string
+    occurred_on: string | null
+    due_on: string | null
+  } | null>(null)
+  const editToken = useRef(0)
   const [choosingInstruction, setChoosingInstruction] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [sortColumn, setSortColumn] = useState<string>('order_no')
@@ -81,6 +87,8 @@ export default function WorkOrdersPage() {
     is_cost_template: false,
     cost_template_work_order_id: '',
     heater_model: '',
+    occurred_on: '',
+    due_on: '',
   })
   const [heaterModels, setHeaterModels] = useState<Array<{ model: string; name: string | null }>>([])
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null)
@@ -161,6 +169,7 @@ export default function WorkOrdersPage() {
 
   const startEditingOrder = async (order: WorkOrder) => {
     const initialHasBom = order.cost_mode === 'bom' || Boolean(order.bom_model)
+    const token = ++editToken.current
 
     setEditingId(order.id)
     setFormData({
@@ -178,7 +187,22 @@ export default function WorkOrdersPage() {
       is_cost_template: Boolean(order.is_cost_template),
       cost_template_work_order_id: order.cost_template_work_order_id || '',
       heater_model: order.heater_model || '',
+      occurred_on: '',
+      due_on: '',
     })
+    try {
+      const dateResponse = await fetch(`/api/work-instructions?work_order_id=${encodeURIComponent(order.id)}`)
+      if (dateResponse.ok && editToken.current === token) {
+        const dates = await dateResponse.json()
+        setFormData((prev) => ({
+          ...prev,
+          occurred_on: String(dates?.occurred_on || '').slice(0, 10),
+          due_on: String(dates?.due_on || '').slice(0, 10),
+        }))
+      }
+    } catch {
+      /* 日付が取れなくても、ほかの項目は編集できる */
+    }
 
     // DB列未反映などで cost_mode が取得できない場合でも、枝番が存在すればBOM編集モードを復帰する
     const loadedBranches = await fetchBranches(order.id)
@@ -563,6 +587,7 @@ export default function WorkOrdersPage() {
   }
 
   const resetForm = () => {
+    editToken.current += 1
     setBranches([])
     setFormData({
       order_no: '',
@@ -579,6 +604,8 @@ export default function WorkOrdersPage() {
       is_cost_template: false,
       cost_template_work_order_id: '',
       heater_model: '',
+      occurred_on: '',
+      due_on: '',
     })
     setEditingId(null)
   }
@@ -626,6 +653,8 @@ export default function WorkOrdersPage() {
           cost_template_work_order_id: formData.cost_template_work_order_id.trim() || null,
           heater_model: formData.heater_model.trim() || null,
           fiscal_year: fiscalYear,
+          occurred_on: formData.occurred_on || null,
+          due_on: formData.due_on || null,
         }),
       })
 
@@ -649,7 +678,12 @@ export default function WorkOrdersPage() {
       const progress = savedOrder?.instruction_progress
       const orderNo = savedOrder?.order_no || formData.order_no.trim()
       if (!editingId && progress?.needsChoice && savedOrder?.id) {
-        setInstructionChoice({ id: savedOrder.id, orderNo })
+        setInstructionChoice({
+          id: savedOrder.id,
+          orderNo,
+          occurred_on: formData.occurred_on || null,
+          due_on: formData.due_on || null,
+        })
         setSuccessMessage(`D指令 ${orderNo} を登録しました。番号の頭2文字から反映先を判断できないため、追加先を選んでください。`)
       } else if (branchSavedCount > 0) {
         setInstructionChoice(null)
@@ -777,7 +811,12 @@ export default function WorkOrdersPage() {
                       const response = await fetch('/api/work-instructions', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ work_order_id: instructionChoice.id, doc_type: docType }),
+                        body: JSON.stringify({
+                          work_order_id: instructionChoice.id,
+                          doc_type: docType,
+                          occurred_on: instructionChoice.occurred_on,
+                          due_on: instructionChoice.due_on,
+                        }),
                       })
                       const result = await response.json()
                       if (!response.ok || !result?.attached) {
@@ -959,6 +998,39 @@ export default function WorkOrdersPage() {
                   className={formFieldClass}
                 />
               </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="order-occurred-on">
+                    発生日
+                  </label>
+                  <input
+                    id="order-occurred-on"
+                    type="date"
+                    value={formData.occurred_on}
+                    onChange={(event) =>
+                      setFormData({ ...formData, occurred_on: event.target.value })
+                    }
+                    className={formFieldClass}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="order-due-on">
+                    納期
+                  </label>
+                  <input
+                    id="order-due-on"
+                    type="date"
+                    value={formData.due_on}
+                    onChange={(event) =>
+                      setFormData({ ...formData, due_on: event.target.value })
+                    }
+                    className={formFieldClass}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                カレンダーで選んだ発生日と納期は、指図書の発生日・期限に反映されます。
+              </p>
               <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <input

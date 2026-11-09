@@ -4,7 +4,7 @@ import { getCurrentFiscalYear, parseFiscalYearParam, workOrderFiscalYearOrFilter
 import {
   calcAssemblyLaborFromMinutes,
 } from '@/lib/work-order-assembly-labor'
-import { attachWorkOrderToInstructionProgress, syncWorkOrderInstructionNumber } from '@/lib/work-instruction-progress'
+import { attachWorkOrderToInstructionProgress, parseInstructionDate, syncWorkOrderInstructionNumber } from '@/lib/work-instruction-progress'
 
 export const runtime = 'nodejs'
 
@@ -347,6 +347,8 @@ export async function POST(req: Request) {
       model: saved.model,
       qty: saved.qty,
       fiscal_year: saved.fiscal_year ?? normalizedFiscalYear,
+      occurred_on: Object.prototype.hasOwnProperty.call(body, 'occurred_on') ? parseInstructionDate(body.occurred_on) : undefined,
+      due_on: Object.prototype.hasOwnProperty.call(body, 'due_on') ? parseInstructionDate(body.due_on) : undefined,
     })
 
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
@@ -494,6 +496,8 @@ export async function PUT(req: Request) {
       model: saved.model,
       qty: saved.qty,
       fiscal_year: saved.fiscal_year ?? normalizedFiscalYear,
+      occurred_on: Object.prototype.hasOwnProperty.call(body, 'occurred_on') ? parseInstructionDate(body.occurred_on) : undefined,
+      due_on: Object.prototype.hasOwnProperty.call(body, 'due_on') ? parseInstructionDate(body.due_on) : undefined,
     })
 
     if (normalizedCostMode === 'bom' && normalizedBomModel) {
