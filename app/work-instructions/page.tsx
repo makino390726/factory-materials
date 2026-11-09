@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { formatFiscalYearLabel, getCurrentFiscalYear } from '@/lib/fiscal-year'
 import { formatDInstructionNo, INSTRUCTION_SHOPS, isLInstructionOrderNo, parseDrivePdfUrl, type InstructionShop } from '@/lib/work-instruction-progress'
+import WorkInstructionCalendar, { type CalendarInstruction } from './WorkInstructionCalendar'
 
 type DocType = '製作' | '切替' | '修理'
 
@@ -66,6 +67,47 @@ function todayIso() {
   return `${now.getFullYear()}-${month}-${day}`
 }
 
+function calendarDay(value: string | null | undefined) {
+  const day = String(value || '').trim().slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
+}
+
+function startedDay(value: string | null | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+function earliestCalendarDay(values: Array<string | null | undefined>) {
+  let best: string | null = null
+  for (const value of values) {
+    const day = calendarDay(value)
+    if (!day) continue
+    if (!best || day < best) best = day
+  }
+  return best
+}
+
+function calendarShops(rows: ProgressRow[]) {
+  return INSTRUCTION_SHOPS.map((shop) => {
+    const startedOns = new Set<string>()
+    let started = false
+    let assigned = false
+    for (const row of rows) {
+      const found = row.shops?.find((item) => item.code === shop.code)
+      if (!found) continue
+      if (found.completed) started = true
+      if (found.assigned) assigned = true
+      const day = startedDay(found.started_at)
+      if (day) startedOns.add(day)
+    }
+    return { code: shop.code, name: shop.name, startedOns: [...startedOns].sort(), started, assigned }
+  })
+}
+
 function qtyText(value: number | null) {
   if (value == null || Number.isNaN(Number(value))) return ''
   const number = Number(value)
@@ -79,7 +121,9 @@ function remainingQty(row: ProgressRow) {
 
 function nextShop(shop: InstructionShop): InstructionShop {
   if (!shop.assigned && !shop.completed) return { ...shop, assigned: true, completed: false }
-  if (shop.assigned && !shop.completed) return { ...shop, assigned: true, completed: true }
+  if (shop.assigned && !shop.completed) {
+    return { ...shop, assigned: true, completed: true, started_at: new Date().toISOString() }
+  }
   return { ...shop, assigned: false, completed: false }
 }
 
@@ -289,12 +333,13 @@ function useVisibleSlice(rowCount: number, resetKey: string) {
       scroller.removeEventListener('scroll', update)
       observer.disconnect()
     }
-  }, [rowCount])
+  }, [resetKey, rowCount])
 
   return { scrollerRef, start: slice.start, end: slice.end }
 }
 
 export default function WorkInstructionsPage() {
+  const [view, setView] = useState<'sheet' | 'calendar'>('sheet')
   const [docType, setDocType] = useState<DocType>('製作')
   const [fiscalYear, setFiscalYear] = useState('all')
   const [openOnly, setOpenOnly] = useState(false)
@@ -386,8 +431,59 @@ export default function WorkInstructionsPage() {
     })
   }, [docType, masterPartByRow, parentBySort, query, rows])
 
-  const { scrollerRef, start, end } = useVisibleSlice(visibleRows.length, `${docType}:${fiscalYear}:${openOnly}:${query}`)
+  const { scrollerRef, start, end } = useVisibleSlice(visibleRows.length, `${view}:${docType}:${fiscalYear}:${openOnly}:${query}`)
   const windowRows = visibleRows.slice(start, end)
+
+  const calendarItems = useMemo(() => {
+    const childrenByParent = new Map<string, ProgressRow[]>()
+    for (const row of visibleRows) {
+      if (row.parent_sort_no == null) continue
+      const key = `${row.fiscal_year ?? ''}:${row.parent_sort_no}`
+      const list = childrenByParent.get(key) || []
+      list.push(row)
+      childrenByParent.set(key, list)
+    }
+    const usedChildIds = new Set<string>()
+    const items: CalendarInstruction[] = []
+    for (const parent of visibleRows) {
+      if (parent.parent_sort_no != null) continue
+      const key = parent.sort_no == null ? '' : `${parent.fiscal_year ?? ''}:${parent.sort_no}`
+      const children = key ? childrenByParent.get(key) || [] : []
+      for (const child of children) usedChildIds.add(child.id)
+      const childDue = children
+        .map((child) => child.due_on)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+      const group = [parent, ...children]
+      const dueOn = calendarDay(parent.due_on) || earliestCalendarDay(childDue)
+      items.push({
+        id: parent.id,
+        label: productionInstructionNo(parent),
+        name: parent.product_name || children.find((child) => child.product_name)?.product_name || '',
+        occurredOn: calendarDay(parent.occurred_on) || earliestCalendarDay(children.map((child) => child.occurred_on)),
+        dueOn,
+        dueText: dueOn ? null : parent.due_text,
+        completedOn: calendarDay(parent.completed_on) || earliestCalendarDay(children.map((child) => child.completed_on)),
+        shops: calendarShops(group),
+      })
+    }
+    for (const row of visibleRows) {
+      if (row.parent_sort_no == null || usedChildIds.has(row.id)) continue
+      const parent = parentBySort.get(row.parent_sort_no)
+      const dueOn = calendarDay(row.due_on)
+      items.push({
+        id: row.id,
+        label: productionInstructionNo(row, parent),
+        name: row.product_name || '',
+        occurredOn: calendarDay(row.occurred_on),
+        dueOn,
+        dueText: dueOn ? null : row.due_text,
+        completedOn: calendarDay(row.completed_on),
+        shops: calendarShops([row]),
+      })
+    }
+    return items
+  }, [parentBySort, visibleRows])
 
   const yearOptions = useMemo(() => {
     const current = getCurrentFiscalYear()
@@ -550,7 +646,25 @@ export default function WorkInstructionsPage() {
               28年度以降は「L指令新規登録」でマスタから登録します。行の「削除」、または「一括削除」でやり直せます。
             </p>
           </div>
-          <div className="text-sm text-slate-500">{loading ? '読込中' : `${visibleRows.length} 件`}</div>
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex rounded-lg bg-white p-0.5 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setView('sheet')}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === 'sheet' ? 'bg-red-600 text-white' : 'text-slate-600'}`}
+              >
+                一覧
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('calendar')}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === 'calendar' ? 'bg-red-600 text-white' : 'text-slate-600'}`}
+              >
+                カレンダー
+              </button>
+            </div>
+            <span>{loading ? '読込中' : `${visibleRows.length} 件`}</span>
+          </div>
         </div>
 
         <div className="mb-1 flex shrink-0 flex-wrap items-center gap-2 rounded-xl bg-white px-2 py-2 shadow-sm">
@@ -624,6 +738,15 @@ export default function WorkInstructionsPage() {
           </div>
         )}
 
+        {view === 'calendar' ? (
+          <WorkInstructionCalendar
+            items={calendarItems}
+            onOpen={(item) => {
+              setQuery(item.label || item.name)
+              setView('sheet')
+            }}
+          />
+        ) : (
         <div ref={scrollerRef} className="wi-scroller min-h-0 min-w-0 w-full flex-1 rounded-xl bg-white shadow-sm">
           <table className="wi-sheet w-full min-w-[1880px] table-fixed border-collapse text-[13px]">
             <colgroup>
@@ -692,6 +815,7 @@ export default function WorkInstructionsPage() {
                     name: shop.name,
                     assigned: Boolean(found?.assigned),
                     completed: Boolean(found?.completed),
+                    started_at: found?.started_at || null,
                   }
                 })
                 return (
@@ -893,7 +1017,11 @@ export default function WorkInstructionsPage() {
                         <button
                           type="button"
                           disabled={savingId === row.id}
-                          title={`${shop.name}: ${shop.completed ? '着手' : shop.assigned ? '担当' : '未割当'}`}
+                          title={`${shop.name}: ${shop.completed ? '着手' : shop.assigned ? '担当' : '未割当'}${
+                            shop.started_at
+                              ? `（着手 ${new Date(shop.started_at).toLocaleString('ja-JP', { hour12: false })}）`
+                              : ''
+                          }`}
                           onClick={() => {
                             const next = shops.map((item) => (item.code === shop.code ? nextShop(item) : item))
                             void patchRow(row.id, { shops: next }, { shops: next })
@@ -959,6 +1087,7 @@ export default function WorkInstructionsPage() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
       {pdfEditor
         ? createPortal(

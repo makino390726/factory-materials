@@ -28,6 +28,8 @@ export type InstructionShop = {
   name: string
   assigned: boolean
   completed: boolean
+  /** 着手にした日時（ISO）。一覧はボタンに触れると出て、カレンダーでは着手日になる */
+  started_at?: string | null
 }
 
 export const INSTRUCTION_SHOPS: Array<Pick<InstructionShop, 'code' | 'name'>> = [
@@ -77,17 +79,27 @@ export function emptyInstructionShops(): InstructionShop[] {
   }))
 }
 
+function parseShopStartedAt(value: unknown) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  const time = Date.parse(text)
+  if (!Number.isFinite(time)) return null
+  return new Date(time).toISOString()
+}
+
 export function normalizeInstructionShops(value: unknown): InstructionShop[] {
   const incoming = Array.isArray(value) ? value : []
   return INSTRUCTION_SHOPS.map((shop) => {
     const found = incoming.find((item) => item && typeof item === 'object' && (item as InstructionShop).code === shop.code) as
       | Partial<InstructionShop>
       | undefined
+    const completed = Boolean(found?.completed)
     return {
       code: shop.code,
       name: shop.name,
-      assigned: Boolean(found?.assigned) || Boolean(found?.completed),
-      completed: Boolean(found?.completed),
+      assigned: Boolean(found?.assigned) || completed,
+      completed,
+      started_at: parseShopStartedAt(found?.started_at),
     }
   })
 }
