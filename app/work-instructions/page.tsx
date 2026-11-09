@@ -207,17 +207,34 @@ function rowIsLInstruction(row: ProgressRow, parents: Map<number, ProgressRow>) 
   return isLInstructionOrderNo(productionInstructionNo(row, parent) || row.series_no || parent?.series_no)
 }
 
+/** DR9-0014 を DR・年度・ハイフン以降の番号・枝番に分ける。並びは DR7-0001、DR7-0002、DR8-0001。 */
+function instructionOrderKey(row: ProgressRow, parents: Map<number, ProgressRow>) {
+  const parent = row.parent_sort_no != null ? parents.get(row.parent_sort_no) : undefined
+  const no = (productionInstructionNo(row, parent) || row.series_no || parent?.series_no || '').normalize('NFKC').toUpperCase()
+  const matched = no.match(/^([A-Z]+)(\d+)-(\d+)(?:-(\d+))?/)
+  return {
+    l: rowIsLInstruction(row, parents) ? 0 : 1,
+    prefix: matched?.[1] ?? 'ZZZ',
+    year: matched ? Number(matched[2]) : Number.MAX_SAFE_INTEGER,
+    seq: matched ? Number(matched[3]) : Number.MAX_SAFE_INTEGER,
+    branch: matched?.[4] ? Number(matched[4]) : 0,
+    child: row.parent_sort_no == null ? 0 : 1,
+    sortNo: row.sort_no ?? Number.MAX_SAFE_INTEGER,
+    id: row.id,
+  }
+}
+
 function compareProductionRows(a: ProgressRow, b: ProgressRow, parents: Map<number, ProgressRow>) {
-  const yearA = a.fiscal_year ?? Number.MAX_SAFE_INTEGER
-  const yearB = b.fiscal_year ?? Number.MAX_SAFE_INTEGER
-  if (yearA !== yearB) return yearA - yearB
-  const planA = rowIsLInstruction(a, parents) ? 0 : 1
-  const planB = rowIsLInstruction(b, parents) ? 0 : 1
-  if (planA !== planB) return planA - planB
-  const sortA = a.sort_no ?? Number.MAX_SAFE_INTEGER
-  const sortB = b.sort_no ?? Number.MAX_SAFE_INTEGER
-  if (sortA !== sortB) return sortA - sortB
-  return a.id.localeCompare(b.id)
+  const left = instructionOrderKey(a, parents)
+  const right = instructionOrderKey(b, parents)
+  if (left.l !== right.l) return left.l - right.l
+  if (left.prefix !== right.prefix) return left.prefix < right.prefix ? -1 : 1
+  if (left.year !== right.year) return left.year - right.year
+  if (left.seq !== right.seq) return left.seq - right.seq
+  if (left.branch !== right.branch) return left.branch - right.branch
+  if (left.child !== right.child) return left.child - right.child
+  if (left.sortNo !== right.sortNo) return left.sortNo - right.sortNo
+  return left.id.localeCompare(right.id)
 }
 
 function dueDisplay(row: ProgressRow) {
